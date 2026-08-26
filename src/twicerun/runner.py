@@ -80,8 +80,8 @@ def new_run_dir(parent: Path) -> Path:
     raise PipelineError(f"1000 run directories already exist for {stamp} under {parent}")
 
 
-def prune_run_dirs(parent: Path, keep: int) -> list[Path]:
-    """Drop all but the most recent `keep` run directories.
+def prune_run_dirs(parent: Path, keep: int, current: Path | None = None) -> list[Path]:
+    """Drop all but the most recent `keep` run directories, `current` always among them.
 
     A five-run pass over the reference pipeline writes about 200 MB, most of it
     the generated inputs held once per run because the comparison needs a copy
@@ -92,14 +92,27 @@ def prune_run_dirs(parent: Path, keep: int) -> list[Path]:
     tool reads a previous run yet, so keeping more would be storing 200 MB
     against a feature that does not exist. Slice 7 regenerates the results table
     from a committed run artifact and may want more, and --keep is there for it.
+
+    Two things here were wrong until a flaky test in slice 2 caught them, and
+    both come from `new_run_dir` reusing a name this function has freed. Names
+    carry a second-resolution timestamp, so once `run-100715` is deleted the
+    next invocation inside that second takes the name back. After that, name
+    order and creation order disagree: the newest directory on disk sorts first
+    and gets deleted next. That deleted the run that was starting, which then
+    recreated its own directory as it wrote, leaving `keep + 1` behind.
+
+    So recency comes from mtime rather than from the name, and `current` is
+    excluded from the candidates outright. It still counts toward `keep`, so
+    --keep 1 means one directory in total.
     """
     if keep < 1:
         return []
-    existing = sorted(
-        (p for p in parent.glob("run-*") if p.is_dir() and RUN_DIR_NAME.match(p.name)),
-        key=lambda p: p.name,
+    everything = [p for p in parent.glob("run-*") if p.is_dir() and RUN_DIR_NAME.match(p.name)]
+    candidates = sorted(
+        (p for p in everything if current is None or p != current),
+        key=lambda p: (p.stat().st_mtime, p.name),
     )
-    dropped = existing[: max(0, len(existing) - keep)]
+    dropped = candidates[: max(0, len(everything) - keep)]
     for path in dropped:
         shutil.rmtree(path)
     return dropped
@@ -221,7 +234,7 @@ def run_pipeline(
 
     steps = load_steps(pipeline)
     run_dir = new_run_dir(parent)
-    dropped = prune_run_dirs(parent, keep)
+    dropped = prune_run_dirs(parent, keep, current=run_dir)
     probe = duckdb.connect()
     environment = Environment.observe(probe)
     probe.close()

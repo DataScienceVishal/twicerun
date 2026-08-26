@@ -10,12 +10,13 @@ suite that has to pass every time.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import duckdb
 import pytest
 
-from twicerun.runner import PipelineError, load_steps, run_pipeline
+from twicerun.runner import PipelineError, load_steps, prune_run_dirs, run_pipeline
 
 CONTROLLED = '''
 CALLS = {"n": 0}
@@ -258,3 +259,36 @@ def test_pruning_leaves_anything_it_did_not_name_alone(tmp_path):
 
     assert bystander.read_text(encoding="utf-8") == "keep me"
     assert (parent / "run-of-the-mill").is_dir()
+
+
+def test_pruning_never_deletes_the_run_that_is_starting(tmp_path):
+    """The flake slice 2's suite turned up, made deterministic.
+
+    Names carry a second-resolution timestamp, so a name this function frees
+    can be taken back by the next invocation inside the same second. The newest
+    directory on disk then sorts first and was the next to be deleted, which
+    deleted the run that was starting. That run went on writing and recreated
+    its own directory, so --keep 2 left three behind about one time in fifty.
+    """
+    parent = tmp_path / "artifacts"
+    parent.mkdir()
+    for name in ("run-20260826-100715-1", "run-20260826-100715-2"):
+        (parent / name).mkdir()
+    current = parent / "run-20260826-100715"
+    current.mkdir()
+
+    prune_run_dirs(parent, keep=2, current=current)
+    assert current.is_dir()
+    assert len(list(parent.glob("run-*"))) == 2
+
+
+def test_recency_comes_from_the_clock_not_from_the_name(tmp_path):
+    parent = tmp_path / "artifacts"
+    parent.mkdir()
+    older, newer = parent / "run-20260826-100715-9", parent / "run-20260826-100715-1"
+    older.mkdir()
+    newer.mkdir()
+    os.utime(older, (1, 1))
+
+    assert prune_run_dirs(parent, keep=1) == [older]
+    assert newer.is_dir()
