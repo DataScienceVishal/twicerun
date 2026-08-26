@@ -53,10 +53,11 @@ def daily_revenue(ctx: StepContext) -> None:
     """Bug 1. sum() over a DOUBLE column, 2,000,000 rows in 1,000 groups.
 
     Parallel reduction associates the additions in whatever order the threads
-    finish in, and float addition is not associative. Measured at 555 to 714 of
-    the 1,000 groups differing between two runs at threads=8, and 0 of 1,000 at
-    threads=1. The fix is DECIMAL(18,4), whose sum is fixed-point and
-    reassociates exactly.
+    finish in, and float addition is not associative. Two runs at threads=8
+    differed on a median 605 of the 1,000 groups over 10 attempts, and on 0 of
+    1,000 at threads=1. That spread is not a bound and the README lists four
+    occasions when a figure here was beaten by a larger sample. The fix is
+    DECIMAL(18,4), whose sum is fixed-point and reassociates exactly.
     """
     ctx.read("orders")
     ctx.write("daily_revenue", "SELECT day, sum(amount) AS revenue FROM orders GROUP BY day")
@@ -67,8 +68,10 @@ def customer_keys(ctx: StepContext) -> None:
 
     500 rows share every value of `cust`, and nothing in the ORDER BY decides
     which of them comes first, so the parallel sort is free to order them
-    differently on a rerun. Measured at 275,280 to 491,520 rows of 500,000
-    getting a different key. The fix is one word: ORDER BY cust, event_id.
+    differently on a rerun. Over 70 comparisons inside the five-run loop, a
+    median 368,640 rows of 500,000 got a different key, the extremes being
+    245,760 and 491,520. Sample size stated because the extremes are not
+    bounds. The fix is one word: ORDER BY cust, event_id.
 
     Two queries in one session diverged on every attempt. Two separate runs
     reading the same Parquet file do not: across 13 invocations of the five-run
@@ -132,11 +135,12 @@ def apply_price_updates(ctx: StepContext) -> None:
     same mistake this project exists to catch, one layer up.
 
     Under containment the merge always runs over run 1's catalogue rather than
-    over a catalogue three runs of drift deep. Twenty contained passes fired 0
-    to 4 of 4 with two flat zeros, and the magnitude widened at both ends, from
-    9,248 to 35,104 rows to 1,344 to 42,304. The bisect gave 0 of 4 every time,
-    which agrees with the standalone measurement: at threads=1 this merge gave
-    one answer at every scale tried.
+    over a catalogue three runs of drift deep. Twenty contained passes fired a
+    median 3 of 4 with one flat zero, at a median 17,376 rows of 125,000. Each
+    resampling has moved the extremes outward: 9,248 to 35,104 first, then
+    1,344 to 42,304, then 1,056 to 40,608 here and 77,120 on someone else's 28
+    passes. The bisect gave 0 of 4 every time, which agrees with the standalone
+    measurement: at threads=1 this merge gave one answer at every scale tried.
     """
     ctx.read("price_updates")
     ctx.state(

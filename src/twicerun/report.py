@@ -256,8 +256,9 @@ class Report:
             "settled on and carries a",
             "  factor of the output row count in slack. The second is the terms behind one "
             "output value, has no slack",
-            "  in it, and is expected to fail. Both print so the slack is visible rather than "
-            "described.",
+            "  in it, so it is normally the one that fails: it cleared on 1 of 40 step-passes "
+            "here, at 1,229x. Both",
+            "  print so the slack is visible rather than described.",
         ]
         for verdict in drifting:
             lines.append(f"  {verdict.step.index} {verdict.step.name}")

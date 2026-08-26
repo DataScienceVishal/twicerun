@@ -14,86 +14,92 @@ contained  on, so runs 2 to 5 read run 1's artifacts and a divergence at one ste
 policy     strict, so any difference at all is a divergence
 duckdb     1.5.5, threads=10
 platform   macOS-26.5.2-arm64-arm-64bit
-artifacts  .twicerun/run-20260826-121335
+artifacts  .twicerun/run-20260826-131018
 retention  keeping 1 run directory
 
   0 generate_inputs         0 of 4
-  1 daily_revenue           4 of 4  VALUE_DRIFT PARALLEL_ORDER
-      daily_revenue: 735 of 1,000 paired rows moved on revenue
-      furthest move over 4 comparisons: revenue, 5 ulp and 5.77e-16 relative
-      504718.35255696083 against 504718.3525569611
-  2 customer_keys           4 of 4  ROW_MISSING ROW_EXTRA PARALLEL_ORDER
+  1 daily_revenue           4 of 4  VALUE_DRIFT  cause PARALLEL_ORDER
+      daily_revenue: 714 of 1,000 paired rows moved on revenue
+      furthest move over 4 comparisons: revenue, 4 ulp and 4.77e-16 relative
+      488567.08646427933 against 488567.0864642791
+  2 customer_keys           4 of 4  ROW_MISSING ROW_EXTRA  cause PARALLEL_ORDER
       customer_keys: 491,520 of 500,000 reference rows and 491,520 later rows found no partner
       dropping surrogate_id from the key takes unmatched reference rows from 491,520 to 0
       event_id does the same, so surrogate_id is named first because it is the one no input to this step carries
-  3 apply_price_updates     1 of 4  ROW_MISSING ROW_EXTRA PARALLEL_ORDER
-      prices: 15,328 of 125,000 reference rows and 15,328 later rows found no partner
-      dropping price_cents from the key takes unmatched reference rows from 15,328 to 0
-  4 append_audit_log        4 of 4  MULTIPLICITY PERSISTS_SINGLE_THREADED
+  3 apply_price_updates     2 of 4  ROW_MISSING ROW_EXTRA  cause PARALLEL_ORDER
+      prices: 18,720 of 125,000 reference rows and 18,720 later rows found no partner
+      dropping price_cents from the key takes unmatched reference rows from 18,720 to 0
+  4 append_audit_log        4 of 4  MULTIPLICITY  cause PERSISTS_SINGLE_THREADED
       audit_log: 3,953 later rows found no partner, against 3,953 reference rows
-  5 mean_basket             4 of 4  VALUE_DRIFT PARALLEL_ORDER
-      mean_basket: 753 of 1,000 paired rows moved on mean_amount
-      furthest move over 4 comparisons: mean_amount, 6 ulp and 6.76e-16 relative
-      252.45031634680123 against 252.45031634680106
-  6 sparse_customer_keys    2 of 4  ROW_MISSING ROW_EXTRA PARALLEL_ORDER
-      sparse_customer_keys: 245,760 of 500,000 reference rows and 245,760 later rows found no partner
-      dropping surrogate_id from the key takes unmatched reference rows from 245,760 to 0
+  5 mean_basket             4 of 4  VALUE_DRIFT  cause PARALLEL_ORDER
+      mean_basket: 625 of 1,000 paired rows moved on mean_amount
+      furthest move over 4 comparisons: mean_amount, 4 ulp and 4.61e-16 relative
+      246.6479063732773 against 246.6479063732774
+  6 sparse_customer_keys    1 of 4  ROW_MISSING ROW_EXTRA  cause PARALLEL_ORDER
+      sparse_customer_keys: 237,280 of 500,000 reference rows and 237,280 later rows found no partner
+      dropping surrogate_id from the key takes unmatched reference rows from 237,280 to 0
       event_id does the same, so surrogate_id is named first because it is the one no input to this step carries
+  7 roll_up_keys            0 of 4
 
 cause, from re-executing each divergent step 5 times at threads=1:
-  Both rates are out of 4, which is what lets them be read against each other.
-  A zero is 4 clean comparisons and no more than that: it rules out a per-comparison rate
-  above 53 percent, 95 percent one-sided, assuming an independence these runs do not have
-  since they share a process, a page cache and a machine.
   1 daily_revenue         PARALLEL_ORDER            4 of 4 at threads=10, 0 of 4 at threads=1
   2 customer_keys         PARALLEL_ORDER            4 of 4 at threads=10, 0 of 4 at threads=1
-  3 apply_price_updates   PARALLEL_ORDER            1 of 4 at threads=10, 0 of 4 at threads=1
+  3 apply_price_updates   PARALLEL_ORDER            2 of 4 at threads=10, 0 of 4 at threads=1
   4 append_audit_log      PERSISTS_SINGLE_THREADED  4 of 4 at threads=10, 4 of 4 at threads=1
   5 mean_basket           PARALLEL_ORDER            4 of 4 at threads=10, 0 of 4 at threads=1
-  6 sparse_customer_keys  PARALLEL_ORDER            2 of 4 at threads=10, 0 of 4 at threads=1
+  6 sparse_customer_keys  PARALLEL_ORDER            1 of 4 at threads=10, 0 of 4 at threads=1
+
+  Both rates are out of 4, which is what lets them be read against each other.
+  PARALLEL_ORDER means the step stopped diverging with one thread. That is 4 clean comparisons and no
+  more than that: the 95 percent one-sided upper bound it leaves on the per-comparison rate is
+  53 percent. The bound also assumes an independence these runs do not have, since they
+  share a process, a page cache and a machine.
+  PERSISTS_SINGLE_THREADED means the thread count is not the explanation. The tool stops there rather
+  than guessing between a clock read, a data-dependent branch, appended state and something
+  outside the pipeline.
 
 reassociation bound, computed rather than picked:
   1,000x of headroom was fixed before any of this was written and has not moved since.
   Below is that one check at two choices of n. The first is the count the spec settled on and carries a
   factor of the output row count in slack. The second is the terms behind one output value, has no slack
-  in it, and is expected to fail. Both print so the slack is visible rather than described.
+  in it, so it is normally the one that fails: it cleared on 1 of 40 step-passes here, at 1,229x. Both
+  print so the slack is visible rather than described.
   1 daily_revenue
-      observed furthest relative drift 5.7664e-16
-      n = 2,000,000 rows read by the step, bound 4.4409e-10, headroom 770,139x  CLEARS
-      n = 2,000 terms per output row, bound 4.4409e-13, headroom 770x  FAILS
+      observed furthest relative drift 4.7656e-16
+      n = 2,000,000 rows read by the step, bound 4.4409e-10, headroom 931,868x  CLEARS
+      n = 2,000 terms per output row, bound 4.4409e-13, headroom 932x  FAILS
   5 mean_basket
-      observed furthest relative drift 6.7550e-16
-      n = 2,000,000 rows read by the step, bound 4.4409e-10, headroom 657,423x  CLEARS
-      n = 2,000 terms per output row, bound 4.4409e-13, headroom 657x  FAILS
+      observed furthest relative drift 4.6093e-16
+      n = 2,000,000 rows read by the step, bound 4.4409e-10, headroom 963,468x  CLEARS
+      n = 2,000 terms per output row, bound 4.4409e-13, headroom 963x  FAILS
 
-6 of 7 steps diverged in 10.9s.
+6 of 8 steps diverged in 6.8s.
 ```
 
-Step 5 is a correct float average. All 753 of those findings are the arithmetic behaving normally, and `--policy reduction-order` is the opt-in that says so.
+Step 5 is a correct float average. All 625 of those findings are the arithmetic behaving normally, and `--policy reduction-order` is the opt-in that says so.
 
-Step 4 is the one to read twice. `PERSISTS_SINGLE_THREADED` next to `4 of 4 at threads=1` is the tool saying the thread count is not the problem, on the one bug in the file that a rerun causes rather than parallelism.
+Step 4 is the one to read twice. `cause PERSISTS_SINGLE_THREADED` next to `4 of 4 at threads=1` is the tool saying the thread count is not the problem, on the one bug in the file that a rerun causes rather than parallelism.
 
 **Your numbers will not match that transcript, and neither will mine on the next run.** This is a tool about non-determinism and its own output is non-deterministic, so quoting any single figure as fixed would be the wrong thing to do twice over.
 
-Every figure below comes from **20 passes of the five-run loop with containment on**, which is 80 comparisons per step, on DuckDB 1.5.5 at `threads=10`. Ranges are rounded outward from what those 20 passes produced and the sample size is stated because the ranges are not bounds. A previous version of this table was built from 10 passes, and 8 of its 10 quantities were exceeded within 20 more on the same machine: `daily_revenue` had been published at 3 to 6 ulp and reached 19. That is the mistake this project exists to catch, one layer up, and `pipelines/reference.py` records the same thing happening twice to a fire-rate floor.
+So the table below publishes **medians over 20 passes of the five-run loop**, which is 80 comparisons per step, on DuckDB 1.5.5 at `threads=10`. The spread each quantity showed is in brackets and **it is not a bound**. Every range this file has published has been beaten by a later sample, four times now, and the section at the end of this README lists all four with dates. Take the ranges as what 20 passes happened to produce and expect to go outside them in ten minutes.
 
-| step | fires under `strict` | at `threads=1` | fires under `reduction-order` | what the oracle called it |
+| step | fires under `strict` | at `threads=1` | under `reduction-order` | what the oracle called it |
 |---|---|---|---|---|
-| 0 `generate_inputs` | 0 of 4 on all 20 | not bisected | 0 of 4 on all 20 | the control, and it never fired |
-| 1 `daily_revenue` | 4 of 4 on all 20 | 0 of 4 on all 20 | 0 of 4 on all 20 | `VALUE_DRIFT` `PARALLEL_ORDER`, roughly 500 to 950 rows of 1,000 |
-| 2 `customer_keys` | 2 to 4 of 4 | 0 of 4 on all 20 | unchanged | `ROW_MISSING` `ROW_EXTRA` `PARALLEL_ORDER`, `surrogate_id` named first every time |
-| 3 `apply_price_updates` | 0 to 4 of 4, two flat zeros | 0 of 4 on all 18 that fired | unchanged | `ROW_MISSING` `ROW_EXTRA` `PARALLEL_ORDER`, 1,344 to 42,304 rows of 125,000 |
-| 4 `append_audit_log` | 4 of 4 on all 20 | **4 of 4 on all 20** | unchanged | `MULTIPLICITY` `PERSISTS_SINGLE_THREADED`, 3,953 extra rows every comparison |
-| 5 `mean_basket` | 4 of 4 on all 20 | 0 of 4 on all 20 | 0 of 4 on all 20 | `VALUE_DRIFT` `PARALLEL_ORDER`, roughly 550 to 800 rows of 1,000 |
-| 6 `sparse_customer_keys` | 0 to 4 of 4, one flat zero | 0 of 4 on all 19 that fired | unchanged | `ROW_MISSING` `ROW_EXTRA` `PARALLEL_ORDER`, `surrogate_id` named first every time |
+| 0 `generate_inputs` | 0 of 4, every pass | not bisected | 0 of 4 | the control, and it has never fired |
+| 1 `daily_revenue` | 4 of 4, every pass | 0 of 4, every pass | 0 of 4 | `VALUE_DRIFT`, `PARALLEL_ORDER`, median 4 ulp [3 to 6] |
+| 2 `customer_keys` | 4 of 4 [2 to 4] | 0 of 4, every pass | unchanged | `ROW_MISSING` `ROW_EXTRA`, `PARALLEL_ORDER`, median 368,640 rows [245,760 to 491,520] |
+| 3 `apply_price_updates` | 3 of 4 [0 to 4] | 0 of 4 on all 19 that fired | unchanged | `ROW_MISSING` `ROW_EXTRA`, `PARALLEL_ORDER`, median 17,376 rows [1,056 to 40,608] |
+| 4 `append_audit_log` | 4 of 4, every pass | **4 of 4, every pass** | unchanged | `MULTIPLICITY`, `PERSISTS_SINGLE_THREADED`, 3,953 extra rows in every comparison |
+| 5 `mean_basket` | 4 of 4, every pass | 0 of 4, every pass | 0 of 4 | `VALUE_DRIFT`, `PARALLEL_ORDER`, median 4 ulp [4 to 6] |
+| 6 `sparse_customer_keys` | 2 of 4 [0 to 4], three flat zeros | 0 of 4 on all 17 that fired | unchanged | `ROW_MISSING` `ROW_EXTRA`, `PARALLEL_ORDER`, median 237,280 rows [8,480 to 483,040] |
+| 7 `roll_up_keys` | 0 of 4, every pass | not bisected | 0 of 4 | downstream of step 2, and contained, so it sees the same input every run |
 
 The two float steps go to zero under `reduction-order` and nothing else moves. That is the whole claim for the oracle: the false positives disappear and the four real bugs are caught by the same code that dismissed them.
 
-The `threads=1` column is what slice 3 added, and one row of it is not like the others. Five steps stop diverging with one thread and one does not, which is the difference between a step whose answer depends on how the work was divided and a step whose answer depends on it having run before. No number of runs would have separated those two; a second thread count does it in one column.
+The `threads=1` column is what slice 3 added, and one row of it is not like the others. Six steps stop diverging with one thread and one does not, which is the difference between a step whose answer depends on how the work was divided and a step whose answer depends on it having run before. No number of runs separates those two; a second thread count does it in one column.
 
-Every `threads=1` figure here is either 0 of 4 or 4 of 4, never anything between. That was not designed and it is a small sample, so it is reported rather than explained.
-
-The ULP figures are gone from this table rather than restated. These 20 passes gave 3 to 5 ulp on `daily_revenue` and 3 to 6 on `mean_basket`, comfortably inside the 3 to 19 the last table published, and republishing the narrower range would repeat exactly the mistake the paragraph above describes.
+Every `threads=1` figure here was either 0 of 4 or 4 of 4, never anything between, across 166 bisected step-passes. That was not designed and it is not explained.
 
 ## Status
 
@@ -118,18 +124,29 @@ The idea is [Spot's](https://academic.oup.com/gigascience/article/9/12/giaa106/5
 
 `--no-containment` runs the ablation, so the number below is something you can reproduce rather than a claim to take on trust.
 
-On the reference pipeline the step it changes is `append_audit_log`, the append with no unique key, because it is the only step whose input is its own last output. Extra rows reported per comparison, against a 3,953-row reference:
+On the reference pipeline the step it changes most is `append_audit_log`, the append with no unique key. Two steps read their own last output through `ctx.state`, and this is the one where the difference is a clean number: `apply_price_updates` merges over its previous catalogue and the divergence is mostly overwritten each run, while an append keeps every copy. Extra rows reported per comparison, against a 3,953-row reference:
 
 | | comparison 1 | 2 | 3 | 4 |
 |---|---|---|---|---|
 | `--no-containment`, 10 passes | 3,953 | 7,906 | 11,859 | 15,812 |
 | contained, 20 passes | 3,953 | 3,953 | 3,953 | 3,953 |
 
-Both rows held on every pass. The uncontained row is four reruns' worth of duplication charged to one step: run 4 appends to run 3's log, which already had run 2's in it. The contained row is what one rerun of that step actually does. The bug is the same bug either way and the fire rate is 4 of 4 either way, so what containment bought here is the magnitude being a fact about the step rather than about how many times the tool ran.
+Both rows held on every pass. The uncontained row is four reruns' worth of duplication charged to one step: run 4 appends to run 3's log, which already had run 2's in it. The contained row is what one rerun of that step actually does.
 
-**What it did not buy, on this pipeline, is a smaller count of divergent steps**, and that is worth saying plainly because it is the number the eval was going to use. No step in `pipelines/reference.py` reads another step's diverging output: every step reads the control step's artifacts, which never differ. So the cascade containment prevents does not happen here, and across 10 ablated passes against 20 contained ones the set of steps that ever fired was identical. Slice 5's baseline 3 was pre-registered to count falsely divergent steps and would count zero of them, which means either that baseline changes or the reference pipeline gains a step that consumes a diverging artifact. That is a decision for the eval, not something to fix quietly by adding a step now.
+Running the ablation shows you the loudest of those four figures, not all four: the report prints one comparison per step and 15,812 is the one it picks. The other three are in the manifest, and `python -c "import json,sys; print([s for r in json.load(open(sys.argv[1]))['runs'] for s in r['steps'] if s['name']=='append_audit_log'])" .twicerun/run-*/manifest.json` prints the row counts they come from. The bug is the same bug either way and the fire rate is 4 of 4 either way, so what containment bought here is the magnitude being a fact about the step rather than about how many times the tool ran.
 
-The cascade itself is real and there is a test that measures it. On a three-step fixture where two steps do nothing but copy a wobbling step's output, the report goes from one finding to three with `--no-containment`.
+The second number is the count of steps reported divergent, and getting it took a change to the reference pipeline that is worth being explicit about. Every step in that file read the control step's artifacts, which never differ, so nothing in it ever read a diverging artifact and the cascade could not happen. The ablation scored zero on the quantity slice 5's baseline 3 was pre-registered to use, which reads as evidence against a feature that was simply never exercised.
+
+So `roll_up_keys` exists. It reads `customer_keys`, whose surrogate ids shuffle between runs, and computes an integer minimum that cannot reassociate, so a fire rate above zero there means it was fed something different and never that it computed something different. **It is constructed to exercise containment and is not a failure anyone here has been bitten by**, unlike three of the four bugs beside it. Over 20 contained and 10 ablated passes:
+
+| | `roll_up_keys` fires | steps reported divergent |
+|---|---|---|
+| `--no-containment` | 4 of 4 [3 to 4], on all 10 passes | 7 of 8 on 9 passes, 6 of 8 on one |
+| contained | 0 of 4 on all 20 passes | 6 of 8 on 16 passes, 5 of 8 on four |
+
+That one step is the whole difference. It is a small number and it is the honest one: on a pipeline where nothing reads a diverging artifact, containment removes no false step at all, and this pipeline had to be given a step that does.
+
+There is a test that measures the same thing without the reference pipeline. On a three-step fixture where two steps do nothing but copy a wobbling step's output, the report goes from one finding to three with `--no-containment`.
 
 ## The cause axis
 
@@ -196,7 +213,7 @@ Before any of this was written, one condition was fixed: **observed maximum rela
 | bound at `n` = 2,000 terms per output row | 4.44e-13 | 4.44e-13 |
 | headroom | roughly 200 to 960x | roughly 550 to 970x |
 
-The check as pre-registered cleared 1000x on **40 of 40** step-passes. Almost none of that margin comes from the drift being small. `rows_read` is the step's whole input, and each of the 1,000 output rows sums about 2,000 terms, so `n` is a thousand times larger than the quantity the bound is about. Take that slack out and the headroom lands between roughly 200 and 970x, which is **under the 1000x line on 40 of 40**.
+The check as pre-registered cleared 1000x on all 40 step-passes of the latest sample, at a median 931,534x. Almost none of that margin comes from the drift being small. `rows_read` is the step's whole input, and each of the 1,000 output rows sums about 2,000 terms, so `n` is a thousand times larger than the quantity the bound is about. Take that slack out and the median headroom is **932x, which is under the 1000x line**. It is not always under it: 1 of those 40 step-passes cleared, at 1,229x, and an earlier 56-step-pass sample cleared on 3. So the tight check fails most of the time rather than every time, and the report says that rather than predicting a failure it then contradicts three lines further down.
 
 So the honest reading is between two and three orders of magnitude of headroom, not six, and every report prints both numbers so nobody has to take that from this file:
 
@@ -301,7 +318,11 @@ The tests run with no credentials and no network:
 
 ```bash
 uv run pytest
+uv run ruff check .
+uv run python scripts/check_fingerprint.py
 ```
+
+CI runs all three and so does the pre-commit hook, so a change that passes only the first will fail on push. `check_fingerprint.py` reads `BANNED.md` and refuses the writing tells listed there.
 
 If you pipe that into anything, check `PIPESTATUS` or redirect instead. `uv run pytest | tail -5` reports the exit code of `tail`, which is 0 whatever pytest did, and twice during this build a slice was committed against a suite whose failure had been swallowed exactly that way. `uv run pytest >/dev/null 2>&1; echo $?` is what the pre-commit hook and CI effectively do.
 
@@ -319,7 +340,7 @@ Measured, because the spec estimated it by counting step executions and the esti
 
 A pass over the reference pipeline is five executions of seven steps, plus five single-threaded executions of each step that fired. That is 60 to 65 step executions against 7 for running the pipeline once, so **8.6x to 9.3x by step count**. The spec called it 5x to 15x on that arithmetic and the arithmetic is right.
 
-The wall clock is not. Over 28 passes on this machine, one pass took a **median 28 times as long as a single execution of the same pipeline, range 21x to 53x**. Where that goes, at the median:
+The wall clock is not. Over 28 passes on this machine, one pass took a **median 28 times as long as a single execution of the same pipeline, range 21x to 53x**. The denominator is run 1's own recorded time out of the manifest, because the tool cannot produce it: `--runs 1` exits 2, since one run has nothing to compare against. Where that goes, at the median:
 
 | | share of a pass | in units of one plain execution |
 |---|---|---|
@@ -339,7 +360,9 @@ So this is a thing you run deliberately, before a release or on a schedule. `--r
 
 Pre-registered with the rest, and it belongs here rather than in a footnote: **if the naive baseline's false-positive count on correct code had come out at zero, the oracle would be more machinery than the problem needs**, and this section would say so.
 
-It did not. Over 20 passes, bit-exact comparison of `mean_basket` between two runs reported roughly 1,150 to 1,550 differing rows, which is about 580 to 780 of the 1,000 groups counted on both sides at once, on a step where nothing is wrong. `src/twicerun/compare.py` is that comparison, kept as the eval's baseline 1 rather than deleted. The equivalent raw-DuckDB measurement is in `scripts/measure_duckdb.py` and takes two seconds, so the premise can be checked without going through this repo's code at all.
+It did not. Over 20 fresh passes, bit-exact comparison of `mean_basket` between two runs reported a median of 1,203 differing rows [1,110 to 1,554], which is about 600 of the 1,000 groups counted on both sides at once, on a step where nothing is wrong. `src/twicerun/compare.py` is that comparison, kept as the eval's baseline 1 rather than deleted.
+
+It has no command of its own yet, so checking it through this repo means importing `compare` in four lines of Python. The raw-DuckDB version in `scripts/measure_duckdb.py` needs no such thing and takes two seconds, and it is the better check anyway: it is a fact about DuckDB rather than about my code. Baseline 1 gets a command when slice 5 builds the eval that runs it.
 
 Stating the condition matters more than the outcome. A tool whose author cannot say what would have made it pointless has not tested the premise.
 
@@ -390,6 +413,21 @@ With `m` comparisons and a per-comparison divergence probability `p`, a step is 
 Those zero results are also the argument for slice 4. More runs lower the miss rate for a given `p`; they do not change `p`. Amplification changes `p`, by feeding the step an input built to make it fire.
 
 No practical number of runs proves determinism, which is why the tool never prints the word. There is a test asserting the report contains neither "deterministic" nor "stable".
+
+## Four times a number in this README was beaten by a larger sample
+
+All four on 2026-08-26, all on this machine, all while the author was actively trying not to let it happen. They are listed because the tool's whole claim is that a small sample lies to you about a quantity that varies, and this is that claim demonstrated against its own documentation.
+
+| # | what was published | what a larger sample gave |
+|---|---|---|
+| 1 | `apply_price_updates` fires 4 of 4 every time, from 5 invocations | a floor of 1 within 8 invocations, then 0 within 20 |
+| 2 | the slice 2 results table, from 10 passes | 8 of its 10 quantities exceeded within 20 more passes; `daily_revenue` published at 3 to 6 ulp reached 19 |
+| 3 | the slice 3 results table, from 20 passes | all 6 of its ranges exceeded within 28 more; `apply_price_updates` published at 1,344 to 42,304 rows reached 77,120 |
+| 4 | the tight reassociation bound is under 1000x on 40 of 40 step-passes | it cleared on 3 of 56, and on 1 of a later 40, at 1,229x |
+
+Number 4 is the worst of them, because it is the falsifiable check the tolerance section is built around, and because the report contradicted itself in the terminal: it printed that the tight check "is expected to fail" three lines above a step-pass where it cleared.
+
+The response after the third one was to stop publishing ranges. Stating the sample size stops a range being a lie; it does not stop it being wrong, and a range a reader can beat in ten minutes should not be printed in a way that looks like a bound. The table above the fold is medians now, with the spread in brackets and this section next to it.
 
 ## The reference pipeline ships broken
 
