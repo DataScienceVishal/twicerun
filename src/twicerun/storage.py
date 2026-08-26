@@ -6,10 +6,11 @@ here. What is left is an injected interface the pipeline reads and writes
 through, which is portable, needs no root, and only sees pipelines that opted
 in. That last part is the project's first limitation, not a footnote.
 
-What the interface buys back is that one abstraction carries four jobs: it is
+What the interface buys back is that one abstraction carries five jobs: it is
 where artifacts get captured, where reads get redirected for containment, where
-input rows get counted for the tolerance bound, and where amplified inputs will
-be substituted. A step calling `ctx.write()` gets all four. A step calling
+input rows get counted for the tolerance bound, where the column names feeding
+attribution come from, and where amplified inputs get substituted. A step
+calling `ctx.write()` gets all five. A step calling
 `duckdb.execute("COPY ... TO ...")` behind its back gets none.
 
 `ctx.sql` is the seam in that argument and it is deliberate rather than
@@ -84,9 +85,17 @@ class StepContext:
         # divergence equally well and only one of them is the step's doing.
         self.input_columns: set[str] = set()
         self.uncontained_reads: set[str] = set()
+        # Artifact names this step pulled in through `read`, which is what
+        # containment redirects and what amplification substitutes. A `state`
+        # read is deliberately not here: it resolves against the previous run's
+        # copy rather than against an upstream step's output, so there is
+        # nothing for an amplifier to hand it that the step's own last
+        # execution did not already decide.
+        self.reads: set[str] = set()
 
     def read(self, name: str) -> duckdb.DuckDBPyRelation:
         """Bring an artifact into scope as a view, run 1's copy under containment."""
+        self.reads.add(name)
         artifact = None if self._upstream is None else self._upstream.get(name)
         if artifact is None:
             artifact = self._written.get(name)

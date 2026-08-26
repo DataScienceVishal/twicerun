@@ -52,7 +52,7 @@ def test_tie_collapse_lowers_the_distinct_count_of_the_column_a_sort_would_tie_o
     rows, distinct = counted(con, attempt.artifacts["sparse_customers"].path, "cust")
     assert rows == sparse.rows
     assert distinct == 1000
-    assert "hashed into 1,000 buckets" in attempt.note
+    assert "cust into 1,000 buckets, from 2 to 500 rows per value" in attempt.note
 
 
 def test_tie_collapse_leaves_the_most_distinct_column_alone_so_a_tiebreak_survives(

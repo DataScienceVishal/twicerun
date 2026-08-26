@@ -88,6 +88,11 @@ class StepRecord:
     seconds: float
     rows_read: int
     input_columns: list[str] = field(default_factory=list)
+    # What the step pulled in through ctx.read. Amplification substitutes these
+    # and nothing else: the artifacts written before a step are everything the
+    # pipeline has produced by then, and rewriting all of them to amplify one
+    # step that reads two of them is 205 MB of Parquet nobody asked for.
+    reads: list[str] = field(default_factory=list)
     # Names this step had to read from its own run because run 1 never wrote
     # them. Empty on every run of a pipeline whose steps write the same
     # artifacts every time, which is why it is worth recording: when it is not
@@ -105,6 +110,24 @@ class RunRecord:
 
 
 @dataclass
+class AmplifiedRuns:
+    """One amplifier's re-executions of one step, kept rather than summarised.
+
+    Same reasoning as the bisect below: `judge` re-derives the fire rate from
+    these artifacts through the comparison code the run used, instead of reading
+    back a number this file could have got wrong. `note` is the exception,
+    because what the amplifier did to the input is not recoverable from the
+    output and there is nowhere else to put it.
+    """
+
+    step_index: int
+    amplifier: str
+    note: str
+    runs: list[RunRecord] = field(default_factory=list)
+    error: str | None = None
+
+
+@dataclass
 class Manifest:
     pipeline: str
     root: Path
@@ -117,6 +140,11 @@ class Manifest:
     # that rate from the artifacts through the same comparison code the run
     # used instead of trusting a number this file could have got wrong.
     bisect: list[RunRecord] = field(default_factory=list)
+    # The amplified re-executions, one entry per (step, amplifier) pair that was
+    # attempted, including the pairs where the amplifier declined to change
+    # anything. Those carry their reason and no runs, and they are the half of
+    # the report that says which axes were not varied.
+    amplified: list[AmplifiedRuns] = field(default_factory=list)
     # What stopped the bisect, where something did. It is kept because a run
     # whose bisect failed is not a run whose steps have no cause, and judging
     # the saved manifest later has no other way to tell those apart.
@@ -151,6 +179,16 @@ class Manifest:
             runs=[_run_record(run) for run in body["runs"]],
             bisect=[_run_record(run) for run in body.get("bisect", [])],
             bisect_error=body.get("bisect_error"),
+            amplified=[
+                AmplifiedRuns(
+                    step_index=entry["step_index"],
+                    amplifier=entry["amplifier"],
+                    note=entry["note"],
+                    runs=[_run_record(run) for run in entry["runs"]],
+                    error=entry.get("error"),
+                )
+                for entry in body.get("amplified", [])
+            ],
         )
 
 
@@ -165,6 +203,7 @@ def _run_record(body: dict) -> RunRecord:
                 seconds=step["seconds"],
                 rows_read=step["rows_read"],
                 input_columns=step["input_columns"],
+                reads=step.get("reads", []),
                 uncontained_reads=step.get("uncontained_reads", []),
                 artifacts=[Artifact(**a) for a in step["artifacts"]],
             )

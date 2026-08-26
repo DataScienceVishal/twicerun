@@ -189,8 +189,8 @@ def tie_collapse(
         collapsed[name] = _rewrite(con, artifact, into / f"{name}.parquet", query)
         was = min(artifact.rows / max(counts[c], 1) for c in collapsing)
         notes.append(
-            f"{name}.{', '.join(collapsing)} hashed into {buckets:,} buckets, "
-            f"{was:,.0f} rows per value to {artifact.rows / buckets:,.0f}, {tiebreak} left alone"
+            f"{name}.{', '.join(collapsing)} into {buckets:,} buckets, from {was:,.0f} to "
+            f"{artifact.rows / buckets:,.0f} rows per value"
         )
 
     if not collapsed:
@@ -248,7 +248,7 @@ def thread_count(
                              f"this would set")
     return Substituted(
         dict(inputs),
-        note=f"at threads={raised}, against threads={threads} in the loop above",
+        note=f"threads raised to {raised} from the {threads} in the loop above",
         threads=raised,
     )
 

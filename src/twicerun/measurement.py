@@ -10,6 +10,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from twicerun.amplify import (
+    AMPLIFICATION_FAILED,
+    DIVERGENT,
+    NO_DIVERGENCE_OBSERVED,
+    STABLE_ON_THIS_INPUT,
+    Amplification,
+)
 from twicerun.cause import Bisect
 from twicerun.oracle import ArtifactFindings, ColumnDrift, Divergence
 
@@ -38,6 +45,7 @@ class StepMeasurement:
     rounds: list[list[ArtifactFindings]] = field(default_factory=list)
     uncontained_reads: set[str] = field(default_factory=set)
     bisect: Bisect | None = None
+    amplifications: list[Amplification] = field(default_factory=list)
 
     def observe(self, findings: list[ArtifactFindings]) -> None:
         self.rounds.append(findings)
@@ -71,6 +79,42 @@ class StepMeasurement:
         if self.bisect is None or not self.fired:
             return None
         return self.bisect.label
+
+    @property
+    def status(self) -> str | None:
+        """Which of the four this step came out as, or None where none of them fit.
+
+        Read off the measurement rather than off the verdict, deliberately. A
+        policy decides whether a difference matters and it must not be able to
+        decide whether a difference happened, so a step whose drift was all
+        downgraded to TOLERATED still reads DIVERGENT here and the two figures
+        beside it say what the policy did with it. The practical consequence is
+        that this column is byte-identical under --policy strict and --policy
+        reduction-order, and there is a test that runs both and diffs them.
+
+        None has two causes and they are different. Amplification was off, in
+        which case a zero is four comparisons on one input and no status is
+        claimed for it; or nothing was compared at all, which is the case a
+        report must never call clean, since `any([])` is False and a step that
+        wrote no artifacts would otherwise read exactly like a step that wrote
+        matching ones.
+        """
+        if self.artifacts_compared == 0:
+            return None
+        if self.fired:
+            return DIVERGENT
+        if not self.amplifications:
+            return None
+        if any(a.fired for a in self.amplifications if a.measured):
+            return STABLE_ON_THIS_INPUT
+        if any(a.error for a in self.amplifications):
+            return AMPLIFICATION_FAILED
+        return NO_DIVERGENCE_OBSERVED
+
+    @property
+    def amplified_by(self) -> list[Amplification]:
+        """The amplifiers that made this step disagree with itself."""
+        return [a for a in self.amplifications if a.measured and a.fired]
 
     @property
     def classes(self) -> frozenset[Divergence]:

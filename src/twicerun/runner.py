@@ -23,13 +23,28 @@ import shutil
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import NamedTuple
 
 import duckdb
 
+from twicerun.amplify import (
+    AMPLIFIERS,
+    PROBE_RUNS,
+    Amplification,
+    Attempt,
+    NotApplicable,
+)
 from twicerun.cause import BISECT_THREADS, Bisect
-from twicerun.manifest import Artifact, Environment, Manifest, RunRecord, StepRecord
+from twicerun.manifest import (
+    AmplifiedRuns,
+    Artifact,
+    Environment,
+    Manifest,
+    RunRecord,
+    StepRecord,
+)
 from twicerun.measurement import StepMeasurement
 from twicerun.oracle import ArtifactFindings, compare
 from twicerun.policy import Policy
@@ -203,15 +218,21 @@ def execute_run(
     run: int,
     run_dir: Path,
     carried: dict[str, Artifact],
-    reference: RunRecord | None = None,
+    upstream: Callable[[int], dict[str, Artifact]] | None = None,
     only: Collection[int] | None = None,
     threads: int | None = None,
 ) -> tuple[RunRecord, dict[str, Artifact]]:
     """One execution of the pipeline, or of the steps in `only`.
 
-    `reference` is run 1's record and turns containment on: every read resolves
-    against what run 1 had written by that point. Run 1 itself passes None, and
-    so does every run under --no-containment.
+    `upstream` turns containment on: called with a step index, it answers with
+    what that step's reads should resolve against. Run 1 of the main loop passes
+    None, and so does every run under --no-containment.
+
+    It is a callable rather than run 1's record because the two loops downstream
+    of the main one want different answers out of it. The bisect wants run 1's
+    artifacts as they stood before each step, which is what `artifacts_before`
+    computes. Amplification wants a substituted set that has nothing to do with
+    what any run wrote.
 
     `only` and `threads` are the bisect's. Executing one step out of the middle
     of a pipeline works for reads that go through `ctx.read` and `ctx.state`,
@@ -244,7 +265,7 @@ def execute_run(
                 run_dir=run_dir,
                 written=written,
                 carried=carried,
-                upstream=None if reference is None else artifacts_before(reference, index),
+                upstream=None if upstream is None else upstream(index),
             )
             before = dict(written)
             step_began = time.perf_counter()
@@ -256,6 +277,7 @@ def execute_run(
                     seconds=time.perf_counter() - step_began,
                     rows_read=ctx.rows_read,
                     input_columns=sorted(ctx.input_columns),
+                    reads=sorted(ctx.reads),
                     uncontained_reads=sorted(ctx.uncontained_reads),
                     artifacts=[a for name, a in written.items() if before.get(name) is not a],
                 )
@@ -365,42 +387,211 @@ def bisect_runs(
 
     Cost is `len(divergent) * runs` step executions and no more: the steps that
     never fired are not re-executed, because there is nothing about them for a
-    thread count to explain.
-
-    The state a step carries starts empty here, exactly as it did for run 1 of
-    the main loop, and every later single-threaded run reads the first one's.
-    Seeding it from the main loop's run 1 instead was wrong in a way that took a
-    reference-pipeline run to see: `append_audit_log` then read the same log in
-    all five single-threaded executions, agreed with itself five times, and was
-    labelled PARALLEL_ORDER. Duplicating a log on rerun has nothing to do with
-    threads. The bisect has to be the main loop again at one thread, or its
-    zero answers a different question from the one the other rate asked.
-
-    Which is why runs 2 to N carry an overlay rather than only what the bisect
-    produced. A divergent step can carry state under a name a step that did not
-    diverge wrote, and that writer is skipped here, so taking `written` alone
-    left the name missing and every single-threaded run fell back to the seed.
-    Five identical seeds agree, and the same mislabelling came back through the
-    other door. Names the bisect re-produced take its own version, since those
-    are the single-threaded ones; every other name takes run 1's.
+    thread count to explain. The steps that never fired go to amplification
+    instead, which is the other half of this arithmetic.
     """
-    from_run_one = artifacts_before(reference, len(steps))
+    return repeat_steps(
+        steps,
+        divergent,
+        run_dir / f"threads-{BISECT_THREADS}",
+        runs,
+        upstream=partial(artifacts_before, reference),
+        seed=artifacts_before(reference, len(steps)),
+        threads=BISECT_THREADS,
+    )
+
+
+def repeat_steps(
+    steps: list[Step],
+    only: Sequence[int],
+    into: Path,
+    runs: int,
+    upstream: Callable[[int], dict[str, Artifact]],
+    seed: dict[str, Artifact],
+    threads: int | None = None,
+) -> list[RunRecord]:
+    """Execute a subset of the pipeline `runs` times, run 1 the reference for the rest.
+
+    The main loop again, narrowed. Both the bisect and amplification want it,
+    they want it with different reads resolved and different thread counts, and
+    the state handling below is the part neither can get wrong twice.
+
+    That state starts empty, exactly as it did for run 1 of the main loop, and
+    every later run reads the first one's. Seeding it from the main loop's run 1
+    instead was wrong in a way that took a reference-pipeline run to see:
+    `append_audit_log` then read the same log in all five re-executions, agreed
+    with itself five times, and got a label about parallelism on a bug that
+    duplicates a log on rerun whatever the thread count.
+
+    Which is why runs 2 to N carry `seed` underneath what run 1 produced rather
+    than only what it produced. A re-executed step can carry state under a name
+    that some skipped step wrote, and skipping the writer left the name missing
+    so every later run fell back to `seed` and the same mislabelling came back
+    through the other door. Names this loop re-produced take its own version;
+    every other name takes the seed's.
+    """
     carried: dict[str, Artifact] = {}
     records = []
     for run in range(1, runs + 1):
         record, written = execute_run(
             steps,
             run,
-            run_dir / f"threads-{BISECT_THREADS}" / f"run-{run:02d}",
+            into / f"run-{run:02d}",
             carried,
-            reference=reference,
-            only=set(divergent),
-            threads=BISECT_THREADS,
+            upstream=upstream,
+            only=set(only),
+            threads=threads,
         )
         records.append(record)
         if run == 1:
-            carried = {**from_run_one, **written}
+            carried = {**seed, **written}
     return records
+
+
+def amplify_runs(
+    steps: list[Step],
+    reference: RunRecord,
+    quiet: Sequence[int],
+    run_dir: Path,
+    runs: int,
+    threads: int,
+    keys: Mapping[str, Sequence[str]],
+) -> list[AmplifiedRuns]:
+    """Re-execute each step that never fired against an input built to make it fire.
+
+    Only the quiet steps, because a step that already diverged has been answered
+    and pushing its firing probability higher would cost executions to learn
+    nothing. That is also what keeps the status of a step independent of the
+    policy: which steps get amplified comes off the measured fire rate, so the
+    same pipeline judged twice re-executes the same steps.
+
+    Each amplifier gets three runs, which is two comparisons, and any that fires
+    is extended to the main loop's N so the two rates share a denominator. The
+    extension continues against the same amplified run 1 rather than starting
+    over, so escalating costs `N - 3` executions rather than `N`.
+    """
+    amplified = []
+    con = duckdb.connect()
+    try:
+        for index in quiet:
+            reads = set(_step_record(reference, index).reads)
+            inputs = {
+                name: artifact
+                for name, artifact in artifacts_before(reference, index).items()
+                if name in reads
+            }
+            for amplifier, substitute in AMPLIFIERS:
+                into = run_dir / "amplified" / f"step-{index:02d}" / _slug(amplifier)
+                amplified.append(
+                    _one_amplifier(
+                        steps, reference, index, runs, keys,
+                        amplifier=amplifier,
+                        attempt=substitute(con, into / "input", inputs, threads),
+                        into=into,
+                    )
+                )
+    finally:
+        con.close()
+    return amplified
+
+
+def _one_amplifier(
+    steps: list[Step],
+    reference: RunRecord,
+    index: int,
+    runs: int,
+    keys: Mapping[str, Sequence[str]],
+    *,
+    amplifier: str,
+    attempt: Attempt,
+    into: Path,
+) -> AmplifiedRuns:
+    """Execute one (step, amplifier) pair, or record why it did not run.
+
+    The blanket catch is what AMPLIFICATION_FAILED is made of. An amplified
+    input can make a step raise rather than diverge, most obviously by
+    collapsing a column a downstream uniqueness constraint depends on, and the
+    step is arbitrary user code so there is no narrower exception to name.
+    Nothing is swallowed: the error is stored, printed against the amplifier
+    that produced it, and it stops the step reaching a clean status. Falling
+    back to green is the failure this whole feature exists to prevent.
+    """
+    if isinstance(attempt, NotApplicable):
+        return AmplifiedRuns(index, amplifier, note=attempt.reason)
+
+    repeat = partial(
+        repeat_steps,
+        steps,
+        [index],
+        into,
+        upstream=lambda _: attempt.artifacts,
+        seed=artifacts_before(reference, len(steps)),
+        threads=attempt.threads,
+    )
+    try:
+        records = repeat(runs=PROBE_RUNS)
+        if runs > PROBE_RUNS and _scored(records, keys)[0]:
+            records += repeat(runs=runs)[PROBE_RUNS:]
+    except Exception as exc:  # noqa: BLE001
+        return AmplifiedRuns(
+            index, amplifier, note=attempt.note, error=f"{type(exc).__name__}: {exc}".strip()
+        )
+    return AmplifiedRuns(index, amplifier, note=attempt.note, runs=records)
+
+
+def _scored(
+    records: Sequence[RunRecord], keys: Mapping[str, Sequence[str]]
+) -> tuple[int, int]:
+    """How many of runs 2 to N disagreed with run 1, and how many artifacts said so.
+
+    The second figure is the guard the main loop and the bisect already carry: a
+    re-executed step that wrote nothing produces `0 of 2` out of two comparisons
+    of nothing, and that has to be distinguishable from two clean ones.
+    """
+    if len(records) < 2:
+        return 0, 0
+    reference, *later = records
+    fired = compared = 0
+    for run in later:
+        found = [f for step in compare_runs(reference, run, keys) for f in step]
+        compared += len(found)
+        fired += any(f.diverged for f in found)
+    return fired, compared
+
+
+def attach_amplification(
+    manifest: Manifest, measured: list[StepMeasurement], keys: Mapping[str, Sequence[str]]
+) -> None:
+    """Score the amplified runs against each other and hang each rate on its step.
+
+    Run from `measure`'s two callers rather than from inside it, for the same
+    reason the bisect is: the run command needs the main loop's fire rates
+    before it knows which steps to amplify at all.
+    """
+    on = {step.index: step for step in measured}
+    for entry in manifest.amplified:
+        step = on.get(entry.step_index)
+        if step is None:
+            continue
+        fired, compared = _scored(entry.runs, keys)
+        step.amplifications.append(
+            Amplification(
+                amplifier=entry.amplifier,
+                note=entry.note,
+                comparisons=max(len(entry.runs) - 1, 0),
+                fired=fired,
+                artifacts_compared=compared,
+                error=entry.error,
+            )
+        )
+
+
+def _step_record(record: RunRecord, index: int) -> StepRecord:
+    return next(step for step in record.steps if step.index == index)
+
+
+def _slug(amplifier: str) -> str:
+    return amplifier.replace(" ", "-")
 
 
 def attach_bisect(
@@ -484,6 +675,7 @@ def rejudge(
         )
     measured = measure(manifest, keys or {})
     attach_bisect(manifest, measured, keys or {})
+    attach_amplification(manifest, measured, keys or {})
     return Report(
         pipeline=manifest.pipeline,
         run_dir=str(manifest.root),
@@ -493,6 +685,7 @@ def rejudge(
         seconds=None,
         policy=policy,
         contained=manifest.contained,
+        amplified=bool(manifest.amplified),
         bisect_error=manifest.bisect_error,
     )
 
@@ -505,6 +698,7 @@ def run_pipeline(
     keys: Mapping[str, Sequence[str]] | None = None,
     policy: Policy | None = None,
     contained: bool = True,
+    amplify: bool = True,
 ) -> tuple[Report, Manifest]:
     if runs < 2:
         raise PipelineError(f"--runs must be at least 2 to have anything to compare, got {runs}")
@@ -530,7 +724,7 @@ def run_pipeline(
                 run,
                 run_dir / f"run-{run:02d}",
                 carried,
-                reference=reference if contained else None,
+                upstream=partial(artifacts_before, reference) if contained and reference else None,
             )
             manifest.runs.append(record)
             if run == 1:
@@ -559,6 +753,15 @@ def run_pipeline(
                 # and prints what raised.
                 manifest.bisect_error = f"{type(exc).__name__}: {exc}".strip()
         attach_bisect(manifest, measured, keys or {})
+        # The steps the bisect leaves alone are exactly the ones amplification
+        # takes, so the two together re-execute every step once more and neither
+        # covers a step twice.
+        if amplify:
+            quiet = [step.index for step in measured if not step.fired]
+            manifest.amplified = amplify_runs(
+                steps, reference, quiet, run_dir, runs, environment.threads, keys or {}
+            )
+            attach_amplification(manifest, measured, keys or {})
         manifest.save()
         # Pruning is last rather than first, which costs one run directory of
         # peak disk and buys the previous run surviving anything that goes
@@ -576,6 +779,7 @@ def run_pipeline(
             seconds=time.perf_counter() - began,
             policy=policy or Policy(),
             contained=contained,
+            amplified=amplify,
             bisect_error=manifest.bisect_error,
             pruned=len(retention.dropped),
             live=retention.live,

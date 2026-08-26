@@ -103,6 +103,14 @@ def build_parser() -> argparse.ArgumentParser:
         "by echoes of it",
     )
     run.add_argument(
+        "--no-amplify",
+        action="store_true",
+        help="skip the amplifiers. Each of them re-executes a step that never fired against an "
+        "input built to make it fire, at 3 runs, escalating to --runs on a hit. Without them a "
+        "step's zero is only ever a zero on the one input you gave it, so none of the four "
+        "statuses is printed and the report says so instead",
+    )
+    run.add_argument(
         "--keep",
         type=int,
         default=1,
@@ -211,6 +219,7 @@ def main(argv: list[str] | None = None) -> int:
             keys=parse_keys(args.key),
             policy=_policy_from(args),
             contained=not args.no_containment,
+            amplify=not args.no_amplify,
         )
     except (PipelineError, MissingArtifact, KeySyntaxError) as exc:
         print(f"twicerun: {exc}", file=sys.stderr)
