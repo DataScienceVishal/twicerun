@@ -53,7 +53,7 @@ from twicerun.cli import exit_code
 from twicerun.compare import compare as bit_exact
 from twicerun.manifest import Manifest
 from twicerun.measurement import StepMeasurement, name_classes
-from twicerun.policy import HEADROOM_REQUIRED, Policy, judge
+from twicerun.policy import HEADROOM_REQUIRED, REDUCTION_ORDER, Policy, judge
 from twicerun.runner import amplify_runs, load_steps, run_pipeline, scored_runs
 
 HERE = Path(__file__).resolve().parent.parent
@@ -169,6 +169,11 @@ class Trial:
     twins: list[StepMeasurement]
     uncontained: list[StepMeasurement]
     naive: dict[str, NaiveScore]
+    # The same comparison as `naive` over the runs the oracle got, on both
+    # pipelines, which is what tells a difference in method from a difference in
+    # run count.
+    matched: dict[str, tuple[int, int]]
+    matched_twins: dict[str, tuple[int, int]]
     # Each amplifier's rate on the intermittent step, taken every trial rather
     # than only on the trials where the loop came back quiet.
     forced: dict[str, Amplification]
@@ -348,8 +353,13 @@ def naive_pass(manifest: Manifest) -> dict[str, tuple[int, int]]:
     Two runs, no tolerance, no classification, no repetition. What almost anyone
     would write first, and what the first version of this project's spec
     proposed. Pointed at the trial's own first two runs rather than at two fresh
-    ones, so the only difference between this and the oracle's answer is the
-    comparison: same bytes, same containment, same everything else.
+    ones, so it sees the same bytes under the same containment.
+
+    It does not see the same number of comparisons, and this docstring used to
+    say the comparison was the only difference. It is not: the oracle gets runs
+    2 to 5 against run 1 and this gets run 2 alone, so most of the published gap
+    between them is a run count. `run_matched` below is the row that separates
+    those two claims, and it should be read next to this one.
 
     Per step it returns the rows each side had that the other did not, the
     total rows the two runs put in front of it, and how many artifacts it
@@ -375,6 +385,45 @@ def naive_pass(manifest: Manifest) -> dict[str, tuple[int, int]]:
             found[ref_step.name] = NaiveScore(
                 missing, appeared, rows, len(ref_step.artifacts)
             )
+    finally:
+        con.close()
+    return found
+
+
+def run_matched(manifest: Manifest) -> dict[str, tuple[int, int]]:
+    """The same bit-exact comparison, over every comparison the oracle got.
+
+    Baseline 1 gets one comparison and the oracle gets four, so the two answers
+    differ by a run count as well as by a comparison and the eval published the
+    difference as though only the comparison moved. This scores runs 2 to N
+    against run 1 with `twicerun.compare`, which is multiset equality over row
+    hashes and produces no class, no magnitude, no attributed column, no bound
+    and no cause.
+
+    Per step it returns the comparisons in which anything differed and the
+    comparisons that looked at an artifact, which are `StepMeasurement.fired`
+    and `measured_comparisons` computed the cheap way, so the two are
+    comparable cell by cell.
+    """
+    con = duckdb.connect()
+    found: dict[str, tuple[int, int]] = {}
+    try:
+        reference, *later = manifest.runs
+        for run in later:
+            for ref_step, cand_step in zip(reference.steps, run.steps, strict=True):
+                written = {a.name: a for a in cand_step.artifacts}
+                differed = False
+                for artifact in ref_step.artifacts:
+                    twin = written.get(artifact.name)
+                    if twin is None:
+                        differed = True
+                        continue
+                    diff = bit_exact(con, artifact, twin)
+                    differed = differed or bool(diff.only_in_reference or diff.only_in_candidate)
+                fired, compared = found.get(ref_step.name, (0, 0))
+                looked = 1 if ref_step.artifacts else 0
+                hit = 1 if differed and looked else 0
+                found[ref_step.name] = (fired + hit, compared + looked)
     finally:
         con.close()
     return found
@@ -522,9 +571,11 @@ def one_trial(into: Path, runs: int) -> Trial:
     began = time.perf_counter()
     broken, manifest = run_pipeline(REFERENCE, runs=runs, parent=into / "reference", keep=1)
     naive = naive_pass(manifest)
+    matched = run_matched(manifest)
     index = next(s.index for s in broken.steps if s.name == INTERMITTENT)
     amplified = forced_amplification(manifest, runs, index)
-    twinned, _ = run_pipeline(TWINS, runs=runs, parent=into / "twins", keep=1)
+    twinned, twin_manifest = run_pipeline(TWINS, runs=runs, parent=into / "twins", keep=1)
+    matched_twins = run_matched(twin_manifest)
     ablated, _ = run_pipeline(
         REFERENCE, runs=runs, parent=into / "uncontained", keep=1, contained=False
     )
@@ -534,6 +585,8 @@ def one_trial(into: Path, runs: int) -> Trial:
         twins=twinned.steps,
         uncontained=ablated.steps,
         naive=naive,
+        matched=matched,
+        matched_twins=matched_twins,
         forced=amplified,
         exit_with_amplifiers=exit_code(broken),
         exit_without=exit_code(quiet),
@@ -651,6 +704,14 @@ def report_specificity(scored: dict[str, StepScore], trials: int) -> None:
         # step-passes that compared nothing print as `0 twin step-passes fired`
         # and read as the strongest specificity result in the file.
         say(f"  {quiet} of them compared no artifact at all and are not counted as clean.")
+    shared = [twin for broken, twin in PAIRS if broken == twin]
+    untwinned = [name for name in WHAT_EACH_STEP_IS if name not in {b for b, _ in PAIRS}]
+    if shared:
+        say(f"  {', '.join(shared)} is the same function in both files, so its share of that")
+        say("  denominator is the sensitivity table's control row counted a second time.")
+    if untwinned:
+        say(f"  {', '.join(untwinned)} have no twin and are not in this table at all, which")
+        say("  leaves out the correct-code step that fires in every trial above.")
 
 
 def report_twin_comparisons(trials: list[Trial]) -> dict[str, int]:
@@ -687,7 +748,7 @@ def report_twin_comparisons(trials: list[Trial]) -> dict[str, int]:
 
 
 def report_baseline_one(trials: list[Trial], scored: dict[str, StepScore]) -> dict[str, float]:
-    say("\nbaseline 1: two runs, bit-exact multiset equality, no tolerance and no classes")
+    say("\nbaseline 1: bit-exact multiset equality, no tolerance and no classes, at two run counts")
     say("  Runs 1 and 2 of each trial, rescored. Same bytes as the oracle saw.")
     benign = [n for n in (trial.naive.get(BENIGN) for trial in trials) if n and n.artifacts]
     fired = sum(1 for n in benign if n.unmatched)
@@ -718,7 +779,7 @@ def report_baseline_one(trials: list[Trial], scored: dict[str, StepScore]) -> di
         f"at one comparison, against the five-run loop's "
         f"{scored[INTERMITTENT].fired_in} of {scored[INTERMITTENT].trials}",
     )
-    return {
+    figures = {
         # The median of both sides added up, which is the figure the README has
         # published since slice 5, now with the denominator it is out of.
         "benign_median": statistics.median(counts),
@@ -727,6 +788,64 @@ def report_baseline_one(trials: list[Trial], scored: dict[str, StepScore]) -> di
         "benign_later_side": statistics.median(n.unmatched_candidate for n in benign),
         "benign_fired": fired,
         "benign_trials": len(benign),
+    }
+    return {**figures, **report_run_matched(trials, scored)}
+
+
+def report_run_matched(trials: list[Trial], scored: dict[str, StepScore]) -> dict[str, float]:
+    """The same comparison over the same runs the oracle got, which is the honest control.
+
+    Everything above this line hands the cheap comparison one comparison and the
+    oracle four, then reports the difference as though the comparison method
+    were the only thing that moved. It is not, and this is the row that says so:
+    same runs, same bytes, same containment, and nothing but multiset equality.
+
+    What the oracle produces that this cannot is the class, the ulp and relative
+    magnitudes, the attributed column, the derived bound and the bisect cause.
+    None of those appear in the sensitivity or specificity tables, which is why
+    those two tables are the wrong place to look for evidence that the oracle
+    earns its cost.
+    """
+    say("")
+    say("  Run-matched: the same bit-exact comparison over all of the oracle's comparisons.")
+    fires = {
+        name: sum(1 for t in trials if t.matched.get(name, (0, 0))[0])
+        for name in (*BROKEN, INTERMITTENT, BENIGN)
+    }
+    hang(
+        f"{'run-matched':<22}",
+        ", ".join(f"{name} {n} of {len(trials)}" for name, n in fires.items()),
+    )
+    cells = disagreed = 0
+    for trial in trials:
+        for step in trial.reference:
+            found = trial.matched.get(step.name)
+            if found is None or not found[1]:
+                continue
+            cells += 1
+            disagreed += found[0] != step.fired
+    twin_fires = sum(fired for t in trials for fired, _ in t.matched_twins.values())
+    twin_passes = sum(1 for t in trials for _, compared in t.matched_twins.values() if compared)
+    hang(
+        " " * 22,
+        f"disagreed with the oracle's fire count on {disagreed} of {cells} step-trials, and "
+        f"fired on {twin_fires} of {twin_passes} twin step-passes",
+    )
+    if not cells or not twin_passes:
+        say("  One side of that compared nothing, so this row is not a result either way.")
+    elif not disagreed and not twin_fires:
+        say("  So the sensitivity and specificity tables above hold no evidence for the oracle")
+        say("  over multiset equality given the same runs. What it adds is the class, the")
+        say("  magnitudes, the attributed column, the bound and the cause, and none of those")
+        say("  are scored up there.")
+    else:
+        say("  Where those two disagree is the only place in this eval where the comparison")
+        say("  method is doing the work rather than the run count.")
+    return {
+        "matched_disagreements": disagreed,
+        "matched_cells": cells,
+        "matched_twin_fires": twin_fires,
+        "matched_twin_passes": twin_passes,
     }
 
 
@@ -972,7 +1091,7 @@ def _status(steps: list[StepMeasurement], name: str) -> str | None:
 
 
 def report_bounds(trials: list[Trial], policy: Policy) -> dict[str, float]:
-    say("\nthe pre-registered 1000x headroom check, at both choices of n")
+    say(f"\nthe pre-registered {HEADROOM_REQUIRED:,.0f}x headroom check, at both choices of n")
     loose_clear = tight_clear = passes = 0
     loose, tight = [], []
     for trial in trials:
@@ -998,13 +1117,64 @@ def report_bounds(trials: list[Trial], policy: Policy) -> dict[str, float]:
     )
     say("  The first carries a factor of the output row count in slack and the second has")
     say("  none. The check as written is the first. The honest reading is the second.")
+    # Multiplying that factor out is the part nobody did. relative_bound is
+    # linear in terms in this regime, so the loose ratio is the tight one times
+    # the output row count, and this pipeline groups into 1,000 days.
+    slack = statistics.median(loose) / statistics.median(tight)
+    say(f"  The first is the second times {slack:,.0f}, which is the pipeline's output row count.")
+    if abs(slack - HEADROOM_REQUIRED) <= HEADROOM_REQUIRED * 0.05:
+        say(f"  That is also {HEADROOM_REQUIRED:,.0f}, the multiplier this check asks for, so "
+            f"clearing it at the loose n")
+        say("  is clearing the honest n with no margin at all. A pipeline grouping into 100 days")
+        say("  would fail the same check on the same drift.")
+    else:
+        say("  The multiplier this check asks for was fixed independently of that factor.")
     return {
         "loose_cleared": loose_clear,
         "tight_cleared": tight_clear,
         "step_passes": passes,
         "loose_median": statistics.median(loose),
         "tight_median": statistics.median(tight),
+        "loose_over_tight": slack,
     }
+
+
+def report_policy_cost(trials: list[Trial]) -> dict[str, int]:
+    """What `--policy reduction-order` costs on the four broken steps.
+
+    Everything else here runs strict, which is the default and the only policy
+    the tables measure, so this figure appears nowhere above and the README
+    explains the mechanism without ever printing its price. A step whose every
+    comparison is downgraded does not gate a release, and one of the four is a
+    float aggregate whose drift is exactly what the policy exists to downgrade.
+    """
+    say("\nsensitivity under --policy reduction-order, which no table above runs")
+    lenient = Policy(name=REDUCTION_ORDER)
+    lost = []
+    passes = 0
+    for name in BROKEN:
+        gated = seen = 0
+        for trial in trials:
+            step = next((s for s in trial.reference if s.name == name), None)
+            if step is None or step.artifacts_compared == 0:
+                continue
+            seen += 1
+            gated += judge(step, lenient).fired > 0
+        if not seen:
+            continue
+        passes += 1
+        hang(f"{name:<22}", f"gates on {gated} of {seen} trials")
+        if gated < seen:
+            lost.append(name)
+    if not passes:
+        say("  Nothing compared, so there is no cost to report here.")
+        return {"gating_steps": 0, "gating_of": 0}
+    say(f"  {passes - len(lost)} of the {passes} broken steps still gate a release under it.")
+    if lost:
+        say(f"  {', '.join(lost)} stops gating: float-only drift, inside the derived bound, and")
+        say("  gone at threads=1, which is the conjunction the policy downgrades on. That is")
+        say("  the trade the flag makes and it is not in any table above.")
+    return {"gating_steps": passes - len(lost), "gating_of": passes}
 
 
 def report_attribution(trials: list[Trial]) -> dict[str, int]:
@@ -1015,9 +1185,9 @@ def report_attribution(trials: list[Trial]) -> dict[str, int]:
         "apply_price_updates": "price_cents",
     }
     say("\nattribution: did leave-one-out name the right column first")
-    right = seen = 0
+    right = seen = tied = 0
     for name, column in expected.items():
-        hits = misses = 0
+        hits = misses = ties = 0
         for trial in trials:
             step = next((s for s in trial.reference if s.name == name), None)
             worst = None if step is None else step.worst
@@ -1025,6 +1195,14 @@ def report_attribution(trials: list[Trial]) -> dict[str, int]:
             if not unstable:
                 continue
             seen += 1
+            # Where the two best columns leave the same count behind, nothing
+            # in the counts chose between them and the sort key did. Both
+            # descriptions of the divergence are true, and the tie-break prefers
+            # the column the step invented, so scoring the answer against that
+            # preference is scoring a sort key against itself.
+            if len(unstable) > 1 and unstable[0].remaining == unstable[1].remaining:
+                ties += 1
+                tied += 1
             if unstable[0].column == column:
                 right += 1
                 hits += 1
@@ -1032,15 +1210,21 @@ def report_attribution(trials: list[Trial]) -> dict[str, int]:
                 misses += 1
         if hits + misses:
             say(
-                f"  {name:<22} {hits} right, {misses} wrong, out of {hits + misses} attributions"
+                f"  {name:<22} {hits} right, {misses} wrong, out of {hits + misses} attributions, "
+                f"{ties} decided by the tie-break"
             )
         else:
             say(f"  {name:<22} no attribution came out of any trial, so nothing to score here")
     if seen:
         say(f"  {right} of {seen} named the column the step invented rather than one it copied in.")
+        say(f"  {tied} of those {seen} had two columns leaving the same count behind, so the")
+        say("  counts chose nothing and the sort key chose, which is a preference this repo")
+        say("  also asserts as a unit test. The rest is the arithmetic doing the work.")
     else:
         say("  Nothing was attributed in any trial, so there is no rate here rather than a zero.")
-    return {"attribution_right": right, "attribution_seen": seen}
+    say("  This is a rate over findings the oracle produced, so it cannot fall when the oracle")
+    say("  stops finding anything: a detector that fires on nothing scores nothing here.")
+    return {"attribution_right": right, "attribution_seen": seen, "attribution_tied": tied}
 
 
 def report_conditions(
@@ -1108,6 +1292,15 @@ def report_conditions(
             f"{amplification['amplifier_comparisons']}, so there is no pair of rates here"
         )
     )
+    if gap_seen and amplification["loop_rate"] >= 1.0:
+        # A maximum cannot exceed a saturated rate, so the condition is at its
+        # ceiling and would trigger on a run where amplification worked
+        # perfectly. That is a property of how it was written, and it was
+        # written before any of this existed, so it prints rather than moves.
+        gap_words += (
+            "; the loop is at 1.00 and no amplifier can beat a rate that is already at its "
+            "ceiling, so this condition triggers on saturation rather than on amplification"
+        )
     containment_words = (
         f"{DOWNSTREAM} fires uncontained on {ablation['falsely_divergent_trials']:.0f} of "
         f"{ablation['downstream_trials']:.0f} trials that compared it, and contained on "
@@ -1272,6 +1465,7 @@ def main(argv: list[str] | None = None) -> int:
     ablation = report_baseline_three(trials, broken_scores)
     amplification = report_baseline_four(trials, broken_scores)
     bounds = report_bounds(trials, Policy())
+    policy_cost = report_policy_cost(trials)
     attribution = report_attribution(trials)
 
     seconds = time.perf_counter() - began
@@ -1320,6 +1514,7 @@ def main(argv: list[str] | None = None) -> int:
                         for trial in trials
                     ],
                     "bounds": bounds,
+                    "policy_cost": policy_cost,
                     "attribution": attribution,
                     "conditions": [
                         {"condition": c, "verdict": v, "evidence": e} for c, v, e in checked

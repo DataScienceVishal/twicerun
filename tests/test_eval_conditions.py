@@ -124,6 +124,11 @@ def a_trial(*, artifacts: int = 1, downstream_uncontained: int = 3, fires: dict 
             BENIGN: NaiveScore(632, 633, 2000, artifacts),
             INTERMITTENT: NaiveScore(0, 0, 2000, artifacts),
         },
+        # The cheap comparison agreeing with the oracle cell for cell, which is
+        # what it does on the real pipeline.
+        matched={name: (fired if artifacts else 0, 4 if artifacts else 0)
+                 for name, fired in fires.items()},
+        matched_twins={twin: (0, 4 if artifacts else 0) for _, twin in PAIRS},
         forced={
             name: Amplification(
                 amplifier=name,
@@ -251,3 +256,35 @@ def test_no_printed_line_runs_past_the_width_the_eval_wraps_to(capsys):
     verdicts([a_trial(artifacts=0) for _ in range(10)])
     over = [line for line in capsys.readouterr().out.splitlines() if len(line) > WIDTH]
     assert not over, over[:3]
+
+
+def test_the_run_matched_row_does_not_claim_agreement_from_nothing(capsys):
+    """The strongest sentence in the eval, and it must not come out of an absence.
+
+    "No evidence for the oracle over multiset equality" is a conclusion about
+    the project's own centrepiece. Ten trials that compared nothing produce zero
+    disagreements and zero twin fires, which is the same pair of zeros a perfect
+    agreement produces.
+    """
+    verdicts([a_trial(artifacts=0) for _ in range(10)])
+    assert "no evidence for the oracle" not in capsys.readouterr().out
+
+    verdicts([a_trial() for _ in range(10)])
+    assert "no evidence for the oracle" in capsys.readouterr().out
+
+
+def test_a_cheap_comparison_that_misses_a_step_is_counted_as_a_disagreement(capsys):
+    """The control on the row above, which is a row of zeros on a healthy run.
+
+    The oracle catches daily_revenue in all ten trials of this fixture, so a
+    run-matched pass that missed it ten times has to print ten disagreements out
+    of the eighty step-trials and lose the sentence that follows.
+    """
+    ten = [a_trial() for _ in range(10)]
+    for trial in ten:
+        trial.matched["daily_revenue"] = (0, 4)
+    verdicts(ten)
+
+    printed = capsys.readouterr().out
+    assert "disagreed with the oracle's fire count on 10 of 80" in printed
+    assert "no evidence for the oracle" not in printed
