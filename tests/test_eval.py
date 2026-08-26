@@ -4,7 +4,7 @@ There are four loops in this repository now: the main one, the single-threaded
 bisect, amplification, and this. Three times a guard written for one of them
 failed to reach its twins, so this file enumerates what the main loop refuses to
 do and checks the eval refuses the same. It does not re-measure
-`pipelines/reference.py`, which takes six minutes and belongs in
+`pipelines/reference.py`, which takes nine minutes and belongs in
 `scripts/eval.py`. One test runs a fifty-row pipeline of its own, because
 baseline 1's arithmetic is over real artifacts and a hand-built score would
 assert nothing but the fixture.

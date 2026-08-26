@@ -10,7 +10,7 @@ needs".
 
 The trials here are built out of `StepMeasurement` rather than measured, because
 the conditions read counts the oracle already computed and nothing that points
-at a Parquet file. Ten real trials take six minutes; these take milliseconds and
+at a Parquet file. Ten real trials take nine minutes; these take milliseconds and
 can be given the shape that never happens on a healthy laptop.
 
 Having the whole report on tap for the price of a fixture is also what lets the

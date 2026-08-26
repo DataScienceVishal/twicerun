@@ -17,13 +17,16 @@ sensitivity threshold.
 A trial is three passes: the broken pipeline at the defaults, its matched twin at
 the defaults, and the broken pipeline again with containment off. The first two
 give sensitivity and specificity, the third is baseline 3. Baseline 1 rescores
-the first pass's own runs 1 and 2 bit-exactly, so the only thing separating it
-from the oracle is the comparison, and baseline 4 rescores the same measurements
-with the amplifiers taken away, through the shipped exit-code function. Only
-baseline 3 costs an extra pass.
+the first pass's own runs 1 and 2 bit-exactly, and then rescores every
+comparison the oracle got the same way, which is the row that separates a
+difference in comparison method from a difference in run count. Baseline 4
+rescores the same measurements with the amplifiers taken away, through the
+shipped exit-code function. Only baseline 3 costs an extra pipeline pass, and
+the run-matched row costs about 20 seconds a trial in comparisons.
 
-Peak disk measured at 1,292 MB, which is one trial's three run directories alive
-at once. Each trial's are removed before the next one starts, so that is a peak
+Ten trials took 532 seconds on a ten-core laptop, a median of 53 a trial. Peak
+disk measured at 1,292 MB, which is one trial's three run directories alive at
+once. Each trial's are removed before the next one starts, so that is a peak
 rather than a total. The first estimate here was 800 MB and came from arithmetic
 rather than from watching it, which is the same mistake the cost section of the
 README already records once.

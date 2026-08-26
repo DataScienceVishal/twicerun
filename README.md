@@ -166,47 +166,56 @@ That line is gone, because the condition it stood in for is now measured and enf
 
 ## The eval
 
-A trial is three passes: the broken pipeline at the defaults, its matched twin at the defaults, and the broken pipeline again with containment off. Ten trials, four baselines, and eight failure conditions that were written into the spec before any of this existed.
+A trial is three passes: the broken pipeline at the defaults, its matched twin at the defaults, and the broken pipeline again with containment off. Ten trials, four baselines with the first of them scored at two run counts, and eight failure conditions that were written into the spec before any of this existed.
 
 ```bash
-uv run python scripts/eval.py               # ten trials, about six minutes, 1.3 GB of peak disk
+uv run python scripts/eval.py               # ten trials, about nine minutes, 1.3 GB of peak disk
 uv run python scripts/eval.py --trials 2    # the same shape, quicker
 uv run python scripts/eval.py --json out.json
 ```
 
-**Four ten-trial runs went into this section and they disagree with each other about the headline number.** All four are below, in the order they happened. A and B are the same code. C and D followed two changes to how a rate is printed and nothing else, which is why they are here rather than replacing anything: a display change is not a reason to drop a measurement, and the run that breached a pre-registered threshold is the second column.
+**Five ten-trial runs went into this section and they disagree with each other about the headline number.** All five are below, in the order they happened. A and B are the same code. C and D followed two changes to how a rate is printed and nothing else, which is why they are here rather than replacing anything: a display change is not a reason to drop a measurement, and the run that breached a pre-registered threshold is the second column.
+
+E is the current code, which measures the same things and reports several of them differently: every denominator is now comparisons that happened rather than runs minus one, and baseline 1 gained the run-matched row two sections down, which is what pushed the wall clock from six minutes to nine.
 
 Run A's wall clock is the odd one because the laptop was running other things, which the cost section further down is already about.
 
-A fifth ten-trial run, in a fresh clone outside the working tree, is the independent one and it is not in the table because it is not the same code path being questioned. It gave `customer_keys` 4x6 3x4, `apply_price_updates` 4x6 3x3 2x1, `sparse_customer_keys` 4x4 3x1 2x3 1x2, the other five steps unchanged, zero twin fires, 30 of 30 on attribution, and every condition not triggered, in 370s.
+There was also a ten-trial run in a fresh clone outside the working tree, on the slice-5 code. It is not in the table because it is not the same code path being questioned, and calling it independent would be overstating it: same laptop, same DuckDB pin, same pipelines, same author, independent of the working tree and of nothing else. It gave `customer_keys` 4x6 3x4, `apply_price_updates` 4x6 3x3 2x1, `sparse_customer_keys` 4x4 3x1 2x3 1x2, the other five steps unchanged, zero twin fires, 30 of 30 on attribution, and every condition not triggered, in 370s.
 
-| step | run A | run B | run C | run D |
-|---|---|---|---|---|
-| 0 `generate_inputs` | `0 of 4` on all 10 | on all 10 | on all 10 | on all 10 |
-| 1 `daily_revenue` | `4 of 4` on all 10 | on all 10 | on all 10 | on all 10 |
-| 2 `customer_keys` | 4x8 3x1 2x1 1x0 0x0 | 4x9 3x1 2x0 1x0 0x0 | 4x8 3x2 2x0 1x0 0x0 | 4x7 3x3 2x0 1x0 0x0 |
-| 3 `apply_price_updates` | 4x5 3x1 2x2 1x2 0x0 | 4x5 3x2 2x0 1x2 **0x1** | 4x6 3x3 2x1 1x0 0x0 | 4x6 3x4 2x0 1x0 0x0 |
-| 4 `append_audit_log` | `4 of 4` on all 10 | on all 10 | on all 10 | on all 10 |
-| 5 `mean_basket` | `4 of 4` on all 10 | on all 10 | on all 10 | on all 10 |
-| 6 `sparse_customer_keys` | 4x2 3x4 2x2 1x2 0x0 | 4x1 3x2 2x2 1x5 0x0 | 4x0 3x4 2x2 1x3 **0x1** | 4x3 3x2 2x2 1x2 **0x1** |
-| 7 `roll_up_keys` | `0 of 4` on all 10 | on all 10 | on all 10 | on all 10 |
-| six twins, every step | nothing fired | nothing fired | nothing fired | nothing fired |
-| wall clock | 536s | 363s | 406s | 356s |
+| step | run A | run B | run C | run D | run E |
+|---|---|---|---|---|---|
+| 0 `generate_inputs` | `0 of 4` on all 10 | on all 10 | on all 10 | on all 10 | on all 10 |
+| 1 `daily_revenue` | `4 of 4` on all 10 | on all 10 | on all 10 | on all 10 | on all 10 |
+| 2 `customer_keys` | 4x8 3x1 2x1 1x0 0x0 | 4x9 3x1 2x0 1x0 0x0 | 4x8 3x2 2x0 1x0 0x0 | 4x7 3x3 2x0 1x0 0x0 | 4x7 3x1 2x2 1x0 0x0 |
+| 3 `apply_price_updates` | 4x5 3x1 2x2 1x2 0x0 | 4x5 3x2 2x0 1x2 **0x1** | 4x6 3x3 2x1 1x0 0x0 | 4x6 3x4 2x0 1x0 0x0 | 4x8 3x0 2x2 1x0 0x0 |
+| 4 `append_audit_log` | `4 of 4` on all 10 | on all 10 | on all 10 | on all 10 | on all 10 |
+| 5 `mean_basket` | `4 of 4` on all 10 | on all 10 | on all 10 | on all 10 | on all 10 |
+| 6 `sparse_customer_keys` | 4x2 3x4 2x2 1x2 0x0 | 4x1 3x2 2x2 1x5 0x0 | 4x0 3x4 2x2 1x3 **0x1** | 4x3 3x2 2x2 1x2 **0x1** | 4x1 3x1 2x3 1x4 **0x1** |
+| 7 `roll_up_keys` | `0 of 4` on all 10 | on all 10 | on all 10 | on all 10 | on all 10 |
+| six twins, every step | nothing fired | nothing fired | nothing fired | nothing fired | nothing fired |
+| wall clock | 536s | 363s | 406s | 356s | 532s |
 
 `4x5 3x2 2x0 1x2 0x1` reads as five trials at four fires of four, two at three, none at two, two at one, and one trial where a definitely broken step gave the same answer four times running. **The cells carry the counts that came out zero**, which is the method correction slice 5 forced and the section at the end of this file explains.
 
 Run B breached the spec's sensitivity threshold, which fixed 10 of 10 on the four broken steps. `apply_price_updates` came out 9 of 10. The eval printed `TRIGGERED` next to it and exited 0, because a triggered condition is a result and not a failed run.
 
-Twin specificity held in every run: **zero fires across 240 main-loop comparisons and 260 amplified ones per run**, with 50 amplifier attempts declining rather than passing, which the eval counts separately so a decline is never read as a clean result.
+Twin specificity held in every run: **zero fires across 240 main-loop comparisons and 260 amplified ones per run**, with 50 amplifier attempts declining rather than passing, which the eval counts separately so a decline is never read as a clean result. Until run E the 240 was runs minus one times steps times trials rather than a count of comparisons that happened, in the same function that filtered the amplified figure on whether anything was compared. It is counted now and it is still 240, because every twin step wrote an artifact in all 60 of its step-trials.
+
+Two things that denominator contains are worth naming. One of the six pairs is `generate_inputs`, which is the same function in both files, so 40 of the 240 are the sensitivity table's control row counted a second time. And `mean_basket` and `roll_up_keys` have no twin at all, so the correct-code step that fires in every trial is not in the specificity set. The eval prints both of those under the table rather than leaving the denominator to be read as 240 independent chances to fail.
 
 ### The four baselines, implemented rather than named
 
 | baseline | what it is | what it gave |
 |---|---|---|
-| 1 | two runs, bit-exact multiset equality, no tolerance and no classes. Rescored from each trial's own runs 1 and 2, so the comparison is the only thing that differs from the oracle | fired on `mean_basket` in 10 of 10 trials in all four runs, at medians of 1,265, 1,270, 1,269 and 1,208 rows that failed to pair, counted across both sides out of the 2,000 the two runs put in front of it, on a step where nothing is wrong. Caught the intermittent step in 7, 5, 4 and 6 of 10, against the five-run loop's 10, 10, 9 and 9 |
+| 1 | two runs, bit-exact multiset equality, no tolerance and no classes. Rescored from each trial's own runs 1 and 2, so it sees the same bytes under the same containment | fired on `mean_basket` in 10 of 10 trials in all five runs, at medians of 1,265, 1,270, 1,269, 1,208 and 1,347 rows that failed to pair, counted across both sides out of the 2,000 the two runs put in front of it, on a step where nothing is wrong. Caught the intermittent step in 7, 5, 4, 6 and 5 of 10, against the five-run loop's 10, 10, 9, 9 and 9 |
+| 1, run-matched | the same comparison over all four of the oracle's comparisons rather than one | agreed with the oracle's fire count on 80 of 80 step-trials in run E, and fired on 0 of 60 twin step-passes |
 | 2 | four static patterns over the pipeline source, parsed per step | separated 4 of the 5 matched pairs, flagged `mean_basket` which has no bug, and could not separate the `MERGE` from its own fix |
 | 3 | the same oracle with `--no-containment` | `roll_up_keys` fires on 10 of 10 trials uncontained and never contained, and is given `cause PARALLEL_ORDER`. `append_audit_log` reports 15,812 extra rows uncontained against 3,953 contained, on every trial of every run |
-| 4 | the same measurements with the amplifiers dropped, scored through the tool's own `exit_code` | 0 of 10 trials would exit 0 in any of the four runs, because the loop caught something on every one. Per comparison on the intermittent step the loop ran 0.65, 0.47, 0.47 and 0.60, against row multiplication's 0.95, 0.93, 1.00 and 0.87 |
+| 4 | the same measurements with the amplifiers dropped, scored through the tool's own `exit_code` | 0 of 10 trials would exit 0 in any of the five runs, because the loop caught something on every one. Per comparison on the intermittent step the loop ran 0.65, 0.47, 0.47, 0.60 and 0.42, against row multiplication's 0.95, 0.93, 1.00, 0.87 and 0.95 |
+
+**Baseline 1 was handed one comparison and the oracle four, and that is most of the gap between them.** Until run E this section said the comparison method was the only difference, which was false in the direction that flattered the oracle. The run-matched row is the control that was missing: same runs, same bytes, same containment, and nothing but multiset equality over row hashes. It agrees with the oracle on every cell of the sensitivity table and fires on no twin.
+
+**So the sensitivity and specificity tables contain no evidence for the oracle over the cheap comparison.** They are the wrong place to look for it. What the oracle produces that multiset equality cannot is the divergence class, the ulp and relative magnitudes, the attributed column, the derived reassociation bound and the single-threaded cause, and none of those five are scored in those two tables. What baseline 1 as originally written does show is what one comparison costs against four, which is a real result about run count and was published as a result about comparison method.
 
 **Baseline 2 is the one worth reading twice, and it is stronger than the spec predicted.** The spec expected a static check to catch the `INSERT`-shaped bug and miss the other three. It catches four of the five, because the patterns were written here after the bugs were known, which is the largest thumb anyone could put on a static checker's scale. What it still cannot do is the result:
 
@@ -220,34 +229,44 @@ The patterns run against parsed function bodies rather than the file. That is no
 
 Three of these declare a piece of this project unnecessary if they fire. All eight print on every run whatever they say.
 
-| condition, as written in the spec | A | B | C | D |
-|---|---|---|---|---|
-| the naive baseline's false positives on correct code are zero, so the oracle is unnecessary | held | held | held | held |
-| the amplification gap on the intermittent step is zero, so amplification is unmotivated | held | held | held | held |
-| observed drift is not 1000x inside the computed bound | held | held | held | held |
-| containment removes no falsely divergent step, so the Spot borrowing did not earn its place | held | held | held | held |
-| sensitivity below 10 of 10 on the four broken steps | held | **TRIGGERED** | held | held |
-| any twin fired at all | held | held | held | held |
-| the intermittent step reached neither `DIVERGENT` nor `STABLE_ON_THIS_INPUT` in a trial | held | held | held | held |
-| the whole eval took longer than 10 minutes | held | held | held | held |
+| condition, as written in the spec | A | B | C | D | E |
+|---|---|---|---|---|---|
+| the naive baseline's false positives on correct code are zero, so the oracle is unnecessary | held | held | held | held | held |
+| the amplification gap on the intermittent step is zero, so amplification is unmotivated | held | held | held | held | held |
+| observed drift is not 1000x inside the computed bound | held | held | held | held | held |
+| containment removes no falsely divergent step, so the Spot borrowing did not earn its place | held | held | held | held | held |
+| sensitivity below 10 of 10 on the four broken steps | held | **TRIGGERED** | held | held | held |
+| any twin fired at all | held | held | held | held | held |
+| the intermittent step reached neither `DIVERGENT` nor `STABLE_ON_THIS_INPUT` in a trial | held | held | held | held | held |
+| the whole eval took longer than 10 minutes | held | held | held | held | held |
 
-The bound check clears at `n = rows read by the step` on 20 of 20 float step-passes in all four runs, at medians of 760,794x, 770,836x, 762,196x and 843,671x. At the tight `n`, the terms behind one output value, it clears on 0, 0, 1 and 1 of 20. That is the same split slice 4 measured and it has not moved: the check as pre-registered passes, and the honest reading of it fails, so both print.
+Three of those eight can be read off an absence rather than off a measurement, and until this pass they were. A step that writes no artifact compares nothing, fires on none of the nothing it compared, and arrives at the conditions as a clean zero, so the naive baseline reports no false positives, the amplification gap comes out as two zero rates and the uncontained pass removes no falsely divergent step. All three then print TRIGGERED, which is the verdict that declares a piece of this project unnecessary. Seven of the eight carry a third verdict now, `NOT MEASURED`, and the eighth is the wall clock, which is measured whatever the pipeline did. The one in the table that fires on a real absence, run B's sensitivity, is a real 9 of 10 rather than a gap.
 
-Attribution named the column the step invented, rather than one it copied in, on 30 of 30, 29 of 29, 29 of 29 and 29 of 29. The denominators are below 30 where a step went quiet for a whole trial and produced no attribution to score.
+**Two of the eight can trigger on something that is not the detector, and both were written that way in the spec.** The amplification gap asks whether any amplifier beats the five-run loop, and a maximum cannot beat a rate that is already at 1.00, so on a run where the loop saturates the condition fires whatever amplification did. The eval says so in the evidence line when it happens rather than moving the threshold. And the sensitivity condition fires when a broken step comes back 0 of 4 in one trial, which on `apply_price_updates` is the roughly one-trial-in-twenty its own docstring predicts: run B is that, and it is the fixture being intermittent rather than the detector missing. The distinction matters because the two are indistinguishable from the condition's own output.
+
+The bound check clears at `n = rows read by the step` on 20 of 20 float step-passes in all five runs, at medians of 760,794x, 770,836x, 762,196x, 843,671x and 771,213x. At the tight `n`, the terms behind one output value, it clears on 0, 0, 1, 1 and 0 of 20. That is the same split slice 4 measured and it has not moved: the check as pre-registered passes, and the honest reading of it fails, so both print.
+
+**On this fixture those are the same check, and the 1000x is cancelled exactly.** `relative_bound` is linear in the term count in this regime, so the loose ratio is the tight ratio times the number of output rows, and `reference.py` groups into `(i % 1000)` days. Run E measured that factor at 1,000 to seven figures, 771,213x against 771x. The multiplier the check asks for is 1,000 and the free parameter of my own test pipeline is 1,000, so **clearing the pre-registered check at the loose `n` is clearing the honest `n` with no margin at all.** An otherwise identical pipeline grouping into 100 days would fail the same check on the same drift. What the check establishes is that the derivation is not wildly wrong; what it does not establish is a thousandfold safety margin, and the number was picked before anyone multiplied the factor out.
+
+Attribution named the column the step invented, rather than one it copied in, on 30 of 30, 29 of 29, 29 of 29, 29 of 29 and 29 of 29. The denominators are below 30 where a step went quiet for a whole trial and produced no attribution to score.
+
+**Two thirds of that is a sort key scored against itself.** On both `row_number` steps, dropping `surrogate_id` and dropping `event_id` each take the unmatched count to zero, because the two columns are a bijection whose pairing moved, so the counts choose nothing and the `(remaining, from_input, column)` tie-break chooses. Preferring the column the step invented is right, and `tests/test_oracle.py::test_a_tie_goes_to_the_column_the_step_invented` asserts it as a unit test; re-scoring it ten times a run and calling the result an accuracy figure is not. Run E was 19 of 29 decided by the tie-break, and the eval prints that split per step. `apply_price_updates` is the one where the counts do the work.
 
 **The amplification gap has to be forced to be visible at all.** Amplification only touches steps the main loop found nothing in, which is the whole cost argument for it, so on a trial where the loop catches the intermittent step there is no amplified rate to compare against. Waiting for a quiet trial throws away nine in ten. So the eval points the shipped amplifiers at that one step every trial, through the same `amplify_runs` the runner calls:
 
 ```
   Per comparison on sparse_customer_keys, with the amplifiers pointed at it every trial:
-    the five-run loop       24 of 40   0.60   1 of 10 trials with nothing at all
-    tie collapse            32 of 40   0.80   0 of 10 trials with nothing at all
-    thread count            22 of 34   0.65   3 of 10 trials with nothing at all
-    row multiplication      33 of 38   0.87   1 of 10 trials with nothing at all
+    the five-run loop       17 of 40   0.42   1 clean, 0 compared nothing, 0 declined
+    tie collapse            35 of 40   0.88   0 clean, 0 compared nothing, 0 declined
+    thread count            24 of 34   0.71   3 clean, 0 compared nothing, 0 declined
+    row multiplication      36 of 38   0.95   1 clean, 0 compared nothing, 0 declined
 ```
 
-That is run D. On its one trial where the five-run loop said nothing, an amplifier fired and the step came out `STABLE_ON_THIS_INPUT`, which is the case the whole feature exists for, seen inside the eval rather than argued for.
+That is run E. On its one trial where the five-run loop said nothing, an amplifier fired and the step came out `STABLE_ON_THIS_INPUT`, which is the case the whole feature exists for, seen inside the eval rather than argued for.
 
-**The eval always exits 0, including on a triggered condition.** A script that failed on one would be a script with a reason to stop publishing it, and there is no CI job running this: it takes six minutes and 1.3 GB.
+The last column used to be one number for three different things: an amplifier that declined to build an input, one that built an input the step wrote nothing from, and one that compared and found the step clean. Only the third is evidence about the step, and a run where all three amplifiers declined printed the same `3 of 10 trials with nothing at all` as a run where all three came back clean.
+
+**The eval always exits 0, including on a triggered condition.** A script that failed on one would be a script with a reason to stop publishing it, and there is no CI job running this: it takes nine minutes and 1.3 GB.
 
 ## Containment, and what it is worth
 
@@ -333,6 +352,10 @@ Substituting the input is allowed because this tool is not checking that the ans
 Two numbers in that table were measured rather than picked. The thread floor of 4 is where the float sum switches on: over eight comparisons each it fired once at `threads=2` and eight times at `threads=4`, and it is flat from there to 40, which is also why doubling a default of 10 was expected to find nothing.
 
 500 rows per distinct value is the density at which the surrogate-key bug fired on every attempt of the standalone measurement this project started from. Inside the tool it takes that step's per-comparison rate from 0.54 to 0.96, which is the table further down. A standalone re-measurement made while building this found much less of a gap, 10 of 12 comparisons at 2 rows per value against 11 of 12 at 500, and the distance between those two pictures is the rest of the pipeline running between one execution of the step and the next. Back to back in one process the bug fires most of the time at either density; inside a five-run loop over eight steps it does not.
+
+**That 500 is also the density `reference.py` generates `customers` at**, which is the input to the loud version of the same bug: `(i % 1000)` over `range(500000)` is 500 rows per distinct value, and `TARGET_ROWS_PER_VALUE` in `amplify.py` is 500. So tie collapse is not raising the sparse step's firing probability by a general principle here. It is converting that step's input into the density the loud step already fires on every time, and I chose both numbers. A fixture built at a different density would need the amplifier retuned, or would be answering a different question.
+
+The counterweight is that tie collapse is not reliably the best of the three on that step. Row multiplication is aimed at the append and the `MERGE` rather than at a surrogate key, and it led in run D at 0.87 against 0.80 and in run E at 0.95 against 0.88, while the 40-pass gap run put tie collapse ahead at 0.96 against 0.91. Which of the two wins moves between runs, and the amplifier that was not co-designed with this step wins as often as the one that was.
 
 Tie collapse replaces a non-NULL value with another real value from the same column, the minimum of its hash bucket, so the type, the row count, the NULL count and the value domain all survive. Casting a hash back to the column's type would have worked for integers and not for `DATE` or `DECIMAL`.
 
@@ -534,6 +557,8 @@ A step that was never bisected gets the same refusal. No evidence is not evidenc
 
 They are an escape hatch, documented as one and never a default, and they still cannot excuse a missing or duplicated row.
 
+**What the opt-in costs is one of the four broken steps, and no table above ran it.** The eval scores everything under `strict`, so the price of `reduction-order` appeared nowhere until run E measured it through the shipped `judge`: `daily_revenue` gates on 0 of 10 trials under it, and the other three gate on 10 of 10. That step is bug 1, a `sum()` over `DOUBLE`, and it is downgraded because its drift is float-only, inside the derived bound and gone at `threads=1`, which is the conjunction working exactly as designed. Under this policy the detector's sensitivity on the four broken steps is 3 of 4 by design, and the eval prints that number in a section of its own.
+
 ## Measuring and deciding are separate stages
 
 Numbers must not move when the policy does. If a tolerance can change a reported figure, everything downstream of it is negotiable and none of it is worth printing.
@@ -576,7 +601,7 @@ uv run twicerun judge .twicerun/run-* --policy reduction-order   # newest, if th
 uv run twicerun run pipelines/reference.py --no-containment
 uv run twicerun run pipelines/twins.py                           # the fixed pipeline: exit 0 or the amplifiers are broken
 
-uv run python scripts/eval.py                                    # the eval, six minutes and 1.3 GB
+uv run python scripts/eval.py                                    # the eval, nine minutes and 1.3 GB
 uv run python scripts/fetch_tlc.py && uv run twicerun run pipelines/tlc_backfill.py
 ```
 
@@ -695,15 +720,17 @@ So this is a thing you run deliberately, before a release or on a schedule. `--r
 
 Pre-registered with the rest, and it belongs here rather than in a footnote: **if the naive baseline's false-positive count on correct code had come out at zero, the oracle would be more machinery than the problem needs**, and this section would say so.
 
-It did not. Baseline 1 fired on `mean_basket` in 10 of 10 trials in every one of the eval's four runs, at medians of 1,265, 1,270, 1,269 and 1,208 rows that failed to pair, on a step where nothing is wrong. That count is across both sides, so it is out of 2,000 rather than 1,000: roughly 600 of the 1,000 groups differ, and each differing group loses a row on each side.
+It did not. Baseline 1 fired on `mean_basket` in 10 of 10 trials in every one of the eval's five runs, at medians of 1,265, 1,270, 1,269, 1,208 and 1,347 rows that failed to pair, on a step where nothing is wrong. That count is across both sides, so it is out of 2,000 rather than 1,000: run E printed 674 on each side of 1,000, which is 674 of the 1,000 groups differing and each losing a row both ways.
 
-Those four figures were published as `median 1,265 rows unmatched out of 1,000 on each side`, which is a magnitude larger than the ceiling it names, on a line whose own rule is that a ceiling cannot be beaten. The numerator summed the two sides and the denominator took one of them. The eval prints the two sides separately now, against the total of both, and the four figures above are unchanged because the quantity was right and only its denominator was wrong. The split is not back-derivable from a sum, so these four keep the sum and a rerun is what shows the two sides.
+The first four figures were published as `median 1,265 rows unmatched out of 1,000 on each side`, which is a magnitude larger than the ceiling it names, on a line whose own rule is that a ceiling cannot be beaten. The numerator summed the two sides and the denominator took one of them. The eval prints the two sides separately now, against the total of both, and the four figures are unchanged because the quantity was right and only its denominator was wrong.
 
-`src/twicerun/compare.py` is that comparison, kept rather than deleted, and `scripts/eval.py` runs it against each trial's own runs 1 and 2. Pointing it at the same bytes the oracle saw is what makes the pair a comparison of comparisons rather than of two separate experiments.
+`src/twicerun/compare.py` is that comparison, kept rather than deleted, and `scripts/eval.py` runs it against each trial's own runs 1 and 2.
+
+**A second and narrower version of this condition was missing until run E, and it is the one that bites.** Baseline 1 gets one comparison where the oracle gets four, so the published gap between them was mostly a run count. Given the same five runs, bit-exact multiset equality agrees with the oracle on all 80 sensitivity cells and fires on none of the 60 twin step-passes. The sensitivity and specificity tables are therefore not evidence for the oracle, and the eval says so in the baseline 1 section on every run. The oracle earns its cost on what it produces beyond a yes or no: the class, the magnitudes, the attributed column, the bound and the cause. If those turn out not to be worth their runtime to anyone, the honest reading of that is the same as this section's.
 
 The two-second version needs none of this repo: `scripts/measure_duckdb.py` re-derives it in raw DuckDB, and it is the better check, because it is a fact about DuckDB rather than about my code.
 
-Stating the condition matters more than the outcome. A tool whose author cannot say what would have made it pointless has not tested the premise, and there are eight of these now, printed on every eval run whatever they say.
+Stating the condition matters more than the outcome. A tool whose author cannot say what would have made it pointless has not tested the premise, and there are eight of these now, printed on every eval run whatever they say, with a ninth in the baseline 1 section that is not a pre-registered threshold because nobody thought to pre-register it.
 
 ## The limitation that goes first, not in a footnote
 
@@ -720,6 +747,8 @@ What that buys back is why it is a design choice rather than a workaround. One a
 **A key group with no exact columns is one big group.** If every column is a float, there is no key, the whole artifact sorts as one group and rows pair by order alone. It is the weakest case here and it is where the heuristic above does the most work, so the report says `matched on no key` when it happens rather than leaving it to be inferred.
 
 **NaN payloads are not distinguished.** The sign survives and the payload does not.
+
+**Two of the published figures cannot go down when the detector gets worse.** Attribution is a rate over findings the oracle produced, and the bound check is a rate over float step-passes that drifted, so both are conditional on something having been found. A detector rewired to report no divergence at all still scores perfectly on both, because neither consults a fire count: they read `step.worst` and `step.rounds` directly. They are quality-of-explanation figures rather than detection figures, and the eval now says so on the attribution line and prints `NOT MEASURED` rather than a zero when there is nothing to score.
 
 **Attribution can name more than one column, and sometimes should.** See above. The tie-break is a heuristic, not a proof.
 
