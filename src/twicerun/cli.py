@@ -6,6 +6,7 @@ import traceback
 from pathlib import Path
 
 from twicerun.columns import UnknownKeyColumn, UnsupportedColumn
+from twicerun.policy import REDUCTION_ORDER, STRICT, Policy
 from twicerun.runner import PipelineError, run_pipeline
 from twicerun.storage import MissingArtifact
 
@@ -50,6 +51,29 @@ def build_parser() -> argparse.ArgumentParser:
         "current run. Use 0 to keep everything",
     )
     run.add_argument(
+        "--policy",
+        choices=[STRICT, REDUCTION_ORDER],
+        default=STRICT,
+        help="strict counts any difference as a divergence and is the default. "
+        "reduction-order downgrades float drift to TOLERATED when it is the step's only "
+        "class and its size is inside the derived reassociation bound",
+    )
+    run.add_argument(
+        "--tolerance-rel",
+        type=float,
+        metavar="X",
+        help="escape hatch for someone who knows their domain: treat a float difference "
+        "at or below this relative size as TOLERATED. Never a default, and it does not "
+        "excuse a missing or duplicated row",
+    )
+    run.add_argument(
+        "--tolerance-ulps",
+        type=int,
+        metavar="N",
+        help="the same escape hatch measured in last-bit steps rather than relative size. "
+        "Set both and a difference has to clear both",
+    )
+    run.add_argument(
         "--key",
         action="append",
         default=[],
@@ -87,6 +111,11 @@ def main(argv: list[str] | None = None) -> int:
             parent=args.run_dir,
             keep=args.keep,
             keys=parse_keys(args.key),
+            policy=Policy(
+                name=args.policy,
+                tolerance_relative=args.tolerance_rel,
+                tolerance_ulps=args.tolerance_ulps,
+            ),
         )
     except (PipelineError, MissingArtifact, KeySyntaxError) as exc:
         print(f"twicerun: {exc}", file=sys.stderr)
@@ -110,10 +139,11 @@ def main(argv: list[str] | None = None) -> int:
         return 3
 
     print(report.render())
-    # 1 is reserved for divergence so this can gate a release. On the reference
-    # pipeline that includes the benign float drift, which is the answer strict
-    # is supposed to give rather than a bug in it.
-    return 1 if any(step.fired for step in report.steps) else 0
+    # 1 is reserved for divergence so this can gate a release. Under the default
+    # policy that includes the benign float drift, which is the answer strict is
+    # supposed to give rather than a bug in it. A comparison downgraded to
+    # TOLERATED is still printed with its magnitudes but does not set this.
+    return 1 if any(verdict.fired for verdict in report.verdicts) else 0
 
 
 if __name__ == "__main__":

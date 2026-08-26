@@ -21,106 +21,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from twicerun.manifest import Environment
-from twicerun.oracle import ArtifactFindings, Divergence
-
-CLASS_ORDER = [
-    Divergence.SCHEMA,
-    Divergence.ROW_MISSING,
-    Divergence.ROW_EXTRA,
-    Divergence.MULTIPLICITY,
-    Divergence.VALUE_DRIFT,
-]
-
-
-@dataclass
-class StepMeasurement:
-    """Every comparison of one step against the reference run, policy-free."""
-
-    index: int
-    name: str
-    comparisons: int
-    terms: int = 0
-    rounds: list[list[ArtifactFindings]] = field(default_factory=list)
-
-    def observe(self, findings: list[ArtifactFindings]) -> None:
-        self.rounds.append(findings)
-
-    @property
-    def artifacts_compared(self) -> int:
-        return sum(len(round_) for round_ in self.rounds)
-
-    @property
-    def diverged(self) -> list[list[ArtifactFindings]]:
-        return [[f for f in round_ if f.diverged] for round_ in self.rounds]
-
-    @property
-    def fired(self) -> int:
-        """Comparisons in which the oracle found anything at all.
-
-        A measurement, not a verdict. The policy layer reports its own count
-        beside this one and never overwrites it.
-        """
-        return sum(1 for round_ in self.diverged if round_)
-
-    @property
-    def classes(self) -> frozenset[Divergence]:
-        seen = (f.classes for round_ in self.rounds for f in round_)
-        return frozenset().union(*seen, frozenset())
-
-    @property
-    def worst(self) -> ArtifactFindings | None:
-        every = [f for round_ in self.rounds for f in round_ if f.diverged]
-        return max(every, key=_rank, default=None)
-
-    @property
-    def max_relative(self) -> float | None:
-        seen = [
-            d.max_relative
-            for round_ in self.rounds
-            for f in round_
-            for d in f.drift
-            if d.max_relative is not None
-        ]
-        return max(seen) if seen else None
-
-    @property
-    def max_ulps(self) -> int | None:
-        seen = [
-            d.max_ulps
-            for round_ in self.rounds
-            for f in round_
-            for d in f.drift
-            if d.max_ulps is not None
-        ]
-        return max(seen) if seen else None
-
-    @property
-    def hints(self) -> list[str]:
-        ordered = dict.fromkeys(h for round_ in self.rounds for f in round_ for h in f.hints)
-        return list(ordered)
+from twicerun.measurement import StepMeasurement, name_classes
+from twicerun.oracle import ArtifactFindings
+from twicerun.policy import HEADROOM_REQUIRED, DriftBound, Policy, StepVerdict, judge
 
 
 def _plural(n: int) -> str:
     return f"{n} comparison" if n == 1 else f"{n} comparisons"
-
-
-def _rank(findings: ArtifactFindings) -> tuple[bool, int, int]:
-    """How interesting one finding is, given only one of them gets printed.
-
-    A schema change comes first regardless of size. It carries no row counts at
-    all, because the row comparison is skipped when the columns do not line up,
-    so ranking on volume alone sorted the one class that is never noise below a
-    two-row drift on a sibling artifact and dropped it out of the report.
-    """
-    return (
-        findings.schema_note is not None,
-        findings.unmatched_reference + findings.unmatched_candidate,
-        findings.drift_rows,
-    )
-
-
-def name_classes(classes: frozenset[Divergence]) -> str:
-    return " ".join(c.value for c in CLASS_ORDER if c in classes)
 
 
 @dataclass
@@ -131,18 +38,33 @@ class Report:
     environment: Environment
     steps: list[StepMeasurement]
     seconds: float
+    policy: Policy = field(default_factory=Policy)
     pruned: int = 0
     keep: int = 1
 
-    def render(self) -> str:
-        return "\n".join([*self._header(), *self._steps(), *self._footer()])
+    @property
+    def verdicts(self) -> list[StepVerdict]:
+        return [judge(step, self.policy) for step in self.steps]
 
-    def _header(self) -> list[str]:
+    def render(self) -> str:
+        judged = self.verdicts
+        sections = [
+            self._header(judged),
+            self._steps(judged),
+            self._bounds(judged),
+            self._footer(judged),
+        ]
+        return "\n".join(line for section in sections for line in section)
+
+    def _header(self, verdicts: list[StepVerdict]) -> list[str]:
         env = self.environment
+        unverified = dict.fromkeys(note for v in verdicts for note in v.unverified)
         return [
             f"pipeline   {self.pipeline}",
             f"runs       {self.runs}, run 1 is the reference, so {_plural(self.runs - 1)} "
             f"per step",
+            f"policy     {self.policy.describe()}",
+            *(f"           {note}" for note in unverified),
             f"duckdb     {env.duckdb_version}, threads={env.threads}",
             f"platform   {env.platform}",
             f"artifacts  {self.run_dir}",
@@ -152,13 +74,17 @@ class Report:
             "",
         ]
 
-    def _steps(self) -> list[str]:
+    def _steps(self, verdicts: list[StepVerdict]) -> list[str]:
         width = max((len(f"{s.index} {s.name}") for s in self.steps), default=10)
         lines = []
-        for step in self.steps:
+        for verdict in verdicts:
+            step = verdict.step
             label = f"{step.index} {step.name}".ljust(width)
-            rate = f"{step.fired} of {step.comparisons}"
-            lines.append(f"  {label}  {rate:>8}  {name_classes(step.classes)}".rstrip())
+            rate = f"{verdict.fired} of {step.comparisons}"
+            tail = name_classes(step.classes)
+            if verdict.tolerated:
+                tail = f"{tail} TOLERATED on {verdict.tolerated} of {step.comparisons}"
+            lines.append(f"  {label}  {rate:>8}  {tail}".rstrip())
             if step.artifacts_compared == 0:
                 lines.append("      wrote no artifacts, so nothing was compared")
                 continue
@@ -168,14 +94,32 @@ class Report:
                 lines.extend(f"      {line}" for line in _magnitudes(worst))
                 lines.extend(f"      {line}" for line in _attribution(worst))
             lines.extend(f"      {hint}" for hint in step.hints)
+            if verdict.blocked:
+                lines.append(f"      {verdict.blocked}")
         return lines
 
-    def _footer(self) -> list[str]:
-        fired = sum(1 for s in self.steps if s.fired)
+    def _bounds(self, verdicts: list[StepVerdict]) -> list[str]:
+        drifting = [v for v in verdicts if v.bound is not None]
+        if not drifting:
+            return []
+        lines = ["", "reassociation bound, computed rather than picked:"]
+        for verdict in drifting:
+            lines.append(f"  {verdict.step.index} {verdict.step.name}")
+            lines.extend(f"      {line}" for line in _bound_lines(verdict.bound))
+        return lines
+
+    def _footer(self, verdicts: list[StepVerdict]) -> list[str]:
+        fired = sum(1 for v in verdicts if v.fired)
+        tolerated = sum(v.tolerated for v in verdicts)
         silent = [s.name for s in self.steps if s.artifacts_compared == 0]
         lines = [
             "",
-            f"{fired} of {len(self.steps)} steps diverged in {self.seconds:.1f}s.",
+            f"{fired} of {len(self.steps)} steps diverged in {self.seconds:.1f}s"
+            + (
+                f", with {tolerated} further comparison(s) measured and downgraded to TOLERATED."
+                if tolerated
+                else "."
+            ),
         ]
         if silent:
             lines += [
@@ -229,3 +173,25 @@ def _attribution(findings: ArtifactFindings) -> list[str]:
             f"attribution runs over the {len(findings.attribution)} with the most distinct values"
         )
     return lines
+
+
+def _bound_lines(bound: DriftBound) -> list[str]:
+    """The check that was pre-registered before any of this existed, run and reported.
+
+    Two ratios, because they answer different questions. The first uses the n
+    the spec settled on and is the check as written. The second uses the terms
+    behind one output value, which is the version with no slack in it, and if
+    the two disagree the margin in the first one came from the slack rather
+    than from the drift being small.
+    """
+    verdict = "clears" if bound.ratio >= HEADROOM_REQUIRED else "FAILS"
+    tight = "clears" if bound.tight_ratio >= HEADROOM_REQUIRED else "fails"
+    return [
+        f"n = {bound.terms:,} rows read by the step, so the bound is "
+        f"{bound.bound:.4e} relative",
+        f"observed max relative drift {bound.observed:.4e}, which is "
+        f"{bound.ratio:.3g}x inside the bound",
+        f"pre-registered check wanted 1000x of headroom and {verdict} it",
+        f"at n = {bound.tight_terms:,} terms per output row the bound is "
+        f"{bound.tight_bound:.4e} and the headroom is {bound.tight_ratio:.3g}x, which {tight}",
+    ]

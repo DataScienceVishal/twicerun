@@ -1,0 +1,109 @@
+"""One step, every comparison of it, and nothing about whether any of it is acceptable.
+
+This is the boundary object between the three stages. The oracle fills it in,
+the policy layer reads it and returns a verdict, and the report prints both. The
+separation is what makes it checkable that a tolerance cannot move a measured
+number: `policy.py` imports this and never writes to it.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from twicerun.oracle import ArtifactFindings, Divergence
+
+# Ordered so a report lists the classes the same way every time, loudest first.
+CLASS_ORDER = [
+    Divergence.SCHEMA,
+    Divergence.ROW_MISSING,
+    Divergence.ROW_EXTRA,
+    Divergence.MULTIPLICITY,
+    Divergence.VALUE_DRIFT,
+]
+
+
+def name_classes(classes: frozenset[Divergence]) -> str:
+    return " ".join(c.value for c in CLASS_ORDER if c in classes)
+
+
+@dataclass
+class StepMeasurement:
+    """Every comparison of one step against the reference run, policy-free."""
+
+    index: int
+    name: str
+    comparisons: int
+    terms: int = 0
+    rounds: list[list[ArtifactFindings]] = field(default_factory=list)
+
+    def observe(self, findings: list[ArtifactFindings]) -> None:
+        self.rounds.append(findings)
+
+    @property
+    def artifacts_compared(self) -> int:
+        return sum(len(round_) for round_ in self.rounds)
+
+    @property
+    def diverged(self) -> list[list[ArtifactFindings]]:
+        return [[f for f in round_ if f.diverged] for round_ in self.rounds]
+
+    @property
+    def fired(self) -> int:
+        """Comparisons in which the oracle found anything at all.
+
+        A measurement, not a verdict. The policy layer reports its own count
+        beside this one and never overwrites it.
+        """
+        return sum(1 for round_ in self.diverged if round_)
+
+    @property
+    def classes(self) -> frozenset[Divergence]:
+        seen = (f.classes for round_ in self.rounds for f in round_)
+        return frozenset().union(*seen, frozenset())
+
+    @property
+    def worst(self) -> ArtifactFindings | None:
+        every = [f for round_ in self.rounds for f in round_ if f.diverged]
+        return max(every, key=_rank, default=None)
+
+    @property
+    def max_relative(self) -> float | None:
+        seen = [
+            d.max_relative
+            for round_ in self.rounds
+            for f in round_
+            for d in f.drift
+            if d.max_relative is not None
+        ]
+        return max(seen) if seen else None
+
+    @property
+    def max_ulps(self) -> int | None:
+        seen = [
+            d.max_ulps
+            for round_ in self.rounds
+            for f in round_
+            for d in f.drift
+            if d.max_ulps is not None
+        ]
+        return max(seen) if seen else None
+
+    @property
+    def hints(self) -> list[str]:
+        ordered = dict.fromkeys(h for round_ in self.rounds for f in round_ for h in f.hints)
+        return list(ordered)
+
+
+def _rank(findings: ArtifactFindings) -> tuple[bool, int, int]:
+    """How interesting one finding is, given only one of them gets printed.
+
+    A schema change comes first regardless of size. It carries no row counts at
+    all, because the row comparison is skipped when the columns do not line up,
+    so ranking on volume alone sorted the one class that is never noise below a
+    two-row drift on a sibling artifact and dropped it out of the report.
+    """
+    return (
+        findings.schema_note is not None,
+        findings.unmatched_reference + findings.unmatched_candidate,
+        findings.drift_rows,
+    )

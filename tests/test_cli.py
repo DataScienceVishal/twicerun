@@ -138,3 +138,60 @@ def test_a_key_naming_a_column_that_is_not_there_exits_two(tmp_path, capsys):
                  "--key", "rows=nope", "--run-dir", str(tmp_path / "artifacts")])
     assert code == 2
     assert "It has i" in capsys.readouterr().err
+
+
+TOLERABLE_DRIFT = '''
+CALLS = {"n": 0}
+
+
+def seed(ctx):
+    ctx.write("source", "SELECT i FROM range(100) AS s(i)")
+
+
+def average(ctx):
+    CALLS["n"] += 1
+    ctx.read("source")
+    nudge = "+ 1.1641532182693481e-10" if CALLS["n"] > 1 else ""
+    ctx.write("total", f"SELECT 1 AS g, (1000000.0 {nudge})::DOUBLE AS v FROM source LIMIT 1")
+
+
+STEPS = [seed, average]
+'''
+
+
+def test_the_same_drift_exits_one_under_strict_and_zero_under_reduction_order(tmp_path, capsys):
+    """The slice's deliverable, in one pair of invocations.
+
+    A float that moved by one ulp on a step that read 100 rows. Under the
+    default that is a divergence, because the question asked was whether the
+    pipeline gave the same answer twice and it did not. Under reduction-order
+    it is measured, printed with its size, and downgraded.
+    """
+    where = pipeline(tmp_path, TOLERABLE_DRIFT)
+    strict = main(["run", str(where), "--runs", "3", "--run-dir", str(tmp_path / "a")])
+    printed = capsys.readouterr().out
+    assert strict == 1
+    assert "2 of 2  VALUE_DRIFT" in printed
+
+    tolerant = main(["run", str(where), "--runs", "3", "--policy", "reduction-order",
+                     "--run-dir", str(tmp_path / "b")])
+    downgraded = capsys.readouterr().out
+    assert tolerant == 0
+    assert "0 of 2  VALUE_DRIFT TOLERATED on 2 of 2" in downgraded
+
+    # The measured size is the same string in both, which is the whole argument
+    # for splitting measurement from policy.
+    magnitude = "up to 1 ulp"
+    assert magnitude in printed and magnitude in downgraded
+
+
+def test_a_report_that_downgrades_says_which_condition_is_missing(tmp_path, capsys):
+    main(["run", str(pipeline(tmp_path, TOLERABLE_DRIFT)), "--runs", "3",
+          "--policy", "reduction-order", "--run-dir", str(tmp_path / "artifacts")])
+    assert "threads=1" in capsys.readouterr().out
+
+
+def test_a_manual_tolerance_appears_in_the_header_so_a_reader_knows(tmp_path, capsys):
+    main(["run", str(pipeline(tmp_path, TOLERABLE_DRIFT)), "--runs", "2",
+          "--tolerance-ulps", "2", "--run-dir", str(tmp_path / "artifacts")])
+    assert "--tolerance-ulps 2" in capsys.readouterr().out

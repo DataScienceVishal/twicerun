@@ -27,8 +27,10 @@ from pathlib import Path
 import duckdb
 
 from twicerun.manifest import Artifact, Environment, Manifest, RunRecord, StepRecord
+from twicerun.measurement import StepMeasurement
 from twicerun.oracle import ArtifactFindings, compare
-from twicerun.report import Report, StepMeasurement
+from twicerun.policy import Policy
+from twicerun.report import Report
 from twicerun.storage import StepContext
 
 Step = Callable[[StepContext], None]
@@ -212,6 +214,7 @@ def run_pipeline(
     parent: Path,
     keep: int = 1,
     keys: Mapping[str, Sequence[str]] | None = None,
+    policy: Policy | None = None,
 ) -> tuple[Report, Manifest]:
     if runs < 2:
         raise PipelineError(f"--runs must be at least 2 to have anything to compare, got {runs}")
@@ -250,6 +253,7 @@ def run_pipeline(
         environment=environment,
         steps=measured,
         seconds=time.perf_counter() - began,
+        policy=policy or Policy(),
         pruned=len(dropped),
         keep=keep,
     )
