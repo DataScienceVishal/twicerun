@@ -536,6 +536,45 @@ def test_judging_one_saved_run_twice_shows_the_measurement_holding_still(tmp_pat
     assert measured_lines(strict), "the comparison would be vacuous with nothing measured"
 
 
+def status_column(printed: str) -> list[str | None]:
+    """The status off each step line, None where the report claimed none.
+
+    Matched on the fire rate rather than on the leading index, because the
+    amplification section and the axes block also start with a step index and
+    neither is the step table.
+    """
+    return [
+        next((token for token in STATUSES if token in line), None)
+        for line in printed.splitlines()
+        if re.match(r"^  \d+ \S+ +\d+ of \d+", line)
+    ]
+
+
+def test_the_status_column_does_not_move_when_the_policy_does(tmp_path, capsys):
+    """The rule the fire rate already follows, extended to the thing slice 4 added.
+
+    A policy decides whether a difference matters. Letting it decide whether one
+    happened would put the status in the same negotiable pile as everything a
+    tolerance touches, so it is read off the measurement and this judges one
+    saved run under three policies to say so.
+    """
+    main(["run", str(pipeline(tmp_path, TOLERABLE_DRIFT)), "--runs", "3",
+          "--run-dir", str(tmp_path / "rd")])
+    run_dir = next((tmp_path / "rd").glob("run-*"))
+    capsys.readouterr()
+
+    rendered = []
+    for flags in ([], ["--policy", "reduction-order"], ["--tolerance-ulps", "4"]):
+        main(["judge", str(run_dir), *flags])
+        rendered.append(capsys.readouterr().out)
+
+    columns = [status_column(text) for text in rendered]
+    assert columns[0] == [NO_DIVERGENCE_OBSERVED, DIVERGENT]
+    assert columns[0] == columns[1] == columns[2]
+    assert len({text for text in rendered}) == 3, "the three policies did print different reports"
+    assert len({tuple(measured_lines(text)) for text in rendered}) == 1
+
+
 def test_judge_does_not_print_figures_that_are_not_true_of_the_run(tmp_path, capsys):
     """It executed nothing and deleted nothing, so it claims neither.
 
