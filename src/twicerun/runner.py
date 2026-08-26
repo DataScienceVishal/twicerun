@@ -121,7 +121,7 @@ def step_diffs(
                     candidate_rows=0,
                     only_in_reference=before.rows,
                     only_in_candidate=0,
-                    schema_note="written by the reference run, absent from this one",
+                    note="written by the reference run, absent from this one",
                 )
             )
         elif before is None:
@@ -132,7 +132,7 @@ def step_diffs(
                     candidate_rows=after.rows,
                     only_in_reference=0,
                     only_in_candidate=after.rows,
-                    schema_note="written by this run, absent from the reference run",
+                    note="written by this run, absent from the reference run",
                 )
             )
         else:

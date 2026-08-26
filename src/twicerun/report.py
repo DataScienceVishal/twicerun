@@ -42,7 +42,7 @@ def _rank(diff: ArtifactDiff) -> tuple[bool, int]:
     so ranking on volume alone sorted the one class that is never noise below a
     two-row drift on a sibling artifact and dropped it out of the report.
     """
-    return (diff.schema_note is not None, diff.only_in_reference + diff.only_in_candidate)
+    return (diff.note is not None, diff.only_in_reference + diff.only_in_candidate)
 
 
 @dataclass

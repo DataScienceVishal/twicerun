@@ -61,15 +61,15 @@ class ArtifactDiff:
     candidate_rows: int
     only_in_reference: int
     only_in_candidate: int
-    schema_note: str | None = None
+    note: str | None = None
 
     @property
     def diverged(self) -> bool:
-        return bool(self.schema_note) or self.only_in_reference > 0 or self.only_in_candidate > 0
+        return bool(self.note) or self.only_in_reference > 0 or self.only_in_candidate > 0
 
     def describe(self) -> str:
-        if self.schema_note:
-            return f"{self.name}: {self.schema_note}"
+        if self.note:
+            return f"{self.name}: {self.note}"
         return (
             f"{self.name}: {self.only_in_reference:,} rows only in the reference run, "
             f"{self.only_in_candidate:,} only in the later run, of {self.reference_rows:,}"
@@ -80,14 +80,14 @@ def compare(
     con: duckdb.DuckDBPyConnection, reference: Artifact, candidate: Artifact
 ) -> ArtifactDiff:
     if reference.columns != candidate.columns:
-        note = _schema_note(reference, candidate)
+        note = _schema_change(reference, candidate)
         return ArtifactDiff(
             name=reference.name,
             reference_rows=reference.rows,
             candidate_rows=candidate.rows,
             only_in_reference=0,
             only_in_candidate=0,
-            schema_note=note,
+            note=note,
         )
 
     digest = row_digest(reference.columns)
@@ -117,7 +117,7 @@ def compare(
     )
 
 
-def _schema_note(reference: Artifact, candidate: Artifact) -> str:
+def _schema_change(reference: Artifact, candidate: Artifact) -> str:
     gone = sorted(set(reference.columns) - set(candidate.columns))
     added = sorted(set(candidate.columns) - set(reference.columns))
     if gone or added:

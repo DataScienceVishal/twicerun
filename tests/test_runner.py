@@ -106,7 +106,7 @@ def test_a_step_that_stops_writing_an_artifact_is_a_divergence(tmp_path):
     )
     step = report.steps[0]
     assert step.fired == 2
-    assert "absent from this one" in step.worst.schema_note
+    assert "absent from this one" in step.worst.note
 
 
 def test_a_step_that_starts_writing_an_extra_artifact_is_a_divergence(tmp_path):
@@ -121,7 +121,7 @@ def test_a_step_that_starts_writing_an_extra_artifact_is_a_divergence(tmp_path):
     )
     step = report.steps[0]
     assert step.fired == 2
-    assert "absent from the reference run" in step.worst.schema_note
+    assert "absent from the reference run" in step.worst.note
 
 
 def test_a_schema_change_outranks_a_bigger_row_drift_in_the_report(tmp_path):
@@ -137,7 +137,7 @@ def test_a_schema_change_outranks_a_bigger_row_drift_in_the_report(tmp_path):
     )
     worst = report.steps[0].worst
     assert worst.name == "schema"
-    assert "INTEGER to BIGINT" in worst.schema_note
+    assert "INTEGER to BIGINT" in worst.note
 
 
 def test_the_manifest_records_every_run_and_the_environment(tmp_path):
