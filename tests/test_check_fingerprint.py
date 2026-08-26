@@ -141,6 +141,44 @@ def test_checker_does_not_exempt_itself(rules):
     assert fp.IGNORE_LINE_MARKER not in source
 
 
+def test_finds_a_repo_local_banned_md_from_a_subdirectory(tmp_path):
+    """Regression: this is what made the suite pass only on the author's machine.
+
+    `find_banned_md` used to check `start / "BANNED.md"` once and then walk up
+    for `_factory/BANNED.md` only. Called from `tests/`, it skipped the repo's
+    own root copy and kept climbing until it found the factory's copy outside
+    the repo. Green locally, 18 errors in every clone.
+    """
+    repo = tmp_path / "someproject"
+    (repo / "tests").mkdir(parents=True)
+    (repo / "BANNED.md").write_text("```banned-words\nrobust\n```\n", encoding="utf-8")
+
+    assert fp.find_banned_md(repo / "tests") == repo / "BANNED.md"
+
+
+def test_repo_local_banned_md_wins_over_a_factory_copy_further_up(tmp_path):
+    (tmp_path / "_factory").mkdir()
+    (tmp_path / "_factory" / "BANNED.md").write_text(
+        "```banned-words\ndelve\n```\n", encoding="utf-8"
+    )
+    repo = tmp_path / "someproject"
+    (repo / "tests").mkdir(parents=True)
+    (repo / "BANNED.md").write_text("```banned-words\nrobust\n```\n", encoding="utf-8")
+
+    assert fp.find_banned_md(repo / "tests") == repo / "BANNED.md"
+
+
+def test_falls_back_to_the_factory_when_the_repo_has_no_copy(tmp_path):
+    (tmp_path / "_factory").mkdir()
+    (tmp_path / "_factory" / "BANNED.md").write_text(
+        "```banned-words\ndelve\n```\n", encoding="utf-8"
+    )
+    nested = tmp_path / "someproject" / "tests"
+    nested.mkdir(parents=True)
+
+    assert fp.find_banned_md(nested) == tmp_path / "_factory" / "BANNED.md"
+
+
 def test_banned_and_claude_md_are_skipped_by_name():
     assert not fp.interesting(Path("BANNED.md"))
     assert not fp.interesting(Path("CLAUDE.md"))

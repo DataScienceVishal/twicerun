@@ -103,13 +103,20 @@ def parse_banned(md: Path) -> Rules:
 
 
 def find_banned_md(start: Path) -> Path:
-    """Prefer a repo-local copy, then walk up to the shared factory."""
-    if (start / "BANNED.md").is_file():
-        return start / "BANNED.md"
+    """Nearest BANNED.md walking up, preferring a repo-local copy at each level.
+
+    The repo-local check has to happen at every level, not only at `start`. An
+    earlier version checked `start / "BANNED.md"` once and then walked up looking
+    only for `_factory/BANNED.md`. Called from a repo's `tests/` directory that
+    meant the repo's own root-level copy was skipped, and on the author's machine
+    the walk found the factory's copy one directory above the repo instead. Tests
+    passed there and failed in every clone, which is the exact shape of bug the
+    adversary agent exists to catch.
+    """
     for parent in [start, *start.parents]:
-        candidate = parent / "_factory" / "BANNED.md"
-        if candidate.is_file():
-            return candidate
+        for candidate in (parent / "BANNED.md", parent / "_factory" / "BANNED.md"):
+            if candidate.is_file():
+                return candidate
     raise SystemExit(
         "check_fingerprint: no BANNED.md in this repo or in any _factory/ above it"
     )
