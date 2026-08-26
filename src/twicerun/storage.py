@@ -68,6 +68,10 @@ class StepContext:
         self._written = written
         self._carried = carried
         self.rows_read = 0
+        # Attribution needs to tell a column this step invented from one it
+        # copied in, because on the row_number bug two columns explain the
+        # divergence equally well and only one of them is the step's doing.
+        self.input_columns: set[str] = set()
 
     def read(self, name: str) -> duckdb.DuckDBPyRelation:
         """Bring an artifact written earlier in this run into scope as a view."""
@@ -100,6 +104,7 @@ class StepContext:
         if artifact is None:
             self._con.execute(f'CREATE OR REPLACE VIEW "{name}" AS {initial}')
             self.rows_read += self._count(name)
+            self.input_columns.update(self._columns(name))
             return self._con.table(name)
         return self._view_over(name, artifact)
 
@@ -142,7 +147,12 @@ class StepContext:
             f"SELECT * FROM read_parquet({quote(Path(artifact.path))})"
         )
         self.rows_read += artifact.rows
+        self.input_columns.update(artifact.columns)
         return self._con.table(name)
 
     def _count(self, view: str) -> int:
         return self._con.execute(f'SELECT count(*) FROM "{view}"').fetchone()[0]
+
+    def _columns(self, view: str) -> list[str]:
+        described = self._con.execute(f'DESCRIBE SELECT * FROM "{view}"').fetchall()
+        return [name for name, *_ in described]

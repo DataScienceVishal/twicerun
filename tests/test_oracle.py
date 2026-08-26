@@ -227,3 +227,74 @@ def test_a_timestamp_that_moved_gets_named_as_the_clock(con, make_artifact):
     right = make_artifact("t", "SELECT 1 AS g, TIMESTAMP '2026-01-01 00:00:01' AS seen", run=2)
     found = compare(con, left, right, key_override=["g"])
     assert found.hints == ("WALL_CLOCK: seen carries a clock type and its values moved",)
+
+
+def test_leave_one_out_names_the_column_that_moved(con, make_artifact):
+    """One key column took different values, and only dropping it restores the pairing."""
+    rows = "SELECT i AS event_id, {sid} AS surrogate_id FROM range(100) AS s(i)"
+    left = make_artifact("t", rows.format(sid="i"), run=1)
+    right = make_artifact("t", rows.format(sid="i + 1000"), run=2)
+    found = compare(con, left, right)
+    assert [e.column for e in found.unstable_key_columns] == ["surrogate_id"]
+    assert (found.unmatched_reference, found.unstable_key_columns[0].remaining) == (100, 0)
+
+
+def test_a_tie_goes_to_the_column_the_step_invented(con, make_artifact):
+    """Both columns explain it, and the counts cannot separate them.
+
+    This is the shape row_number() over a non-unique sort actually produces:
+    each cust block keeps the same set of surrogate_ids and only the pairing to
+    event_id shuffles inside it. So the (cust, surrogate_id) multiset is
+    unchanged and dropping event_id restores the match just as well as dropping
+    surrogate_id. What breaks the tie is that the step read event_id from
+    somewhere and made surrogate_id up.
+    """
+    rows = (
+        "SELECT i AS event_id, i // 10 AS cust, "
+        "(i // 10) * 10 + {position} AS surrogate_id FROM range(20) AS s(i)"
+    )
+    left = make_artifact("t", rows.format(position="i % 10"), run=1)
+    right = make_artifact("t", rows.format(position="9 - i % 10"), run=2)
+
+    effects = {e.column: e for e in compare(con, left, right).unstable_key_columns}
+    assert set(effects) == {"event_id", "surrogate_id"}
+    assert effects["event_id"].remaining == effects["surrogate_id"].remaining == 0
+
+    with_input = compare(con, left, right, input_columns=["event_id", "cust"])
+    assert with_input.unstable_key_columns[0].column == "surrogate_id"
+
+
+def test_attribution_is_not_run_on_duplication(con, make_artifact):
+    """Every key is still there, so no key column can be the explanation."""
+    left = make_artifact("t", "SELECT i AS id FROM range(10) AS s(i)", run=1)
+    right = make_artifact(
+        "t", "SELECT i AS id FROM range(10) AS s(i) UNION ALL SELECT 3", run=2
+    )
+    assert compare(con, left, right).attribution == ()
+
+
+def test_attribution_says_so_when_no_column_explains_it(con, make_artifact):
+    """Rows that vanished did not move, and the report should not imply they did."""
+    rows = "SELECT i AS a, i * 2 AS b FROM range(10) AS s(i)"
+    left = make_artifact("t", f"{rows} UNION ALL SELECT 99, 99", run=1)
+    right = make_artifact("t", f"{rows} UNION ALL SELECT 77, 77", run=2)
+    found = compare(con, left, right)
+    assert found.attribution != ()
+    assert found.unstable_key_columns == ()
+
+
+def test_a_single_column_key_is_not_worth_attributing(con, make_artifact):
+    """Dropping the only key column matches everything by construction."""
+    left = make_artifact("t", "SELECT 1 AS id", run=1)
+    right = make_artifact("t", "SELECT 2 AS id", run=2)
+    assert compare(con, left, right).attribution == ()
+
+
+def test_attribution_stops_at_twelve_columns_and_says_it_did(con, make_artifact):
+    """One extra join per column, so the cost needs a ceiling and the ceiling has to show."""
+    wide = ", ".join(f"i * {n} AS c{n:02d}" for n in range(1, 16))
+    left = make_artifact("t", f"SELECT {wide}, i AS moved FROM range(50) AS s(i)", run=1)
+    right = make_artifact("t", f"SELECT {wide}, 49 - i AS moved FROM range(50) AS s(i)", run=2)
+    found = compare(con, left, right)
+    assert len(found.attribution) == 12
+    assert found.attribution_capped == 4

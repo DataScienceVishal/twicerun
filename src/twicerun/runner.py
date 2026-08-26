@@ -130,6 +130,7 @@ def execute_run(
                     name=step.__name__,
                     seconds=time.perf_counter() - step_began,
                     rows_read=ctx.rows_read,
+                    input_columns=sorted(ctx.input_columns),
                     artifacts=[a for name, a in written.items() if before.get(name) is not a],
                 )
             )
@@ -185,7 +186,9 @@ def step_findings(
                 )
             )
         else:
-            found.append(compare(con, before, after, keys.get(name)))
+            found.append(
+                compare(con, before, after, keys.get(name), reference.input_columns)
+            )
     return found
 
 

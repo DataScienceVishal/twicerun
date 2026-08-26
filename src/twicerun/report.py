@@ -166,6 +166,7 @@ class Report:
             if worst is not None:
                 lines.append(f"      {worst.describe()}")
                 lines.extend(f"      {line}" for line in _magnitudes(worst))
+                lines.extend(f"      {line}" for line in _attribution(worst))
             lines.extend(f"      {hint}" for hint in step.hints)
         return lines
 
@@ -197,3 +198,34 @@ def _magnitudes(findings: ArtifactFindings) -> list[str]:
     if worst is None or worst.example[0] is None:
         return []
     return [f"worst pair on {worst.column}: {worst.example[0]} against {worst.example[1]}"]
+
+
+def _attribution(findings: ArtifactFindings) -> list[str]:
+    """The line that turns a large unmatched count into the name of a column."""
+    unstable = findings.unstable_key_columns
+    if not unstable:
+        if findings.attribution:
+            return ["no key column explains it: dropping each one in turn changed nothing"]
+        return []
+
+    named, before = unstable[0], findings.unmatched_reference
+    lines = [
+        f"dropping {named.column} from the key takes unmatched reference rows "
+        f"from {before:,} to {named.unmatched_reference:,}"
+    ]
+    tied = [e.column for e in unstable[1:] if e.remaining == named.remaining]
+    if tied:
+        reason = (
+            "it is the one no input to this step carries"
+            if not named.from_input
+            else "it sorts first"
+        )
+        lines.append(
+            f"{', '.join(tied)} does the same, so {named.column} is named first because {reason}"
+        )
+    if findings.attribution_capped:
+        lines.append(
+            f"{findings.attribution_capped} further key column(s) were not tested: "
+            f"attribution runs over the {len(findings.attribution)} with the most distinct values"
+        )
+    return lines

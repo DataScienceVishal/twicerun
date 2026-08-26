@@ -28,8 +28,8 @@ differences and it goes in the README rather than being left to be discovered.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Collection, Sequence
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 
@@ -72,6 +72,29 @@ class ColumnDrift:
 
 
 @dataclass(frozen=True)
+class KeyEffect:
+    """What happens to the unmatched count when one column leaves the key.
+
+    `from_input` is the tie-break, and it is needed rather than decorative. On
+    the reference pipeline's row_number bug, dropping `surrogate_id` and
+    dropping `event_id` both take the unmatched count from 491,520 to 0,
+    because the two columns are a bijection whose pairing moved and either
+    description of that is true. The storage interface knows `event_id` arrived
+    from an artifact this step read and `surrogate_id` did not, so the column
+    the step invented gets named first.
+    """
+
+    column: str
+    unmatched_reference: int
+    unmatched_candidate: int
+    from_input: bool
+
+    @property
+    def remaining(self) -> int:
+        return self.unmatched_reference + self.unmatched_candidate
+
+
+@dataclass(frozen=True)
 class ArtifactFindings:
     name: str
     key: tuple[str, ...]
@@ -84,6 +107,8 @@ class ArtifactFindings:
     multiplicity_candidate: int = 0
     drift_rows: int = 0
     drift: tuple[ColumnDrift, ...] = ()
+    attribution: tuple[KeyEffect, ...] = ()
+    attribution_capped: int = 0
     schema_note: str | None = None
     hints: tuple[str, ...] = ()
 
@@ -121,6 +146,17 @@ class ArtifactFindings:
     @property
     def worst_drift(self) -> ColumnDrift | None:
         return max(self.drift, key=lambda d: (d.rows, d.max_relative or 0.0), default=None)
+
+    @property
+    def unstable_key_columns(self) -> tuple[KeyEffect, ...]:
+        """The columns whose removal from the key actually shrank the unmatched count.
+
+        Reported in full rather than as a winner, because more than one column
+        can explain the same divergence and hiding that would be a stronger
+        claim than the arithmetic supports.
+        """
+        before = self.unmatched_reference + self.unmatched_candidate
+        return tuple(e for e in self.attribution if e.remaining < before)
 
     def describe(self) -> str:
         if self.schema_note is not None:
@@ -161,6 +197,7 @@ def compare(
     reference: Artifact,
     candidate: Artifact,
     key_override: Sequence[str] | None = None,
+    input_columns: Collection[str] = (),
 ) -> ArtifactFindings:
     """Pair one artifact against another and count what did not line up.
 
@@ -193,6 +230,14 @@ def compare(
         )
         if moved is not None
     )
+    # Attribution is aimed at key instability, which shows up as rows lost on
+    # both sides at once. Rows that only went missing did not move, they went.
+    attribution, capped = ((), 0)
+    if missing and extra:
+        attribution, capped = attribute(
+            con, columns, Path(reference.path), Path(candidate.path), input_columns
+        )
+
     return ArtifactFindings(
         name=reference.name,
         key=columns.key,
@@ -205,8 +250,70 @@ def compare(
         multiplicity_candidate=mult_candidate,
         drift_rows=drift_rows,
         drift=drift,
+        attribution=attribution,
+        attribution_capped=capped,
         hints=_hints(columns, drift),
     )
+
+
+ATTRIBUTION_CAP = 12
+
+
+def attribute(
+    con: duckdb.DuckDBPyConnection,
+    columns: ColumnPlan,
+    left: Path,
+    right: Path,
+    input_columns: Collection[str],
+) -> tuple[tuple[KeyEffect, ...], int]:
+    """Drop each key column in turn and recount what failed to pair.
+
+    This is what turns 491,520 unmatched rows into the name of one column. The
+    counts alone do not always single one out, so the ordering falls back to
+    whether the step could have invented the column at all.
+
+    Skipped below two key columns, because dropping the only one leaves an
+    empty key that matches everything by construction and says nothing.
+    """
+    if len(columns.key) < 2:
+        return (), 0
+
+    considered, capped = columns.key, 0
+    if len(considered) > ATTRIBUTION_CAP:
+        considered = _most_key_like(con, left, columns.key)[:ATTRIBUTION_CAP]
+        capped = len(columns.key) - ATTRIBUTION_CAP
+
+    effects = []
+    for column in considered:
+        without = replace(columns, key=tuple(c for c in columns.key if c != column))
+        counted = con.execute(census_sql(without, left, right, ordered=False)).fetchone()
+        missing, extra, mult_reference, mult_candidate, _ = (int(n) for n in counted)
+        effects.append(
+            KeyEffect(
+                column=column,
+                unmatched_reference=missing + mult_reference,
+                unmatched_candidate=extra + mult_candidate,
+                from_input=column in input_columns,
+            )
+        )
+    effects.sort(key=lambda e: (e.remaining, e.from_input, e.column))
+    return tuple(effects), capped
+
+
+def _most_key_like(
+    con: duckdb.DuckDBPyConnection, path: Path, key: Sequence[str]
+) -> tuple[str, ...]:
+    """Key columns ordered by distinct values per row, highest first.
+
+    Only reached past the cap, where the choice is which twelve columns to
+    spend a join on. A column with one value per row is the shape a surrogate
+    key has, so it is the one worth testing.
+    """
+    ratios = ", ".join(
+        f"count(DISTINCT {identifier(c)})::DOUBLE / greatest(count(*), 1)" for c in key
+    )
+    measured = con.execute(f"SELECT {ratios} FROM read_parquet({quote(path)})").fetchone()
+    return tuple(c for _, c in sorted(zip(measured, key, strict=True), reverse=True))
 
 
 def _column_drift(columns: ColumnPlan, column: str, cells: Sequence) -> ColumnDrift | None:

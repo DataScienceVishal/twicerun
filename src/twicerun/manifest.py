@@ -74,6 +74,7 @@ class StepRecord:
     name: str
     seconds: float
     rows_read: int
+    input_columns: list[str] = field(default_factory=list)
     artifacts: list[Artifact] = field(default_factory=list)
 
 
