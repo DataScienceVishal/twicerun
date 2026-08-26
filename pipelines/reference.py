@@ -116,7 +116,8 @@ def apply_price_updates(ctx: StepContext) -> None:
 
     In the pipeline it fires 0 to 4 times out of 4 over 20 invocations, and one
     of those 20 was a flat 0. So the five-run loop can report nothing at all on
-    a step that is definitely broken.
+    a step that is definitely broken. Magnitude when it does fire runs from
+    9,248 to 35,104 rows of 125,000.
 
     The floor has now been wrong twice. The first five invocations all gave 4 of
     4 and it went in as "every time"; the next eight put the floor at 1; twenty
@@ -174,10 +175,10 @@ def sparse_customer_keys(ctx: StepContext) -> None:
     Eighteen standalone attempts landed on roughly 0, 8,480, or a quarter of
     the table, with zero coming up about a third of the time. Inside the
     five-run loop it fires 0 to 4 times out of 4 over 20 invocations, and it was
-    a flat 0 on two of them.
+    a flat 0 on five of them.
 
     That floor is the real argument for slice 4. Five runs are much better than
-    two, but they are not enough: on 2 invocations in 20 this step is broken,
+    two, but they are not enough: on 5 invocations in 20 this step is broken,
     the tool ran it five times, and the report said nothing. Raising the number
     of runs cannot fix that, because it lowers the miss rate for a given firing
     probability without changing the probability. Amplification changes the
