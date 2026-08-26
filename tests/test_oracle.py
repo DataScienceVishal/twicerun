@@ -298,3 +298,53 @@ def test_attribution_stops_at_twelve_columns_and_says_it_did(con, make_artifact)
     found = compare(con, left, right)
     assert len(found.attribution) == 12
     assert found.attribution_capped == 4
+
+
+def render_attribution(findings) -> list[str]:
+    from twicerun.report import _attribution
+
+    return _attribution(findings)
+
+
+def test_an_alphabetical_tie_does_not_claim_an_input_based_reason(con, make_artifact):
+    """The reason printed has to be the reason that was used.
+
+    Any step whose inputs arrive through ctx.sql has an empty input_columns, so
+    every column is from_input=False, every tie falls to alphabetical order,
+    and the line still read `zeta does the same, so alpha is named first
+    because it is the one no input to this step carries`. zeta is equally not
+    carried by anything. The letter a decided it.
+    """
+    rows = (
+        "SELECT i AS alpha, i // 10 AS cust, "
+        "(i // 10) * 10 + {position} AS zeta FROM range(20) AS s(i)"
+    )
+    left = make_artifact("t", rows.format(position="i % 10"), run=1)
+    right = make_artifact("t", rows.format(position="9 - i % 10"), run=2)
+
+    blind = render_attribution(compare(con, left, right))
+    assert "nothing separates them but the sort order" in blind[1]
+
+    informed = render_attribution(compare(con, left, right, input_columns=["alpha", "cust"]))
+    assert "no input to this step carries" in informed[1]
+    assert informed[1].startswith("alpha does the same, so zeta is named first")
+
+
+def test_a_runner_up_that_almost_explains_it_is_named_too(con, make_artifact):
+    """A column taking 491,520 down to 4 also explains it, and used to print nothing.
+
+    Only exact ties were disclosed, and on real data a near-tie is the commoner
+    shape. Here b moved on ten rows and c on two different rows, so dropping
+    either shrinks the count and neither takes it to zero.
+    """
+    rows = "SELECT i AS a, {b} AS b, {c} AS c FROM range(100) AS s(i)"
+    moved_b = "CASE WHEN i < 10 THEN i + 1000 ELSE i END"
+    moved_c = "CASE WHEN i BETWEEN 50 AND 51 THEN i + 1000 ELSE i END"
+    left = make_artifact("t", rows.format(b="i", c="i"), run=1)
+    right = make_artifact("t", rows.format(b=moved_b, c=moved_c), run=2)
+
+    found = compare(con, left, right)
+    assert found.unmatched_reference == 12
+    lines = render_attribution(found)
+    assert lines[0].startswith("dropping b from the key")
+    assert lines[1] == "c also shrinks it, to 10, so more than one column moved"

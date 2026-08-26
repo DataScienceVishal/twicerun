@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 
 from twicerun.manifest import Environment
 from twicerun.measurement import StepMeasurement, name_classes
-from twicerun.oracle import ArtifactFindings
+from twicerun.oracle import ArtifactFindings, KeyEffect
 from twicerun.policy import HEADROOM_REQUIRED, DriftBound, Policy, StepVerdict, judge
 
 
@@ -157,22 +157,53 @@ def _attribution(findings: ArtifactFindings) -> list[str]:
         f"dropping {named.column} from the key takes unmatched reference rows "
         f"from {before:,} to {named.unmatched_reference:,}"
     ]
-    tied = [e.column for e in unstable[1:] if e.remaining == named.remaining]
-    if tied:
-        reason = (
-            "it is the one no input to this step carries"
-            if not named.from_input
-            else "it sorts first"
-        )
-        lines.append(
-            f"{', '.join(tied)} does the same, so {named.column} is named first because {reason}"
-        )
+    lines.extend(_runners_up(named, unstable[1:]))
     if findings.attribution_capped:
         lines.append(
-            f"{findings.attribution_capped} further key column(s) were not tested: "
-            f"attribution runs over the {len(findings.attribution)} with the most distinct values"
+            f"{findings.attribution_capped} further {_plural_columns(findings.attribution_capped)} "
+            f"not tested: attribution runs over the {len(findings.attribution)} key columns with "
+            f"the most distinct values"
         )
     return lines
+
+
+def _runners_up(named: KeyEffect, rest: list[KeyEffect]) -> list[str]:
+    """What else shrank the unmatched count, and what actually broke a tie.
+
+    The sort is (remaining, from_input, column), so the reason a column came
+    first depends on which of the three decided it. Printing the input-based
+    reason unconditionally was wrong whenever the tied columns shared
+    `from_input`, which is every tie in a pipeline whose inputs arrive through
+    ctx.sql, since input_columns is then empty and no column is carried. It
+    read as `zeta does the same, so alpha is named first because it is the one
+    no input to this step carries`, over a tie that the letter a decided.
+
+    Near-ties are disclosed too. A runner-up taking 491,520 down to 4 also
+    explains the divergence, and on real data those will be commoner than exact
+    ties. No threshold is involved: the runner-up's own figure is printed and
+    the reader judges it.
+    """
+    if not rest:
+        return []
+    tied = [e for e in rest if e.remaining == named.remaining]
+    if tied:
+        columns = ", ".join(e.column for e in tied)
+        broke_the_tie = any(e.from_input != named.from_input for e in tied)
+        because = (
+            "it is the one no input to this step carries"
+            if broke_the_tie
+            else "nothing separates them but the sort order"
+        )
+        return [f"{columns} does the same, so {named.column} is named first because {because}"]
+    runner = rest[0]
+    return [
+        f"{runner.column} also shrinks it, to {runner.unmatched_reference:,}, "
+        f"so more than one column moved"
+    ]
+
+
+def _plural_columns(n: int) -> str:
+    return "key column was" if n == 1 else "key columns were"
 
 
 def _bound_lines(bound: DriftBound) -> list[str]:
