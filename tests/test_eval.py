@@ -30,6 +30,8 @@ from eval import (  # noqa: E402
     STATIC_CHECKS,
     TWINS,
     StepScore,
+    claim_workspace,
+    main,
     static_flags,
     without_amplifiers,
 )
@@ -176,6 +178,31 @@ def test_the_pairs_name_steps_that_exist_in_both_pipelines():
         assert right in twins, right
     for name in (*BROKEN, INTERMITTENT):
         assert name in broken, name
+
+
+def test_the_eval_refuses_an_into_that_already_exists(tmp_path):
+    """`--into .` deleted the working tree, and `ignore_errors=True` hid half of it.
+
+    The cleanup at the end of the run was `shutil.rmtree(args.into,
+    ignore_errors=True)` against whatever path was passed, so the destructive
+    case was reachable from the README's own command line with one argument
+    changed. The refusal has to come before the first trial starts, which is
+    what this asserts by handing it a directory with something in it and
+    checking the something survives.
+    """
+    theirs = tmp_path / "someone-elses-work"
+    theirs.mkdir()
+    (theirs / "keep.sql").write_text("select 1", encoding="utf-8")
+
+    assert main(["--into", str(theirs), "--trials", "1"]) == 2
+    assert (theirs / "keep.sql").read_text(encoding="utf-8") == "select 1"
+
+
+def test_the_eval_makes_the_directory_it_is_going_to_delete(tmp_path):
+    mine = tmp_path / "fresh"
+    assert claim_workspace(mine)
+    assert mine.is_dir()
+    assert not claim_workspace(mine), "the second call is the refusal"
 
 
 def printed_prose() -> str:

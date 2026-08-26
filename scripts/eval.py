@@ -9,7 +9,8 @@ Every threshold below was written into `specs/2026-08-26-rerun-determinism-spec.
 before any of this project existed, including three that declare a part of it
 unnecessary. They print with whatever they came out as, and a triggered
 condition is a published result rather than a failed run, so this exits 0
-either way. Which of them trigger moves between runs of the same code: the
+either way. The one non-zero exit is 2, for an `--into` that already exists.
+Which of them trigger moves between runs of the same code: the
 README publishes four ten-trial runs and one of the four breached the spec's
 sensitivity threshold.
 
@@ -403,6 +404,29 @@ def forced_amplification(
     return rates
 
 
+def claim_workspace(into: Path) -> bool:
+    """Create the scratch directory, refusing any path this invocation did not make.
+
+    The trial directories are deleted when the run finishes, and the delete used
+    to be `shutil.rmtree(args.into, ignore_errors=True)` pointed at whatever
+    `--into` was handed. `--into .` therefore deleted the working tree, and
+    `ignore_errors` meant a half-finished delete of the wrong tree said nothing
+    at all. Everything this eval writes goes into a directory it created itself,
+    so refusing one that already exists costs nothing and is the entire check.
+    """
+    try:
+        into.mkdir(parents=True)
+    except FileExistsError:
+        print(
+            f"eval.py: {into} already exists, and this deletes the directory it is given when "
+            f"it finishes, so it will only use one it made itself. Pass --into somewhere that "
+            f"does not exist, or remove that path yourself first.",
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
 def one_trial(into: Path, runs: int) -> Trial:
     began = time.perf_counter()
     broken, manifest = run_pipeline(REFERENCE, runs=runs, parent=into / "reference", keep=1)
@@ -424,7 +448,7 @@ def one_trial(into: Path, runs: int) -> Trial:
         exit_without=exit_code(quiet),
         seconds=time.perf_counter() - began,
     )
-    shutil.rmtree(into, ignore_errors=True)
+    shutil.rmtree(into)
     return trial
 
 
@@ -937,6 +961,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--into", type=Path, default=Path(".twicerun-eval"))
     parser.add_argument("--json", type=Path, help="write the figures out as well as printing them")
     args = parser.parse_args(argv)
+    if not claim_workspace(args.into):
+        return 2
 
     began = time.perf_counter()
     say("twicerun eval")
@@ -951,7 +977,7 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
             flush=True,
         )
-    shutil.rmtree(args.into, ignore_errors=True)
+    shutil.rmtree(args.into)
 
     broken_scores: dict[str, StepScore] = {}
     twin_scores: dict[str, StepScore] = {}
