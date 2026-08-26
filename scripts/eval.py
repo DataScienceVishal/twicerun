@@ -141,11 +141,20 @@ class StepScore:
     """One step across every trial. Rates as a distribution, magnitudes as a median.
 
     Two kinds of number and they are printed differently on purpose. A fire rate
-    out of four has five possible values, so the whole distribution fits in a
-    cell and there is nothing left for a longer run to beat. The magnitudes are
-    maxima over a thousand groups: their observed range grows with looking time
-    by construction, so they get a median and an n and no bracket. That method
+    out of four has five possible values, so every one of them gets a cell,
+    including the ones that did not come up. The magnitudes are maxima over a
+    thousand groups: their observed range grows with looking time by
+    construction, so they get a median and an n and no bracket. That method
     changed in slice 4 after a published bracket was beaten for the fifth time.
+
+    Printing the empty buckets is the refinement slice 5 forced, and it came out
+    of this eval disagreeing with itself. Slice 4 published this step's rates
+    over 40 passes as `4 of 4 x27, 3 x5, 2 x5, 1 x3` and called it complete
+    because a rate out of four cannot leave the range. Two ten-trial runs of the
+    eval then gave `apply_price_updates` a flat 0 of 4 in one and nothing below
+    1 of 4 in the other. Omitting a bucket that did not come up reads as the
+    value being impossible rather than unobserved, which is the same overclaim
+    as a bracket in a different shape.
     """
 
     name: str
@@ -160,6 +169,9 @@ class StepScore:
     ulps: list[int] = field(default_factory=list)
     relative: list[float] = field(default_factory=list)
     silent_trials: int = 0
+    # The denominator every rate here is out of, taken from the first step
+    # observed rather than assumed, because `--runs` moves it.
+    comparisons: int = 0
 
     def observe(self, step: StepMeasurement) -> None:
         if step.artifacts_compared == 0:
@@ -170,6 +182,7 @@ class StepScore:
             # evidence about the step and is counted where it can be seen.
             self.silent_trials += 1
             return
+        self.comparisons = step.comparisons
         self.rates[f"{step.fired} of {step.comparisons}"] += 1
         self.statuses[step.status or "no status"] += 1
         if step.classes:
@@ -202,15 +215,19 @@ class StepScore:
         return sum(n for rate, n in self.rates.items() if not rate.startswith("0 "))
 
     def distribution(self) -> str:
-        """Every rate that came up, commonest first, with its count.
+        """Every possible rate with its count, highest first, zeros included.
 
-        `4 of 4 x28, 3 of 4 x9` rather than a range. A range on a bounded
-        quantity is a summary that throws away the shape for no gain, and this
-        file's history is four published ranges that a later sample beat.
+        Ordered by the rate rather than by the count so the shape of the
+        distribution is readable down the column and two steps can be compared
+        line to line. `_render` is used everywhere else here and orders by count,
+        which is right for a set of labels and wrong for a small integer support.
         """
         if not self.rates:
             return "nothing compared"
-        return _render(self.rates)
+        return ", ".join(
+            f"{k} of {self.comparisons} x{self.rates[f'{k} of {self.comparisons}']}"
+            for k in range(self.comparisons, -1, -1)
+        )
 
     def detail(self) -> str:
         """Class, cause, the threads=1 rate, and how far the step moved.

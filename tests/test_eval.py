@@ -76,15 +76,22 @@ def test_a_step_that_compared_something_is_counted():
     assert scored.trials == 1
     assert scored.silent_trials == 0
     assert scored.fired_in == 1
-    assert scored.distribution() == "3 of 4"
+    assert scored.distribution() == "4 of 4 x0, 3 of 4 x1, 2 of 4 x0, 1 of 4 x0, 0 of 4 x0"
 
 
-def test_every_rate_prints_with_its_denominator():
-    """A bare count of fires would be unreadable against a five-run and a three-run pass."""
+def test_every_rate_prints_with_its_denominator_and_the_empty_buckets_too():
+    """A rate that never came up has to print as x0 rather than be left out.
+
+    Slice 4 published this step's 40-pass rates as `4 of 4 x27, 3 x5, 2 x5, 1 x3`
+    and called the cell complete on the grounds that a rate out of four cannot
+    leave the range. Two ten-trial runs of the eval then disagreed about whether
+    0 of 4 happens. An omitted bucket reads as impossible rather than
+    unobserved, so every bucket prints.
+    """
     scored = StepScore("mixed")
     for fired in (4, 4, 2):
         scored.observe(measured("mixed", fired=fired))
-    assert scored.distribution() == "4 of 4 x2, 2 of 4"
+    assert scored.distribution() == "4 of 4 x2, 3 of 4 x0, 2 of 4 x1, 1 of 4 x0, 0 of 4 x0"
 
 
 def test_the_append_magnitude_is_not_reported_as_zero():
