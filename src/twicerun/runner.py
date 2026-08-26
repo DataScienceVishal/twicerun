@@ -121,13 +121,14 @@ def is_running(run_dir: Path) -> bool:
 def prune_run_dirs(parent: Path, keep: int, current: Path | None = None) -> list[Path]:
     """Drop all but the most recent `keep` run directories, `current` always among them.
 
-    A five-run pass over the reference pipeline writes about 200 MB, most of it
-    the generated inputs held once per run because the comparison needs a copy
-    per run. Without pruning, following the README a dozen times leaves a couple
-    of gigabytes behind and nothing ever reclaims it.
+    A five-run pass over the reference pipeline writes about 260 MB: 205 MB of
+    generated inputs, held once per run because the comparison needs a copy per
+    run, and 53 MB of single-threaded bisect artifacts. Without pruning,
+    following the README a dozen times leaves three gigabytes behind and
+    nothing ever reclaims it.
 
     The default keeps one directory, which is the current run. Nothing in the
-    tool reads a previous run yet, so keeping more would be storing 200 MB
+    tool reads a previous run yet, so keeping more would be storing 260 MB
     against a feature that does not exist. Slice 7 regenerates the results table
     from a committed run artifact and may want more, and --keep is there for it.
 
@@ -171,8 +172,18 @@ def artifacts_before(record: RunRecord, step_index: int) -> dict[str, Artifact]:
     let a step read run 1's *later* output under a name the step writes itself,
     which is not a read any run can make on its own, and the reference pipeline
     has two steps that write a name they also read.
+
+    Filtered on each step's own index rather than sliced by list position. The
+    two agree for a record of a whole pipeline and stop agreeing for one built
+    with `only`, where position 2 can be step 5, and the bisect builds exactly
+    those.
     """
-    return {a.name: a for step in record.steps[:step_index] for a in step.artifacts}
+    return {
+        a.name: a
+        for step in record.steps
+        if step.index < step_index
+        for a in step.artifacts
+    }
 
 
 def execute_run(

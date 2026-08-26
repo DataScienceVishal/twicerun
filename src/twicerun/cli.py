@@ -89,7 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="how many run directories to keep. One pass over the reference pipeline writes "
-        "about 200 MB and nothing yet reads a previous one, so the default keeps only the "
+        "about 260 MB and nothing yet reads a previous one, so the default keeps only the "
         "current run. Use 0 to keep everything",
     )
     _policy_flags(run)
@@ -141,8 +141,6 @@ def _policy_flags(parser: argparse.ArgumentParser) -> None:
         "matching on one means joining on bit equality, and it would take the step out of "
         "the reassociation bound report entirely",
     )
-
-
 
 
 def parse_keys(declared: list[str]) -> dict[str, tuple[str, ...]]:

@@ -357,7 +357,6 @@ def _runners_up(named: KeyEffect, rest: list[KeyEffect]) -> list[str]:
     ]
 
 
-
 def _bound_lines(bound: DriftBound) -> list[str]:
     """The check that was pre-registered before any of this existed, run and reported.
 
