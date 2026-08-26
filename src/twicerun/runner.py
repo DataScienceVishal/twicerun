@@ -347,7 +347,6 @@ def bisect_runs(
     zero answers a different question from the one the other rate asked.
     """
     carried: dict[str, Artifact] = {}
-    first: dict[str, Artifact] = {}
     records = []
     for run in range(1, runs + 1):
         record, written = execute_run(
@@ -361,8 +360,7 @@ def bisect_runs(
         )
         records.append(record)
         if run == 1:
-            first = written
-        carried = first
+            carried = written
     return records
 
 
