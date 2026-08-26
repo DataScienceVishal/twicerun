@@ -124,26 +124,32 @@ Steps 3 and 6 are the ones to read three times. Both are broken, both gave the s
 
 **Your numbers will not match that transcript, and neither will mine on the next run.** This is a tool about non-determinism and its own output is non-deterministic, so quoting any single figure as fixed would be the wrong thing to do twice over.
 
-So the table below publishes **medians over 20 passes of the five-run loop**, which is 80 comparisons per step, on DuckDB 1.5.5 at `threads=10`. The spread each quantity showed is in brackets and **it is not a bound**. Every range this file has published has been beaten by a later sample, four times now, and the section at the end of this README lists all four with dates. Take the ranges as what 20 passes happened to produce and expect to go outside them in ten minutes.
+So the table below publishes **40 passes of the five-run loop**, 160 comparisons per step, on DuckDB 1.5.5 at `threads=10`. It carries no brackets, and the reason is the fifth entry in the section at the end of this file.
 
-| step | fires under `strict` | at `threads=1` | under `reduction-order` | what the oracle called it |
+Four times a published range here was beaten by a later sample, and the fifth time the diagnosis was structural rather than "the sample was too small again". **The ulp counts and the relative drift are maxima**, over 1,000 groups times four comparisons. They are extreme-value statistics: their observed range grows with how long you look, by construction, so any bracket on them can be beaten by looking longer. A bracket on a maximum is not a summary, it is a promise, and it is the one promise this file has already broken four times.
+
+So the maxima get a median and a sample size and nothing else. The quantities that have a real ceiling get the ceiling, because a hard bound cannot be beaten: a step comparing 500,000 rows cannot lose more than 500,000 of them, and a fire rate out of four has five possible values, so the whole distribution fits in the cell.
+
+| step | fires under `strict`, 40 passes | at `threads=1` | under `reduction-order` | what the oracle called it, and how far it moved |
 |---|---|---|---|---|
-| 0 `generate_inputs` | 0 of 4, every pass | not bisected | 0 of 4 | the control, and it has never fired |
-| 1 `daily_revenue` | 4 of 4, every pass | 0 of 4, every pass | 0 of 4 | `VALUE_DRIFT`, `PARALLEL_ORDER`, median 4 ulp [3 to 6] |
-| 2 `customer_keys` | 4 of 4 [2 to 4] | 0 of 4, every pass | unchanged | `ROW_MISSING` `ROW_EXTRA`, `PARALLEL_ORDER`, median 368,640 rows [245,760 to 491,520] |
-| 3 `apply_price_updates` | 3 of 4 [0 to 4] | 0 of 4 on all 19 that fired | unchanged | `ROW_MISSING` `ROW_EXTRA`, `PARALLEL_ORDER`, median 17,376 rows [1,056 to 40,608] |
-| 4 `append_audit_log` | 4 of 4, every pass | **4 of 4, every pass** | unchanged | `MULTIPLICITY`, `PERSISTS_SINGLE_THREADED`, 3,953 extra rows in every comparison |
-| 5 `mean_basket` | 4 of 4, every pass | 0 of 4, every pass | 0 of 4 | `VALUE_DRIFT`, `PARALLEL_ORDER`, median 4 ulp [4 to 6] |
-| 6 `sparse_customer_keys` | 2 of 4 [0 to 4], three flat zeros | 0 of 4 on all 17 that fired | unchanged | `ROW_MISSING` `ROW_EXTRA`, `PARALLEL_ORDER`, median 237,280 rows [8,480 to 483,040] |
-| 7 `roll_up_keys` | 0 of 4, every pass | not bisected | 0 of 4 | downstream of step 2, and contained, so it sees the same input every run |
+| 0 `generate_inputs` | 0 of 4 on all 40 | not bisected | 0 of 4 | the control, and it has never fired |
+| 1 `daily_revenue` | 4 of 4 on all 40 | 0 of 4 on all 40 | 0 of 4 | `VALUE_DRIFT`, `PARALLEL_ORDER`, median 4.5 ulp and 5.3e-16 relative, n=40 |
+| 2 `customer_keys` | 4 of 4 x28, 3 of 4 x9, 2 of 4 x3 | 0 of 4 on all 40 | unchanged | `ROW_MISSING` `ROW_EXTRA`, `PARALLEL_ORDER`, median 491,520 of the 500,000 rows compared |
+| 3 `apply_price_updates` | 4 of 4 x27, 3 x5, 2 x5, 1 x3 | 0 of 4 on all 40 | unchanged | `ROW_MISSING` `ROW_EXTRA`, `PARALLEL_ORDER`, median 21,328 of the 125,000 rows compared |
+| 4 `append_audit_log` | 4 of 4 on all 40 | **4 of 4 on all 40** | unchanged | `MULTIPLICITY`, `PERSISTS_SINGLE_THREADED`, 3,953 extra rows in every comparison |
+| 5 `mean_basket` | 4 of 4 on all 40 | 0 of 4 on all 40 | 0 of 4 | `VALUE_DRIFT`, `PARALLEL_ORDER`, median 5 ulp and 5.7e-16 relative, n=40 |
+| 6 `sparse_customer_keys` | 2 of 4 x9, 4 x9, 1 x8, 3 x7, **0 x7** | 0 of 4 on all 33 that fired | unchanged | `ROW_MISSING` `ROW_EXTRA`, `PARALLEL_ORDER`, median 245,760 of the 500,000 rows compared |
+| 7 `roll_up_keys` | 0 of 4 on all 40 | not bisected | 0 of 4 | downstream of step 2, and contained, so it sees the same input every run |
+
+Every number in the fire-rate column is a complete distribution rather than a summary of one, so there is nothing there for a longer run to beat. The medians on the right will move, and the ulp medians will move by a whole ulp on a sample this size, which is why they carry an n.
 
 The two float steps go to zero under `reduction-order` and nothing else moves. That is the whole claim for the oracle: the false positives disappear and the four real bugs are caught by the same code that dismissed them.
 
-That table is the main loop and the amplifiers do not change it. What they add is a status per step, and over a separate 12 passes with amplification on, steps 0 and 7 came out `NO_DIVERGENCE_OBSERVED` every time and steps 1 to 5 `DIVERGENT` every time. Steps 3 and 6 are the ones that move: each reads `DIVERGENT` when the loop catches it and `STABLE_ON_THIS_INPUT` when it does not, and the amplification section below puts a number on how often that happens.
+That table is the main loop and the amplifiers do not change it. What they add is a status per step. Steps 0 and 7 were `NO_DIVERGENCE_OBSERVED` on all 40 and steps 1, 2, 4 and 5 `DIVERGENT` on all 40. Step 6 moved between the two, `STABLE_ON_THIS_INPUT` on the 7 passes the loop said nothing, and step 3 can do the same but did not once in these 40. The transcript above is a pass where it did, which is why it is the transcript.
 
 The `threads=1` column is what slice 3 added, and one row of it is not like the others. Six steps stop diverging with one thread and one does not, which is the difference between a step whose answer depends on how the work was divided and a step whose answer depends on it having run before. No number of runs separates those two; a second thread count does it in one column.
 
-Every `threads=1` figure here was either 0 of 4 or 4 of 4, never anything between, across 166 bisected step-passes. That was not designed and it is not explained.
+Every `threads=1` figure here was either 0 of 4 or 4 of 4, never anything between, across 636 bisected step-passes now: 166 while slice 3 was being built, 237 more in a fresh clone, 233 in the sample above. That was not designed and it is not explained. It is the one quantity in this file that a larger sample has never moved, which after five rounds of the opposite is worth saying out loud.
 
 ## Status
 
@@ -180,8 +186,16 @@ Both rows held on every pass. The uncontained row is four reruns' worth of dupli
 Running the ablation shows you the loudest of those four figures, not all four: the report prints one comparison per step and 15,812 is the one it picks. The other three are in the manifest, and this prints the row counts they come from:
 
 ```bash
-uv run python -c "import json,sys; print([s['artifacts'][0]['rows'] for r in json.load(open(sys.argv[1]))['runs'] for s in r['steps'] if s['name']=='append_audit_log'])" .twicerun/run-*/manifest.json
+uv run twicerun run pipelines/reference.py --no-containment
+uv run python -c "
+import json, sys
+runs = json.load(open(sys.argv[1]))['runs']
+rows = [s['artifacts'][0]['rows'] for r in runs for s in r['steps'] if s['name'] == 'append_audit_log']
+assert rows, 'that manifest has no append_audit_log: it is a run of some other pipeline'
+print(rows)" .twicerun/run-*/manifest.json
 ```
+
+The assert is there because the obvious way to get this wrong is to run it after the twins, which is the command two sections down. Without it the comprehension found nothing, printed `[]`, and exited 0.
 
 Uncontained that gives `[3953, 7906, 11859, 15812, 19765]`, one run per entry, and contained it gives `[3953, 7906, 7906, 7906, 7906]`. The bug is the same bug either way and the fire rate is 4 of 4 either way, so what containment bought here is the magnitude being a fact about the step rather than about how many times the tool ran.
 
@@ -259,6 +273,10 @@ Over 12 passes of that file, 72 step-passes, every step came out `NO_DIVERGENCE_
 
 **The first column is the honest part of that table.** Tie collapse declined 48 of its 72 chances, and the report says why each time rather than printing a zero. `orders.day` and `customers.cust` already hold 2,000 and 500 rows per value, which is at or past what the amplifier targets, so there is nothing for it to raise; `generate_inputs` reads no artifact at all, so two of the three amplifiers have nothing to substitute. A twin an amplifier never touched is not evidence that the amplifier is safe on it, and folding those into the zero would have made the table look twice as strong as it is.
 
+A larger sample in a fresh clone put 40 passes through the same file: 240 twin step-passes, 1,040 amplified comparisons on correct code, zero fires and exit 0 on all 40. The coverage ratios came out the same.
+
+**The twins only cover code that reproduces exactly.** `mean_basket` is the reference pipeline's correct-but-drifting float step, and there is no twin for it because there is nothing to fix: the drift is arithmetic. So this table says the amplifiers do not break code that gives the same answer twice. It says nothing about whether they widen drift that was already there, and the step that would answer that is the one step with no partner.
+
 ### The step this was built for
 
 Step 6 of the reference pipeline is the surrogate-key bug at 2 rows per tie group, the density where it fires only sometimes. Over 40 fresh passes on this machine, with the amplifiers pointed at that step whether or not the main loop had already caught it:
@@ -271,6 +289,14 @@ Step 6 of the reference pipeline is the surrogate-key bug at 2 rows per tie grou
 | thread count | 91 of 144 | 0.63 | 8 of 40 |
 
 Counts over 40 passes, on DuckDB 1.5.5 at `threads=10`. A larger sample will move all of them. The thread-count row has 144 comparisons rather than 160 because an amplifier that finds nothing in its first two comparisons is not escalated to the full five runs, which is the whole cost argument working.
+
+**`twicerun run` cannot produce that table and it is not meant to.** Amplification only touches steps the main loop found nothing in, so on most passes step 6 fires, never reaches an amplifier, and contributes nothing to the second half of the comparison. Waiting for the passes where it stays quiet means throwing away five passes in six. So the table comes from a script rather than from the tool, and the script ships:
+
+```bash
+uv run python scripts/amplification_gap.py 40
+```
+
+It points the amplifiers at that one step every pass. There is no flag for it, deliberately: a flag doing this would make every clean pipeline pay for evidence it does not need, and the argument for amplification's cost is precisely that it runs only where the loop came back quiet. What `twicerun run` does reproduce on its own is the first row and the last column, since a pass where step 6 comes out `STABLE_ON_THIS_INPUT` is a pass where the loop said nothing and an amplifier did not.
 
 **On all 7 of the passes where the five-run loop reported nothing, at least one amplifier fired**, and on all 7 that included tie collapse. That is the gap the feature exists to close, measured rather than argued: a step that is definitely broken, a loop that says nothing about it roughly one pass in six, and a per-comparison rate that goes from 0.54 to 0.96 when the input is stressed.
 
@@ -368,17 +394,15 @@ The magnitude drops out. The tool measures `|a - b| / max(|a|, |b|)`, so the sam
 
 Before any of this was written, one condition was fixed: **observed maximum relative drift on the benign step must be at least 1000x below the computed bound**, or the bound is binding, the derivation is not conservative enough, and the design gets revisited rather than the threshold moved.
 
-**It passes, and the margin is not where it looks.** Over the same 20 passes, 40 float step-passes in all:
+**It passes, and the margin is not where it looks.** Over the same 40 passes, 80 float step-passes in all. Medians with an n, for the reason the results table gives: the drift figure is a maximum over 1,000 groups and its range grows with how long anyone looks.
 
 | | `daily_revenue` | `mean_basket` |
 |---|---|---|
-| observed furthest relative drift | 4.6e-16 to 2.2e-15 | 4.6e-16 to 8.1e-16 |
+| median furthest relative drift, n=40 | 5.3e-16 | 5.7e-16 |
 | bound at `n` = 2,000,000 rows read | 4.44e-10 | 4.44e-10 |
-| headroom | roughly 200,000 to 1,000,000x | roughly 550,000 to 970,000x |
 | bound at `n` = 2,000 terms per output row | 4.44e-13 | 4.44e-13 |
-| headroom | roughly 200 to 960x | roughly 550 to 970x |
 
-The check as pre-registered cleared 1000x on all 40 step-passes of the latest sample, at a median 931,534x. Almost none of that margin comes from the drift being small. `rows_read` is the step's whole input, and each of the 1,000 output rows sums about 2,000 terms, so `n` is a thousand times larger than the quantity the bound is about. Take that slack out and the median headroom is **932x, which is under the 1000x line**. It is not always under it: 1 of those 40 step-passes cleared, at 1,229x, and an earlier 56-step-pass sample cleared on 3. So the tight check fails most of the time rather than every time, and the report says that rather than predicting a failure it then contradicts three lines further down.
+The check as pre-registered cleared 1000x on **80 of 80** step-passes, at a median 775,082x, and a fresh clone's independent 40 passes gave 80 of 80 at a median 776,464x. Almost none of that margin comes from the drift being small. `rows_read` is the step's whole input, and each of the 1,000 output rows sums about 2,000 terms, so `n` is a thousand times larger than the quantity the bound is about. Take that slack out and the median headroom is **775x, under the 1000x line**. It is not always under it: 5 of those 80 step-passes cleared, and earlier samples cleared on 3 of 56 and 1 of 40. So the tight check fails most of the time rather than every time, and the report now prints how many times it cleared on the run in front of you instead of quoting a number from this machine.
 
 So the honest reading is between two and three orders of magnitude of headroom, not six, and every report prints both numbers so nobody has to take that from this file:
 
@@ -638,20 +662,25 @@ Those zero results are the argument for amplification, and it now has a number. 
 
 No practical number of runs proves determinism, which is why the tool never prints the word. There is a test asserting the report contains neither "deterministic" nor "stable".
 
-## Four times a number in this README was beaten by a larger sample
+## Five times a number in this README was beaten by a larger sample
 
-All four on 2026-08-26, all on this machine, all while the author was actively trying not to let it happen. They are listed because the tool's whole claim is that a small sample lies to you about a quantity that varies, and this is that claim demonstrated against its own documentation.
+All five on 2026-08-26, all while the author was actively trying not to let it happen. They are listed because the tool's whole claim is that a small sample lies to you about a quantity that varies, and this is that claim demonstrated against its own documentation.
 
 | # | what was published | what a larger sample gave |
 |---|---|---|
 | 1 | `apply_price_updates` fires 4 of 4 every time, from 5 invocations | a floor of 1 within 8 invocations, then 0 within 20 |
 | 2 | the slice 2 results table, from 10 passes | 8 of its 10 quantities exceeded within 20 more passes; `daily_revenue` published at 3 to 6 ulp reached 19 |
 | 3 | the slice 3 results table, from 20 passes | all 6 of its ranges exceeded within 28 more; `apply_price_updates` published at 1,344 to 42,304 rows reached 77,120 |
-| 4 | the tight reassociation bound is under 1000x on 40 of 40 step-passes | it cleared on 3 of 56, and on 1 of a later 40, at 1,229x |
+| 4 | the tight reassociation bound is under 1000x on 40 of 40 step-passes | it cleared on 3 of 56, then 1 of a later 40, then 5 of a later 80 |
+| 5 | the slice 4 results table, from 20 passes | 13 of its figures exceeded by one 40-pass run that took six minutes, in a fresh clone |
 
-Number 4 is the worst of them, because it is the falsifiable check the tolerance section is built around, and because the report contradicted itself in the terminal: it printed that the tight check "is expected to fail" three lines above a step-pass where it cleared.
+Number 4 is the worst of them, because it is the falsifiable check the tolerance section is built around, and because the report contradicted itself in the terminal: it printed that the tight check "is expected to fail" three lines above a step-pass where it cleared. That was fixed by replacing a wrong prediction with a number measured on this laptop and printed on every machine as "here", so the next reader got a report claiming 1,229x three lines above its own 1,245x. The same contradiction, twice, from two different attempts to state a historical fact in a live report. The report now counts the run in front of you and the history stays in this file where it can carry a date.
 
-The response after the third one was to stop publishing ranges. Stating the sample size stops a range being a lie; it does not stop it being wrong, and a range a reader can beat in ten minutes should not be printed in a way that looks like a bound. The table above the fold is medians now, with the spread in brackets and this section next to it.
+**Number 5 is the one that changed the method, because after four rounds of "the sample was too small again" that had stopped being a diagnosis.** The republished bracket that got beaten was `median 4 ulp [3 to 6]`, and three screens below it this very table already recorded that the same bracket had reached 19. The file contradicted itself, in writing, about the one quantity it had promised to be careful with.
+
+The structural reason: **the ulp count and the relative drift are maxima**, over 1,000 groups times four comparisons. They are extreme-value statistics. The observed range of a maximum grows with the number of observations by construction, so there is no sample size at which a bracket on one becomes safe, and every previous fix had been to take a bigger sample and publish a wider bracket. That is the same move five times.
+
+So the maxima carry a median and an n and no range at all, and the quantities with a real ceiling carry the ceiling instead: a step comparing 500,000 rows cannot lose more than 500,000 of them, and a fire rate out of four has five possible values, so the whole distribution goes in the cell and there is nothing left to beat. What remains beatable is the medians, which will move, and which say so.
 
 ## The reference pipeline ships broken
 
