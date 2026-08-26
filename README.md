@@ -235,13 +235,15 @@ Two numbers in that table were measured rather than picked. The thread floor of 
 
 500 rows per distinct value is the density at which the surrogate-key bug fired on every attempt of the standalone measurement this project started from. Inside the tool it takes that step's per-comparison rate from 0.54 to 0.96, which is the table further down. A standalone re-measurement made while building this found much less of a gap, 10 of 12 comparisons at 2 rows per value against 11 of 12 at 500, and the distance between those two pictures is the rest of the pipeline running between one execution of the step and the next. Back to back in one process the bug fires most of the time at either density; inside a five-run loop over eight steps it does not.
 
-Tie collapse replaces a value with another real value from the same column, the minimum of its hash bucket, so the type, the row count and the value domain all survive. Casting a hash back to the column's type would have worked for integers and not for `DATE` or `DECIMAL`.
+Tie collapse replaces a non-NULL value with another real value from the same column, the minimum of its hash bucket, so the type, the row count, the NULL count and the value domain all survive. Casting a hash back to the column's type would have worked for integers and not for `DATE` or `DECIMAL`.
+
+NULLs needed a special case rather than falling out of that. `hash(NULL)` is an ordinary non-NULL constant, so a NULL row lands in a bucket alongside real values and takes their representative: 300 NULLs in 3,000 rows came out as zero NULLs, while the report line beside it claimed the domain survived. Type and row count did survive, which is why it read as fine. A step that branches on NULL was being handed a different question from the one printed.
 
 ### The property that separates this from a chaos generator
 
 **Each amplifier is built so that the bug's own fix survives it.** Tie collapse leaves the most distinct column alone, which is exactly what `ORDER BY cust, event_id` needs to stay decided. Row multiplication does not trouble a `CREATE OR REPLACE TABLE`, and a `MERGE` over a deduplicated source gives the same answer on twice the rows. An amplifier that made correct code fail would be measuring its own violence and the tool would be worthless.
 
-That is checkable rather than assertable, because `pipelines/twins.py` is the one-line fix for every bug in the reference pipeline. Exit 1 there means the amplifiers are broken, not the twins:
+That is checkable rather than assertable, because `pipelines/twins.py` is the one-line fix for every bug in the reference pipeline. Exit 1 or 4 there means the amplifiers are broken, not the twins:
 
 ```bash
 uv run twicerun run pipelines/twins.py
@@ -466,9 +468,21 @@ uv run twicerun run pipelines/reference.py --no-containment
 uv run twicerun run pipelines/twins.py                           # the fixed pipeline: exit 0 or the amplifiers are broken
 ```
 
-Exit codes are 0 for nothing diverged, 1 for something diverged, 2 for bad input and 3 for a crash. 2 covers a column the oracle refuses to compare and a `--key` naming a column that is not there, because both are facts about the pipeline's output rather than crashes. 1 means divergence and only divergence, so a release gate keyed on it does not also trip on a broken pipeline. A comparison downgraded to `TOLERATED` does not set it.
+| exit | meaning |
+|---|---|
+| 0 | nothing diverged |
+| 1 | a step diverged on the real input |
+| 2 | bad input, including a column the oracle refuses to compare and a `--key` naming a column that is not there |
+| 3 | the run or the judge crashed |
+| 4 | a step diverged only under an amplifier |
 
-**A step that only diverged under an amplifier sets 1 as well**, and that call went the other way from the first instinct. `STABLE_ON_THIS_INPUT` means the step agreed with itself on the data you gave it, so a narrow reading of the exit code would leave it at 0. But the tool watched that step give two different answers, and a tool whose whole argument is that a green five-run loop lies about exactly this case cannot then go green on it. `AMPLIFICATION_FAILED` stays at 0: nothing there was seen giving two answers, and 1 has to keep meaning one thing.
+1 means divergence on your data and only that, so a release gate keyed on it does not also trip on a broken pipeline, and a comparison downgraded to `TOLERATED` does not set it.
+
+**4 exists because 0 and 1 are both wrong for `STABLE_ON_THIS_INPUT`, and working that out took three attempts.** Zero is disqualifying: this tool's argument is that a green five-run loop lies about exactly that step, so returning green rebuilds the failure at the one channel a machine reads. Folding it into 1 is wrong for the reason everything else here is split in two. Measurement is kept apart from policy, `PARALLEL_ORDER` from `PERSISTS_SINGLE_THREADED`, the derived bound from a user's threshold, an amplifier that ran from one that measured, varied from not varied. "Your pipeline gave two answers on your data" and "your pipeline gave two answers on an input twicerun fabricated" are different claims with different urgency and different false-positive character, and the exit code was the one place they were about to be collapsed into a single integer.
+
+Both are non-zero, so `set -e` and `run || fail` behave as they did. A gate that wants real-data divergence only asks for `== 1`. There is deliberately no flag to choose between them: a flag that lets a gate pick its exit code is a flag that lets a gate turn a finding green, and `--key` and `--tolerance` have each already done a version of that here.
+
+`AMPLIFICATION_FAILED` sets neither 1 nor 4. Nothing there was seen giving two answers: an amplified input made the step raise, which is a fact about the pipeline, is printed loudly, and is not a divergence.
 
 `twicerun judge <run directory>` re-scores a saved run under a different policy without executing anything, which is how the paragraph above is checkable rather than assertable. It takes several directories and judges the newest, saying which on stderr, because the glob above matches one only while retention is 1 and `--keep 0` is a documented flag. It refuses a manifest whose artifacts retention has already dropped rather than reporting on files that are not there.
 
@@ -493,7 +507,9 @@ That paragraph exists because two earlier flags failed the same audit. `--key` w
 
 One pass writes a median 376 MB of Parquet under `.twicerun/`, which is gitignored, over 12 passes: 272 MB for the five runs and the single-threaded bisect, and 104 MB more for the amplified inputs and the runs over them. This file said 260 MB before that sample existed, which was the decomposition rather than a measurement. `--no-amplify` takes it back to 272 MB. Retention keeps one directory **per concurrent invocation**, so run it serially and the footprint stays there however many times you run it. `--keep 0` turns pruning off, and `rm -rf .twicerun` reclaims the lot.
 
-Two things that follow from how retention works, both deliberate and neither obvious. Pruning happens at the end of a successful run, not the start, so a run that fails cannot delete the run you would have judged instead, and peak disk during a pass is one directory more than `--keep` says. And a run still writing is never a deletion candidate, because deleting it would pull the Parquet out from under another process, so three parallel invocations leave three directories and 778 MB. The header says when that happened rather than repeating a promise it suspended.
+Two things that follow from how retention works, both deliberate and neither obvious. Pruning happens at the end of a successful run, not the start, so a run that fails cannot delete the run you would have judged instead, and peak disk during a pass is one directory more than `--keep` says. And a run still writing is never a deletion candidate, because deleting it would pull the Parquet out from under another process.
+
+That second one is a **peak**, not an end state, and this file had it wrong until someone ran it. Three parallel invocations do hold three directories at once, and each report says so in its header, which is the honest thing for a per-invocation view to say. But the last one to finish finds no live markers left, prunes the other two, and the count comes back to `--keep` by itself. So the header's line is true when it prints and stops being true a few seconds later, and the disk does not stay at three times a pass.
 
 The tests run with no credentials and no network:
 
@@ -506,6 +522,8 @@ uv run python scripts/check_fingerprint.py
 CI runs all three and so does the pre-commit hook, so a change that passes only the first will fail on push. `check_fingerprint.py` reads `BANNED.md` and refuses the writing tells listed there.
 
 If you pipe that into anything, check `PIPESTATUS` or redirect instead. `uv run pytest | tail -5` reports the exit code of `tail`, which is 0 whatever pytest did, and twice during this build a slice was committed against a suite whose failure had been swallowed exactly that way. `uv run pytest >/dev/null 2>&1; echo $?` is what the pre-commit hook and CI effectively do.
+
+The same shape caught someone checking the policy-separation claim by hand. `zsh` does not word-split an unquoted parameter expansion, so `FLAGS="--policy reduction-order"; twicerun judge "$RD" $FLAGS` passes one argument spelled `--policy reduction-order` in `bash` and something else in `zsh`. Their three reports had all run under the default policy and were identical for that reason rather than for the interesting one. Both failures look like a passing check, which is the only thing they have in common and the reason they are written down together.
 
 To re-derive every DuckDB number quoted here on your own machine, which takes about two seconds:
 

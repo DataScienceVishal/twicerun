@@ -50,6 +50,12 @@ def _plural(n: int, singular: str, plural: str | None = None) -> str:
     return f"{n} {singular}" if n == 1 else f"{n} {plural or singular + 's'}"
 
 
+def _hang(label: str, body: str) -> list[str]:
+    """A label in the left column and a paragraph beside it that wraps under itself."""
+    wrapped = textwrap.wrap(body, width=WIDTH - len(label) - 4)
+    return [f"  {label}  {wrapped[0]}"] + [f"  {' ' * len(label)}  {line}" for line in wrapped[1:]]
+
+
 def _wrap(body: str, indent: str = "") -> list[str]:
     """Fill a sentence that has step names and amplifier names in it.
 
@@ -96,6 +102,7 @@ class Report:
             self._statuses(),
             self._bounds(judged),
             self._footer(judged),
+            self._axes_nobody_varied(),
         ]
         return "\n".join(line for section in sections for line in section)
 
@@ -455,55 +462,44 @@ class Report:
         what was moved against what was not is the only version of that
         difference a black-box tester can produce.
 
-        Everything below the first sentence is per step, because it differs per
-        step. A generator has no input for two of the three amplifiers to touch.
-        Summarising the comparison count across the group took the smallest
-        anyone had managed and printed it as though every step had it, so a step
-        whose only evidence was a thread count inherited a sentence about
-        somebody else's tie collapse.
+        The lists stay per step, because they differ per step and summarising
+        them attached one step's evidence to another. Everything around them has
+        been cut: each amplifier's own rate rides on the name that names it, so
+        the denominators are visible without a sentence each, and the reasons an
+        amplifier declined are one line up in the amplification table instead of
+        repeated here. Measured over 40 real reports this block was 15 lines
+        against 8 for the step results a reader opened the report for, and
+        printed the same reason four times.
         """
+        denominators = sorted(
+            {self.runs - 1}
+            | {a.comparisons for step in steps for a in step.amplifications if a.measured},
+            reverse=True,
+        )
         lines = _wrap(
-            f"{NO_DIVERGENCE_OBSERVED} on {_named(steps)}. It is a fire rate and two lists, "
-            f"and it is not a verdict about the code."
+            f"{NO_DIVERGENCE_OBSERVED} on {_named(steps)}. A fire rate and two lists, not a "
+            f"verdict about the code. {_bound_words(*denominators)}"
         )
+        width = max(len(f"{s.index} {s.name}") for s in steps)
         for step in steps:
-            lines.append(f"  {step.index} {step.name}")
-            lines += _wrap(self._what_a_zero_here_rules_out(step), indent="      ")
-            varied = ["how many times the pipeline ran"]
-            varied += [a.amplifier for a in step.amplifications if a.measured]
-            lines += _wrap("varied: " + ", ".join(varied), indent="      ")
-            missed = [
-                f"{a.amplifier} ({_why_not(a)})"
+            varied = [f"run repetition 0 of {self.runs - 1}"]
+            varied += [
+                f"{a.amplifier} {a.fired} of {a.comparisons}"
                 for a in step.amplifications
-                if not a.measured
+                if a.measured
             ]
-            if missed:
-                lines += _wrap("not varied: " + ", ".join(missed), indent="      ")
-        lines += _wrap(
-            "Not varied anywhere: " + ", ".join(NOT_VARIED) + ". Every bound above assumes an "
-            "independence these runs do not have, since they share a process, a page cache and a "
-            "machine.",
-            indent="  ",
-        )
+            declined = [a.amplifier for a in step.amplifications if not a.measured]
+            body = "varied: " + ", ".join(varied)
+            if declined:
+                body += f". Not varied: {', '.join(declined)}, see the table above"
+            lines += _hang(f"{step.index} {step.name}".ljust(width), body)
         return lines
-
-    def _what_a_zero_here_rules_out(self, step: StepMeasurement) -> str:
-        smallest = min((a.comparisons for a in step.amplifications if a.measured), default=0)
-        rate = f"0 of {self.runs - 1} on the real input"
-        if smallest:
-            rate += f", and 0 of {smallest} under each amplifier that ran"
-        sentence = f"{rate}. {_bound_words(self.runs - 1)}"
-        if smallest and smallest != self.runs - 1:
-            sentence += (
-                f" An amplifier's {smallest} rule out one above "
-                f"{upper_bound(smallest) * 100:.0f} percent."
-            )
-        return sentence
 
     def _bounds(self, verdicts: list[StepVerdict]) -> list[str]:
         drifting = [v for v in verdicts if v.bound is not None]
         if not drifting:
             return []
+        tight = sum(1 for v in drifting if v.bound.tight_ratio >= HEADROOM_REQUIRED)
         lines = [
             "",
             "reassociation bound, computed rather than picked:",
@@ -512,15 +508,36 @@ class Report:
             "  Below is that one check at two choices of n. The first is the count the spec "
             "settled on and carries a",
             "  factor of the output row count in slack. The second is the terms behind one "
-            "output value, has no slack",
-            "  in it, so it is normally the one that fails: it cleared on 1 of 40 step-passes "
-            "here, at 1,229x. Both",
-            "  print so the slack is visible rather than described.",
+            "output value and has none,",
+            f"  so it is normally the one that fails. On this run it cleared on "
+            f"{tight} of {_plural(len(drifting), 'float step')}. Both print",
+            "  so the slack is visible rather than described.",
         ]
         for verdict in drifting:
             lines.append(f"  {verdict.step.index} {verdict.step.name}")
             lines.extend(f"      {line}" for line in _bound_lines(verdict.bound))
         return lines
+
+    def _axes_nobody_varied(self) -> list[str]:
+        """The standing list, printed once at the end rather than inside a status block.
+
+        It says nothing about the two steps it used to sit under. It is the same
+        sentence for every step in every report, which is what makes it a fact
+        about this tool, and the end of the report is where a fact about the
+        tool belongs.
+        """
+        quiet = [s for s in self.steps if not s.fired and s.artifacts_compared]
+        if not quiet:
+            return []
+        return [
+            "",
+            *_wrap(
+                "Nothing above varied any of these, whatever status it carries: "
+                + ", ".join(NOT_VARIED)
+                + ". Every bound above assumes an independence these runs do not have, since "
+                "they share a process, a page cache and a machine."
+            ),
+        ]
 
     def _footer(self, verdicts: list[StepVerdict]) -> list[str]:
         fired = sum(1 for v in verdicts if v.fired)
@@ -552,19 +569,26 @@ def _named(steps: list[StepMeasurement]) -> str:
     return ", ".join(f"{s.index} {s.name}" for s in steps)
 
 
-def _bound_words(comparisons: int) -> str:
+def _bound_words(*comparisons: int) -> str:
     """The sentence a zero has to carry, spelled out rather than left as a fraction.
 
     A reader who does not already know the arithmetic reads `0 of 4` as a pass.
     The number that stops that is 53 percent, and it belongs next to the zero
     rather than in a README.
+
+    Several denominators fold into one sentence rather than one each. A report
+    with a four-comparison loop and two-comparison amplifiers printed the same
+    twenty words twice, three lines apart.
     """
-    verb = "rules" if comparisons == 1 else "rule"
-    return (
-        f"{_plural(comparisons, 'clean comparison')} {verb} out a per-comparison divergence "
-        f"probability above {upper_bound(comparisons) * 100:.0f} percent, "
-        f"{CONFIDENCE * 100:.0f} percent one-sided."
+    first, *rest = comparisons
+    verb = "rules" if first == 1 else "rule"
+    sentence = (
+        f"{_plural(first, 'clean comparison')} {verb} out a per-comparison divergence probability "
+        f"above {upper_bound(first) * 100:.0f} percent"
     )
+    for other in rest:
+        sentence += f", and {other} rule out one above {upper_bound(other) * 100:.0f} percent"
+    return f"{sentence}, {CONFIDENCE * 100:.0f} percent one-sided."
 
 
 def _attempt_line(attempt: Amplification) -> str:

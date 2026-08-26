@@ -155,14 +155,15 @@ def is_running(run_dir: Path) -> bool:
 def prune_run_dirs(parent: Path, keep: int, current: Path | None = None) -> Retention:
     """Drop all but the most recent `keep` run directories, `current` always among them.
 
-    A five-run pass over the reference pipeline writes about 260 MB: 205 MB of
-    generated inputs, held once per run because the comparison needs a copy per
-    run, and 53 MB of single-threaded bisect artifacts. Without pruning,
-    following the README a dozen times leaves three gigabytes behind and
-    nothing ever reclaims it.
+    A five-run pass over the reference pipeline writes a median 376 MB over 12
+    passes: 272 MB for the runs and the single-threaded bisect, most of it the
+    generated inputs held once per run because the comparison needs a copy per
+    run, and 104 MB more for the amplified inputs and the runs over them.
+    Without pruning, following the README a dozen times leaves four gigabytes
+    behind and nothing ever reclaims it.
 
     The default keeps one directory, which is the current run. Nothing in the
-    tool reads a previous run yet, so keeping more would be storing 260 MB
+    tool reads a previous run yet, so keeping more would be storing 376 MB
     against a feature that does not exist. Slice 7 regenerates the results table
     from a committed run artifact and may want more, and --keep is there for it.
 
@@ -188,9 +189,15 @@ def prune_run_dirs(parent: Path, keep: int, current: Path | None = None) -> Rete
 
     The live count comes back with the dropped list because skipping those
     directories suspends the retention the header states as a fact. Three
-    parallel invocations leave three directories and 778 MB, each report
-    claiming to keep one, and a reader with eight CI jobs deserves to be told
-    by the tool rather than by their disk.
+    parallel invocations peak at three directories, each report claiming to
+    keep one, and a reader with eight CI jobs deserves to be told by the tool
+    rather than by their disk.
+
+    Peak rather than final, and the difference was measured rather than
+    reasoned about. The last invocation to finish sees no live markers left, so
+    it prunes the other two and the directory count comes back to --keep on its
+    own. What the header is reporting is true when it prints and stops being
+    true shortly afterwards, which is the most a per-invocation view can say.
     """
     if keep < 1:
         return Retention([], 0)

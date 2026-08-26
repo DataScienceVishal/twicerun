@@ -122,15 +122,39 @@ def test_a_step_only_an_amplifier_could_move_gets_its_own_exit_code(tmp_path, ca
     assert "0 of 2  STABLE_ON_THIS_INPUT" in printed
 
 
-def test_an_amplifier_that_raised_is_not_a_divergence_and_does_not_gate(tmp_path, capsys):
-    """Nothing was seen giving two answers, so 1 would be the wrong thing to return.
+def test_an_amplifier_that_raised_is_not_a_divergence_and_is_not_a_clean_run_either(
+    tmp_path, capsys
+):
+    """Nothing was seen giving two answers, so 1 would be wrong. So would 0.
 
-    The report is loud about it. The exit code keeps meaning one thing.
+    Zero would carry two meanings at once: found nothing, and could not look.
+    Those are further apart than 1 and 4 are, because this one is silent. The
+    step is left at 0 of 4 with a 53 percent upper bound and the only thing that
+    tightens it did not run.
     """
     code = main(["run", str(pipeline(tmp_path, BREAKS_ON_A_DUPLICATE_KEY)),
                  "--runs", "3", "--run-dir", str(tmp_path / "artifacts")])
-    assert code == 0
+    assert code == 5
     assert AMPLIFICATION_FAILED in capsys.readouterr().out
+
+
+def test_an_amplified_divergence_outranks_an_amplifier_that_only_raised(tmp_path, capsys):
+    """A divergence you can reproduce is worth more than a check that did not happen."""
+    both = ONLY_ON_TIED_INPUT.replace(
+        "STEPS = [generate, sensitive]",
+        "def insists(ctx):\n"
+        "    ctx.read('src')\n"
+        "    ctx.sql('CREATE TABLE unique_keys (k INTEGER PRIMARY KEY)')\n"
+        "    ctx.sql('INSERT INTO unique_keys SELECT k FROM src')\n"
+        "    ctx.write('keys', 'SELECT k FROM unique_keys')\n\n\n"
+        "STEPS = [generate, sensitive, insists]",
+    )
+    code = main(["run", str(pipeline(tmp_path, both)), "--runs", "3",
+                 "--run-dir", str(tmp_path / "artifacts")])
+    printed = capsys.readouterr().out
+
+    assert code == 4
+    assert STABLE_ON_THIS_INPUT in printed and AMPLIFICATION_FAILED in printed
 
 
 def test_the_one_status_with_a_banned_word_in_it_carries_its_own_disclaimer(tmp_path, capsys):

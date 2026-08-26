@@ -5,7 +5,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from twicerun.amplify import STABLE_ON_THIS_INPUT
+from twicerun.amplify import AMPLIFICATION_FAILED, STABLE_ON_THIS_INPUT
 from twicerun.columns import FloatInKey, UnknownKeyColumn, UnsupportedColumn
 from twicerun.policy import REDUCTION_ORDER, STRICT, Policy
 from twicerun.report import Report
@@ -53,7 +53,7 @@ def _judge(args: argparse.Namespace) -> int:
 
 
 def _exit_code(report: Report) -> int:
-    """1 for divergence on the real input, 4 for divergence only under an amplifier.
+    """1 real divergence, 4 amplified divergence, 5 an amplifier that could not ask.
 
     Under the default policy the 1 includes the benign float drift, which is the
     answer strict is supposed to give rather than a bug in it, and a comparison
@@ -77,13 +77,25 @@ def _exit_code(report: Report) -> int:
     is a flag that lets a gate turn a finding green, which --key and --tolerance
     have each already done a version of here.
 
-    AMPLIFICATION_FAILED sets neither. Nothing there was seen giving two
-    answers: an amplified input made the step raise, which is a fact about the
-    pipeline, is printed loudly, and is not a divergence.
+    AMPLIFICATION_FAILED gets 5 on the same argument one step further. It is
+    true that nothing there was seen giving two answers, and that is not the
+    question. Zero would then carry two meanings at once: "I checked and found
+    nothing" and "the check that would have made that meaningful did not run".
+    Those are further apart than 1 and 4 are, because this one is silent. A step
+    sitting at 0 of 4 on real data leaves a 53 percent upper bound and
+    amplification is the only thing here that tightens it, so an amplifier that
+    raised leaves the weak bound and no signal at all.
+
+    Ordered loudest first, and a step that fired outranks one that only raised,
+    because a divergence you can reproduce is worth more than a check that did
+    not happen.
     """
     if any(verdict.fired for verdict in report.verdicts):
         return 1
-    return 4 if any(step.status == STABLE_ON_THIS_INPUT for step in report.steps) else 0
+    statuses = {step.status for step in report.steps}
+    if STABLE_ON_THIS_INPUT in statuses:
+        return 4
+    return 5 if AMPLIFICATION_FAILED in statuses else 0
 
 
 def _newest(given: list[Path]) -> Path:
@@ -113,10 +125,11 @@ def build_parser() -> argparse.ArgumentParser:
         "per step, how often it failed to give the same answer.",
         epilog="Exit codes: 0 nothing diverged, 1 a step diverged on the real "
         "input, 2 bad input, 3 crashed, 4 a step diverged only under an "
-        "amplifier. 4 is separate from 1 because they are different claims: 1 "
-        "says your pipeline gave two answers on your data, 4 says it gave two "
-        "answers on an input twicerun fabricated. Both are non-zero, so a gate "
-        "that trips on failure keeps working; a gate that wants real-data "
+        "amplifier, 5 an amplifier raised so the check that would have tightened "
+        "a zero did not run. Each is a different claim: 1 says your pipeline gave "
+        "two answers on your data, 4 says it gave two answers on an input "
+        "twicerun fabricated, 5 says twicerun could not ask. All are non-zero, so "
+        "a gate that trips on failure keeps working; a gate that wants real-data "
         "divergence only asks for 1.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
@@ -158,7 +171,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="how many run directories to keep. One pass over the reference pipeline writes "
-        "about 260 MB and nothing yet reads a previous one, so the default keeps only the "
+        "a median 376 MB and nothing yet reads a previous one, so the default keeps only the "
         "current run. Use 0 to keep everything",
     )
     _policy_flags(run)
