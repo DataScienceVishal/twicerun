@@ -13,48 +13,66 @@ runs       5, run 1 is the reference, so 4 comparisons per step
 policy     strict, so any difference at all is a divergence
 duckdb     1.5.5, threads=10
 platform   macOS-26.5.2-arm64-arm-64bit
-artifacts  .twicerun/run-20260826-100133
-retention  keeping 1 run directory, dropped 1
+artifacts  .twicerun/run-20260826-104801
+retention  keeping 1 run directory
 
   0 generate_inputs         0 of 4
   1 daily_revenue           4 of 4  VALUE_DRIFT
-      daily_revenue: 710 of 1,000 paired rows moved on revenue, up to 4 ulp and 4.78e-16 relative
-      worst pair on revenue: 487167.6412606093 against 487167.64126060955
+      daily_revenue: 745 of 1,000 paired rows moved on revenue
+      furthest move over 4 comparisons: revenue, 6 ulp and 7.03e-16 relative
+      496528.66982424865 against 496528.6698242483
   2 customer_keys           4 of 4  ROW_MISSING ROW_EXTRA
       customer_keys: 491,520 of 500,000 reference rows and 491,520 later rows found no partner
       dropping surrogate_id from the key takes unmatched reference rows from 491,520 to 0
       event_id does the same, so surrogate_id is named first because it is the one no input to this step carries
   3 apply_price_updates     4 of 4  ROW_MISSING ROW_EXTRA
-      prices: 36,160 of 125,000 reference rows and 36,160 later rows found no partner
-      dropping price_cents from the key takes unmatched reference rows from 36,160 to 0
+      prices: 13,632 of 125,000 reference rows and 13,632 later rows found no partner
+      dropping price_cents from the key takes unmatched reference rows from 13,632 to 0
   4 append_audit_log        4 of 4  MULTIPLICITY
       audit_log: 15,812 later rows found no partner, against 3,953 reference rows
   5 mean_basket             4 of 4  VALUE_DRIFT
-      mean_basket: 630 of 1,000 paired rows moved on mean_amount, up to 3 ulp and 3.48e-16 relative
-      worst pair on mean_amount: 244.6697165778526 against 244.6697165778525
-  6 sparse_customer_keys    1 of 4  ROW_MISSING ROW_EXTRA
-      sparse_customer_keys: 245,760 of 500,000 reference rows and 245,760 later rows found no partner
-      dropping surrogate_id from the key takes unmatched reference rows from 245,760 to 0
+      mean_basket: 693 of 1,000 paired rows moved on mean_amount
+      furthest move over 4 comparisons: mean_amount, 6 ulp and 6.81e-16 relative
+      250.3057635677055 against 250.30576356770533
+  6 sparse_customer_keys    4 of 4  ROW_MISSING ROW_EXTRA
+      sparse_customer_keys: 474,560 of 500,000 reference rows and 474,560 later rows found no partner
+      dropping surrogate_id from the key takes unmatched reference rows from 474,560 to 0
       event_id does the same, so surrogate_id is named first because it is the one no input to this step carries
+
+reassociation bound, computed rather than picked:
+  1,000x of headroom was fixed before any of this was written and has not moved since.
+  Below is that one check at two choices of n. The first is the count the spec settled on and carries a
+  factor of the output row count in slack. The second is the terms behind one output value, has no slack
+  in it, and is expected to fail. Both print so the slack is visible rather than described.
+  1 daily_revenue
+      observed furthest relative drift 7.0338e-16
+      n = 2,000,000 rows read by the step, bound 4.4409e-10, headroom 631,369x  CLEARS
+      n = 2,000 terms per output row, bound 4.4409e-13, headroom 631x  FAILS
+  5 mean_basket
+      observed furthest relative drift 6.8129e-16
+      n = 2,000,000 rows read by the step, bound 4.4409e-10, headroom 651,838x  CLEARS
+      n = 2,000 terms per output row, bound 4.4409e-13, headroom 652x  FAILS
+
+6 of 7 steps diverged in 6.9s.
 ```
 
-Step 5 is a correct float average. All 630 of those findings are the arithmetic behaving normally, and `--policy reduction-order` is the opt-in that says so.
+Step 5 is a correct float average. All 693 of those findings are the arithmetic behaving normally, and `--policy reduction-order` is the opt-in that says so.
 
-**Your numbers will not match that transcript, and neither will mine on the next run.** This is a tool about non-determinism and its own output is non-deterministic, so quoting any single figure as fixed would be the wrong thing to do twice over. Over 10 passes of five runs each:
+**Your numbers will not match that transcript, and neither will mine on the next run.** This is a tool about non-determinism and its own output is non-deterministic, so quoting any single figure as fixed would be the wrong thing to do twice over.
+
+Every figure below comes from **20 passes of the five-run loop**, which is 80 comparisons per step, on DuckDB 1.5.5 at `threads=10`. Ranges are rounded outward from what those 20 passes produced and the sample size is stated because the ranges are not bounds. A previous version of this table was built from 10 passes, and 8 of its 10 quantities were exceeded within 20 more on the same machine: `daily_revenue` had been published at 3 to 6 ulp and reached 19. That is the mistake this project exists to catch, one layer up, and `pipelines/reference.py` records the same thing happening twice to a fire-rate floor.
 
 | step | fires under `strict` | fires under `reduction-order` | what the oracle called it |
 |---|---|---|---|
-| 0 `generate_inputs` | 0 of 4, all 10 | 0 of 4, all 10 | the control, and it never fired |
-| 1 `daily_revenue` | 4 of 4, all 10 | 0 of 4, all 10 | `VALUE_DRIFT`, 526 to 753 of 1,000 rows, 3 to 6 ulp |
-| 2 `customer_keys` | 2 to 4 of 4 | unchanged | `ROW_MISSING` `ROW_EXTRA`, attributed to `surrogate_id` in 10 of 10 |
-| 3 `apply_price_updates` | 1 to 4 of 4 | unchanged | `ROW_MISSING` `ROW_EXTRA`, attributed to `price_cents` in 10 of 10 |
-| 4 `append_audit_log` | 4 of 4, all 10 | unchanged | `MULTIPLICITY`, 15,812 extra rows on a 3,953-row reference |
-| 5 `mean_basket` | 4 of 4, all 10 | 0 of 4, all 10 | `VALUE_DRIFT`, 397 to 735 of 1,000 rows, 3 to 6 ulp |
-| 6 `sparse_customer_keys` | 0 to 4 of 4, zero on 3 | unchanged | `ROW_MISSING` `ROW_EXTRA`, attributed to `surrogate_id` in 10 of 10 |
+| 0 `generate_inputs` | 0 of 4 on all 20 | 0 of 4 on all 20 | the control, and it never fired |
+| 1 `daily_revenue` | 4 of 4 on all 20 | 0 of 4 on all 20 | `VALUE_DRIFT`, roughly 500 to 950 rows of 1,000, 3 to 19 ulp |
+| 2 `customer_keys` | 2 to 4 of 4 | unchanged | `ROW_MISSING` `ROW_EXTRA`, `surrogate_id` named first on all 75 findings |
+| 3 `apply_price_updates` | 1 to 4 of 4 | unchanged | `ROW_MISSING` `ROW_EXTRA`, `price_cents` named first on all 58 findings |
+| 4 `append_audit_log` | 4 of 4 on all 20 | unchanged | `MULTIPLICITY`, 15,812 extra rows on a 3,953-row reference |
+| 5 `mean_basket` | 4 of 4 on all 20 | 0 of 4 on all 20 | `VALUE_DRIFT`, roughly 550 to 800 rows of 1,000, 3 to 7 ulp |
+| 6 `sparse_customer_keys` | 1 to 4 of 4 | unchanged | `ROW_MISSING` `ROW_EXTRA`, `surrogate_id` named first on all 55 findings |
 
 The two float steps go to zero and nothing else moves. That is the whole claim for the oracle: the false positives disappear and the four real bugs are caught by the same code that dismissed them.
-
-Step 6 came back a flat 0 of 4 on 3 of those 10 passes, which means the tool ran a step that is definitely broken five times and reported nothing. That is not a defect in the measurement, it is the measurement, and it is the argument for the amplification work in slice 4.
 
 ## Status
 
@@ -105,26 +123,25 @@ The magnitude drops out. The tool measures `|a - b| / max(|a|, |b|)`, so the sam
 
 Before any of this was written, one condition was fixed: **observed maximum relative drift on the benign step must be at least 1000x below the computed bound**, or the bound is binding, the derivation is not conservative enough, and the design gets revisited rather than the threshold moved.
 
-**It passes, and the margin is not where it looks.** Over 10 passes:
+**It passes, and the margin is not where it looks.** Over the same 20 passes, 40 float step-passes in all:
 
 | | `daily_revenue` | `mean_basket` |
 |---|---|---|
-| observed max relative drift | 3.61e-16 to 5.88e-16 | 4.55e-16 to 7.85e-16 |
+| observed furthest relative drift | 4.6e-16 to 2.2e-15 | 4.6e-16 to 8.1e-16 |
 | bound at `n` = 2,000,000 rows read | 4.44e-10 | 4.44e-10 |
-| headroom | 7.55e5 to 1.23e6x | 5.66e5 to 9.76e5x |
+| headroom | roughly 200,000 to 1,000,000x | roughly 550,000 to 970,000x |
 | bound at `n` = 2,000 terms per output row | 4.44e-13 | 4.44e-13 |
-| headroom | 755 to 1,229x | 566 to 976x |
+| headroom | roughly 200 to 960x | roughly 550 to 970x |
 
-The check as pre-registered clears 1000x by six orders of magnitude on every pass. Almost all of that margin comes from `n` rather than from the drift being small. `rows_read` is the step's whole input, and each of the 1,000 output rows sums about 2,000 terms, so `n` is a thousand times larger than the quantity the bound is about. Take that slack out and the headroom lands at 566 to 1,229x, which is **under the 1000x line on 19 of the 20 step-passes measured**.
+The check as pre-registered cleared 1000x on **40 of 40** step-passes. Almost none of that margin comes from the drift being small. `rows_read` is the step's whole input, and each of the 1,000 output rows sums about 2,000 terms, so `n` is a thousand times larger than the quantity the bound is about. Take that slack out and the headroom lands between roughly 200 and 970x, which is **under the 1000x line on 40 of 40**.
 
-So the honest reading is three orders of magnitude of headroom, not six, and every report prints both numbers so nobody has to take that from this file:
+So the honest reading is between two and three orders of magnitude of headroom, not six, and every report prints both numbers so nobody has to take that from this file:
 
 ```
   5 mean_basket
-      n = 2,000,000 rows read by the step, so the bound is 4.4409e-10 relative
-      observed max relative drift 4.5591e-16, which is 9.74e+05x inside the bound
-      pre-registered check wanted 1000x of headroom and clears it
-      at n = 2,000 terms per output row the bound is 4.4409e-13 and the headroom is 974x, which fails
+      observed furthest relative drift 6.8129e-16
+      n = 2,000,000 rows read by the step, bound 4.4409e-10, headroom 651,838x  CLEARS
+      n = 2,000 terms per output row, bound 4.4409e-13, headroom 652x  FAILS
 ```
 
 The threshold is not moving and neither is `n`. `rows_read` was the choice made in the spec before any of this was measured, and switching to whichever count clears the line after seeing the result is exactly what pre-registering is meant to stop. The number that would make the bound correct is the term count behind one output value, and getting it needs the query plan, which this tool does not have.
@@ -159,7 +176,26 @@ The conjunction is the point. A difference that vanishes single-threaded but is 
 
 Numbers must not move when the policy does. If a tolerance can change a reported figure, everything downstream of it is negotiable and none of it is worth printing.
 
-So `oracle.py` produces findings, `measurement.py` collects them per step, `policy.py` reads that and returns a verdict, and nothing writes back. The two transcripts of the same pipeline above carry the same ULP counts, the same relative magnitudes and the same row counts; only the fire rate and the `TOLERATED` line differ. There is a test that judges one measurement under both policies and asserts exactly that.
+So `oracle.py` produces findings, `measurement.py` collects them per step, `policy.py` reads that and returns a verdict, and nothing writes back.
+
+Running `twicerun run` twice under two policies does not show you that, because each invocation runs the pipeline again and the figures move between them for exactly the reason this tool exists. `twicerun judge` scores a run that already happened and executes nothing:
+
+```
+$ uv run twicerun run pipelines/reference.py --runs 3
+$ uv run twicerun judge .twicerun/run-20260826-104305 --policy strict
+  1 daily_revenue    2 of 2  VALUE_DRIFT
+      daily_revenue: 746 of 1,000 paired rows moved on revenue
+      furthest move over 2 comparisons: revenue, 5 ulp and 5.87e-16 relative
+      495421.3042199606 against 495421.3042199603
+
+$ uv run twicerun judge .twicerun/run-20260826-104305 --policy reduction-order
+  1 daily_revenue    0 of 2  VALUE_DRIFT TOLERATED on 2 of 2
+      daily_revenue: 746 of 1,000 paired rows moved on revenue
+      furthest move over 2 comparisons: revenue, 5 ulp and 5.87e-16 relative
+      495421.3042199606 against 495421.3042199603
+```
+
+Same 746, same 5 ulp, same 5.87e-16, same pair of values. The fire rate moves and nothing under it does. A test compares those detail lines rather than describing them.
 
 ## Running it
 
@@ -170,10 +206,12 @@ uv sync --all-extras
 ./scripts/install-hooks.sh
 
 uv run twicerun run pipelines/reference.py
-uv run twicerun run pipelines/reference.py --policy reduction-order
+uv run twicerun judge .twicerun/run-* --policy reduction-order
 ```
 
 Exit codes are 0 for nothing diverged, 1 for something diverged, 2 for bad input and 3 for a crash. 2 covers a column the oracle refuses to compare and a `--key` naming a column that is not there, because both are facts about the pipeline's output rather than crashes. 1 means divergence and only divergence, so a release gate keyed on it does not also trip on a broken pipeline. A comparison downgraded to `TOLERATED` does not set it.
+
+`twicerun judge <run directory>` re-scores a saved run under a different policy without executing anything, which is how the paragraph above is checkable rather than assertable. It refuses a manifest whose artifacts retention has already dropped rather than reporting on files that are not there.
 
 `--key artifact=col,col` matches rows of one artifact on a subset of its exact columns. The columns it leaves out stop deciding what makes a row a row and start being compared as values, which changes the class a difference gets without changing the difference. It is how you say that a surrogate key is not part of the answer.
 
@@ -199,7 +237,7 @@ Its counts will not match these, for the same reason the transcript above will n
 
 Pre-registered with the rest, and it belongs here rather than in a footnote: **if the naive baseline's false-positive count on correct code had come out at zero, the oracle would be more machinery than the problem needs**, and this section would say so.
 
-It did not. Bit-exact comparison of `mean_basket` between two runs reports 1,078 to 1,374 differing rows over 10 passes, which is 539 to 687 of the 1,000 groups counted on both sides at once, on a step where nothing is wrong. `src/twicerun/compare.py` is that comparison, kept as the eval's baseline 1 rather than deleted. The equivalent raw-DuckDB measurement is in `scripts/measure_duckdb.py` and takes two seconds, so the premise can be checked without going through this repo's code at all.
+It did not. Over 20 passes, bit-exact comparison of `mean_basket` between two runs reported roughly 1,150 to 1,550 differing rows, which is about 580 to 780 of the 1,000 groups counted on both sides at once, on a step where nothing is wrong. `src/twicerun/compare.py` is that comparison, kept as the eval's baseline 1 rather than deleted. The equivalent raw-DuckDB measurement is in `scripts/measure_duckdb.py` and takes two seconds, so the premise can be checked without going through this repo's code at all.
 
 Stating the condition matters more than the outcome. A tool whose author cannot say what would have made it pointless has not tested the premise.
 
@@ -215,7 +253,7 @@ What that buys back is why it is a design choice rather than a workaround. One a
 
 **Sorting to pair rows inside a key group is a heuristic once there is more than one float column.** The ordinal sorts both sides the same way, and for a single float column sorted-to-sorted pairing is the assignment that minimises total absolute difference, so it is optimal. With several, a lexicographic sort can pair the wrong two rows inside one key group. That can only understate a difference, so the failure mode is a bounded false negative confined to within-key-group permutations of float-only differences.
 
-**A key group with no exact columns is one big group.** If every column is a float, there is no key, the whole artifact sorts as one group and rows pair by order alone. The tool reports the key it used so this is visible, but it is the weakest case and it is where the heuristic above does the most work.
+**A key group with no exact columns is one big group.** If every column is a float, there is no key, the whole artifact sorts as one group and rows pair by order alone. It is the weakest case here and it is where the heuristic above does the most work, so the report says `matched on no key` when it happens rather than leaving it to be inferred.
 
 **NaN payloads are not distinguished.** The sign survives and the payload does not.
 
@@ -235,7 +273,9 @@ What that buys back is why it is a design choice rather than a workaround. One a
 
 ## Why five runs and not two
 
-A two-run tool cannot tell "deterministic" from "non-deterministic and lucky this time". Step 6 of the reference pipeline is the proof. It is the same `row_number()` bug as step 2 at a lower tie density, and across 10 passes it fired between 0 and 4 times out of 4, with a flat 0 on 3 of them. At 1 of 4, a two-run checker reports nothing three times in four.
+A two-run tool cannot tell "deterministic" from "non-deterministic and lucky this time". Step 6 of the reference pipeline is the proof. It is the same `row_number()` bug as step 2 at a lower tie density, and over 30 passes in total it fired between 0 and 4 times out of 4. At 1 of 4, which came up repeatedly, a two-run checker reports nothing three times in four on a step that is definitely broken. It was a flat 0 of 4 on 3 of those 30, so even five runs miss it outright about one time in ten.
+
+That split, 3 flat zeros in the first 10 passes and none in the next 20, is itself the point. Nothing changed between them but the sample.
 
 With `m` comparisons and a per-comparison divergence probability `p`, a step is missed with probability `(1-p)^m`. At `p = 0.5`, going from two runs to five takes the miss rate from 50 percent to 6.3 percent for 2.5 times the runtime. Going from five to ten takes it to 0.2 percent for twice as much again. The first trade is obviously worth making, the second is a judgement call, so five is the default and `--runs` moves it.
 
