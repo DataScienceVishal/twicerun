@@ -338,21 +338,21 @@ Its counts will not match these, for the same reason the transcript above will n
 
 Measured, because the spec estimated it by counting step executions and the estimate was three times out.
 
-A pass over the reference pipeline is five executions of seven steps, plus five single-threaded executions of each step that fired. That is 60 to 65 step executions against 7 for running the pipeline once, so **8.6x to 9.3x by step count**. The spec called it 5x to 15x on that arithmetic and the arithmetic is right.
+A pass over the reference pipeline is five executions of eight steps, plus five single-threaded executions of each step that fired. That is 65 to 70 step executions against 8 for running the pipeline once, so **8.1x to 8.8x by step count**. The spec called it 5x to 15x on that arithmetic and the arithmetic is right.
 
-The wall clock is not. Over 28 passes on this machine, one pass took a **median 28 times as long as a single execution of the same pipeline, range 21x to 53x**. The denominator is run 1's own recorded time out of the manifest, because the tool cannot produce it: `--runs 1` exits 2, since one run has nothing to compare against. Where that goes, at the median:
+The wall clock is not. Over 20 passes, one pass took a **median 25 times as long as a single execution of the same pipeline**, the extremes being 21x and 43x. The denominator is run 1's own recorded time out of the manifest, because the tool cannot produce it: `--runs 1` exits 2, since one run has nothing to compare against. Where that goes, at the median:
 
 | | share of a pass | in units of one plain execution |
 |---|---|---|
-| the five runs | 18% | 5.0x |
-| the single-threaded bisect | 14% | 4.1x |
-| comparing the artifacts | 68% | 19.2x |
+| the five runs | 19% | 5.0x |
+| the single-threaded bisect | 15% | 4.0x |
+| comparing the artifacts | 65% | 16.6x |
 
 **Two thirds of the cost is the oracle, not the re-execution.** Joining two 500,000-row artifacts on a composite key, four times per step, costs more than running the pipeline that produced them. Anyone reasoning about this tool's cost from the number of runs it does will be wrong in the same direction the spec was.
 
-The range is wide because that two thirds is IO-bound. The same 28 passes split into two sessions gave medians of 27x and 37x with nothing changed but what else the laptop was doing.
+The spread is wide because that two thirds is IO-bound, and it moves with what else the machine is doing rather than with anything in the code. Two sessions of the same measurement gave medians of 25x and 37x on this laptop, and someone else's 28 passes gave 32.5x with the same 19/15/65 split inside it. Treat the multiplier as an order of magnitude, not a figure.
 
-Slice 3 added the bisect to a loop that already cost about this much, and the bisect is the 14% row: 4.1x one execution, or a quarter added to the wall time in a paired run of the two versions back to back. Containment added nothing measurable, since it changes which file a read opens and not how much work is done. The 5x to 15x the spec quoted was for the loop before either existed, and it was already wrong then for the reason above.
+The bisect is the 15% row: 4.0x one execution. Containment added nothing measurable, since it changes which file a read opens and not how much work is done.
 
 So this is a thing you run deliberately, before a release or on a schedule. `--runs` is the lever that moves it most, and it moves the miss rate with it.
 
@@ -431,9 +431,9 @@ The response after the third one was to stop publishing ranges. Stating the samp
 
 ## The reference pipeline ships broken
 
-A checker that finds nothing is indistinguishable from a checker that is broken. `pipelines/reference.py` carries four bugs, one step that drifts benignly, one step that fires intermittently, and one control step that must never fire.
+A checker that finds nothing is indistinguishable from a checker that is broken. `pipelines/reference.py` carries four bugs, one step that drifts benignly, one step that fires intermittently, one control step that must never fire, and one step whose only job is to sit downstream of a bug so the containment ablation has something to measure.
 
-Three of the four are failures Vishal has actually been bitten by running Databricks pipelines and SQL migrations: duplicate rows after a retry, IDs changing between runs, and totals not matching between runs. The fourth, the non-idempotent `MERGE`, is not a war story. It came out of an experiment for this project and he has never seen it. Its distinction is how narrow its window turned out to be: it needs a target somewhere around 100,000 to 125,000 rows, a source staged into a real table and `BIGINT` columns, and at 50,000 rows and again at 200,000 it gives the same answer every time.
+Two of the eight steps are constructed rather than observed, and both say so where they are defined: the `MERGE` bug below, and `roll_up_keys`, which exists to be fed a diverging artifact. Three of the four bugs are failures Vishal has actually been bitten by running Databricks pipelines and SQL migrations: duplicate rows after a retry, IDs changing between runs, and totals not matching between runs. The fourth, the non-idempotent `MERGE`, is not a war story. It came out of an experiment for this project and he has never seen it. Its distinction is how narrow its window turned out to be: it needs a target somewhere around 100,000 to 125,000 rows, a source staged into a real table and `BIGINT` columns, and at 50,000 rows and again at 200,000 it gives the same answer every time.
 
 Every configuration in the file was re-derived on this machine before it was written down, and two of the spec's claims did not survive that. The `MERGE` bug's cause is parallel order rather than the single-threaded persistence the spec predicted, because `threads=1` was clean at every scale tried. And at the three rows the spec proposed for it, it gives the same answer ten times out of ten.
 
