@@ -237,3 +237,22 @@ def test_the_headroom_threshold_is_printed_from_the_constant_that_enforces_it(tm
     printed = capsys.readouterr().out
     assert f"{HEADROOM_REQUIRED:,.0f}x of headroom was fixed" in printed
     assert "CLEARS" in printed or "FAILS" in printed
+
+
+def test_a_key_naming_an_artifact_that_does_not_exist_exits_two(tmp_path, capsys):
+    """It used to produce a full, confident, ordinary report with the flag ignored."""
+    code = main(["run", str(pipeline(tmp_path, CLEAN)), "--runs", "2",
+                 "--key", "no_such_artifact=i", "--run-dir", str(tmp_path / "artifacts")])
+    assert code == 2
+    assert "It writes rows" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("spelling", ["rows=,", "rows= , ", "rows=", "=i", "rows"])
+def test_a_key_that_names_no_column_is_refused(spelling):
+    """`rows=,` passed the old raw-string check and left an empty key.
+
+    An empty key is not a refusal. It puts the whole artifact in one group and
+    pairs rows by sort order, which is the weakest comparison here.
+    """
+    with pytest.raises(KeySyntaxError):
+        parse_keys([spelling])

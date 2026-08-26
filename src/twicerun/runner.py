@@ -207,6 +207,28 @@ def step_findings(
     return found
 
 
+class UnknownArtifact(LookupError):
+    """--key named an artifact this pipeline never writes."""
+
+
+def _check_keys_named_something(keys: Mapping[str, Sequence[str]], reference: RunRecord) -> None:
+    """A --key entry matching no artifact used to be dropped without a word.
+
+    keys.get(name) returned None and the artifact was compared with the default
+    key, so a typo produced a full, confident, ordinary report in which the flag
+    had done nothing. The column case already exits 2 with a helpful message;
+    this matches it, and it can only run after run 1 because that is when every
+    artifact name is known.
+    """
+    written = {a.name for step in reference.steps for a in step.artifacts}
+    unknown = sorted(set(keys) - written)
+    if unknown:
+        raise UnknownArtifact(
+            f"--key named {', '.join(unknown)}, which this pipeline does not write. "
+            f"It writes {', '.join(sorted(written)) or 'nothing'}"
+        )
+
+
 def compare_runs(
     reference: RunRecord, candidate: RunRecord, keys: Mapping[str, Sequence[str]]
 ) -> list[list[ArtifactFindings]]:
@@ -249,6 +271,7 @@ def run_pipeline(
         carried = written
 
     keys = keys or {}
+    _check_keys_named_something(keys, manifest.runs[0])
     measured = [
         StepMeasurement(index=s.index, name=s.name, comparisons=runs - 1, terms=s.rows_read)
         for s in manifest.runs[0].steps

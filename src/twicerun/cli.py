@@ -7,7 +7,7 @@ from pathlib import Path
 
 from twicerun.columns import FloatInKey, UnknownKeyColumn, UnsupportedColumn
 from twicerun.policy import REDUCTION_ORDER, STRICT, Policy
-from twicerun.runner import PipelineError, run_pipeline
+from twicerun.runner import PipelineError, UnknownArtifact, run_pipeline
 from twicerun.storage import MissingArtifact
 
 
@@ -88,15 +88,23 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def parse_keys(declared: list[str]) -> dict[str, tuple[str, ...]]:
+    """Validate what came out of the split, not what went into it.
+
+    `--key rows=,` passed the raw check, because "," survives strip(), and then
+    the comprehension filtered every name out and left an empty tuple. An empty
+    key is not a refusal: it puts the artifact in one group and pairs rows by
+    sort order, which is the weakest comparison this tool has, silently.
+    """
     keys = {}
     for entry in declared:
-        artifact, sep, columns = entry.partition("=")
-        if not sep or not artifact.strip() or not columns.strip():
+        artifact, sep, spelled = entry.partition("=")
+        columns = tuple(c.strip() for c in spelled.split(",") if c.strip())
+        if not sep or not artifact.strip() or not columns:
             raise KeySyntaxError(
                 f"--key {entry!r} is not artifact=column[,column]. "
                 f"For example --key daily_revenue=day"
             )
-        keys[artifact.strip()] = tuple(c.strip() for c in columns.split(",") if c.strip())
+        keys[artifact.strip()] = columns
     return keys
 
 
@@ -122,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
     except (PipelineError, MissingArtifact, KeySyntaxError) as exc:
         print(f"twicerun: {exc}", file=sys.stderr)
         return 2
-    except (UnsupportedColumn, UnknownKeyColumn, FloatInKey) as exc:
+    except (UnsupportedColumn, UnknownKeyColumn, FloatInKey, UnknownArtifact) as exc:
         # A column the oracle refuses is a fact about the pipeline's output,
         # not a crash, so it shares exit 2 with the other bad-input cases.
         print(f"twicerun: {exc}", file=sys.stderr)
