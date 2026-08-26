@@ -416,6 +416,13 @@ def measure(
     code path the run command used. Comparing artifacts on disk is a pure
     function of those artifacts, which is why a saved run can be re-scored at
     all.
+
+    The main loop only. `attach_bisect` is a separate call because
+    `run_pipeline` needs these fire rates before it knows which steps to
+    bisect, so the two cannot be one function without measuring twice. Calling
+    it from in here as well made a hidden no-op at run time and left a window
+    where every step's `cause` was None for a reason nothing could distinguish
+    from having no bisect. Both callers now do the two calls in order.
     """
     reference = manifest.runs[0]
     _check_keys_named_something(keys, reference)
@@ -430,7 +437,6 @@ def measure(
         for step, ran, found in zip(measured, later.steps, found_here, strict=True):
             step.observe(found)
             step.uncontained_reads.update(ran.uncontained_reads)
-    attach_bisect(manifest, measured, keys)
     return measured
 
 
@@ -453,17 +459,18 @@ def rejudge(
             f"{missing[0]}. Retention drops old run directories, so judge the current one or "
             f"rerun with --keep"
         )
+    measured = measure(manifest, keys or {})
+    attach_bisect(manifest, measured, keys or {})
     return Report(
         pipeline=manifest.pipeline,
         run_dir=str(manifest.root),
         runs=len(manifest.runs),
         environment=manifest.environment,
-        steps=measure(manifest, keys or {}),
-        seconds=sum(run.seconds for run in manifest.runs),
+        steps=measured,
+        seconds=None,
         policy=policy,
         contained=manifest.contained,
         bisect_error=manifest.bisect_error,
-        keep=0,
     )
 
 

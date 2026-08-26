@@ -38,12 +38,17 @@ class Report:
     runs: int
     environment: Environment
     steps: list[StepMeasurement]
-    seconds: float
+    # Both None when a saved run is being judged, because judging executes
+    # nothing and deletes nothing. Printing the run command's words over
+    # figures that are not true of the run is worse than printing neither: the
+    # seconds were out by about 8x and the retention read as "keeping
+    # everything", which is also how 0 is spelled for the flag.
+    seconds: float | None
     policy: Policy = field(default_factory=Policy)
     contained: bool = True
     bisect_error: str | None = None
     pruned: int = 0
-    keep: int = 1
+    keep: int | None = None
 
     @property
     def verdicts(self) -> list[StepVerdict]:
@@ -71,11 +76,19 @@ class Report:
             f"duckdb     {env.duckdb_version}, threads={env.threads}",
             f"platform   {env.platform}",
             f"artifacts  {self.run_dir}",
-            f"retention  keeping {self.keep} run "
-            + ("directory" if self.keep == 1 else "directories")
-            + (f", dropped {self.pruned}" if self.pruned else ""),
+            *self._retention(),
             "",
         ]
+
+    def _retention(self) -> list[str]:
+        if self.keep is None:
+            return []
+        kept = (
+            "everything"
+            if self.keep == 0
+            else _plural(self.keep, "run directory", "run directories")
+        )
+        return [f"retention  keeping {kept}" + (f", dropped {self.pruned}" if self.pruned else "")]
 
     def _containment(self) -> str:
         if self.contained:
@@ -208,9 +221,10 @@ class Report:
         fired = sum(1 for v in verdicts if v.fired)
         tolerated = sum(v.tolerated for v in verdicts)
         silent = [s.name for s in self.steps if s.artifacts_compared == 0]
+        took = "" if self.seconds is None else f" in {self.seconds:.1f}s"
         lines = [
             "",
-            f"{fired} of {len(self.steps)} steps diverged in {self.seconds:.1f}s"
+            f"{fired} of {len(self.steps)} steps diverged{took}"
             + (
                 f", with {_plural(tolerated, "further comparison")} measured "
                 f"and downgraded to TOLERATED."

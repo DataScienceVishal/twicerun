@@ -403,6 +403,28 @@ def test_judging_one_saved_run_twice_shows_the_measurement_holding_still(tmp_pat
     assert measured_lines(strict), "the comparison would be vacuous with nothing measured"
 
 
+def test_judge_does_not_print_figures_that_are_not_true_of_the_run(tmp_path, capsys):
+    """It executed nothing and deleted nothing, so it claims neither.
+
+    Retention read `keeping 0 run directories`, which is also how the flag
+    spells keep everything, over a command that prunes nothing at all. The
+    duration was the saved pipeline's five executions printed in the words the
+    run command uses for its whole pass, which under-reported by about 8x.
+    """
+    main(["run", str(pipeline(tmp_path, TOLERABLE_DRIFT)), "--runs", "2",
+          "--run-dir", str(tmp_path / "rd")])
+    run_dir = next((tmp_path / "rd").glob("run-*"))
+    printed_by_run = capsys.readouterr().out
+
+    main(["judge", str(run_dir)])
+    printed_by_judge = capsys.readouterr().out
+
+    assert "retention  keeping 1 run directory" in printed_by_run
+    assert "retention" not in printed_by_judge
+    assert "steps diverged in " in printed_by_run
+    assert "steps diverged." in printed_by_judge
+
+
 def test_judge_takes_the_manifest_file_as_well_as_the_directory(tmp_path):
     where = pipeline(tmp_path, TOLERABLE_DRIFT)
     main(["run", str(where), "--runs", "2", "--run-dir", str(tmp_path / "rd")])
