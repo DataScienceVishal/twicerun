@@ -55,10 +55,21 @@ def load_steps(path: Path) -> list[Step]:
 
 
 def new_run_dir(parent: Path) -> Path:
+    """A fresh directory, never an existing one.
+
+    Second resolution keeps the name readable, and two invocations inside one
+    second used to collide and raise FileExistsError out of the CLI. Falling
+    back to a counter rather than to microseconds keeps the common case legible.
+    """
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    run_dir = parent / f"run-{stamp}"
-    run_dir.mkdir(parents=True, exist_ok=False)
-    return run_dir
+    for suffix in ["", *(f"-{n}" for n in range(1, 1000))]:
+        run_dir = parent / f"run-{stamp}{suffix}"
+        try:
+            run_dir.mkdir(parents=True, exist_ok=False)
+            return run_dir
+        except FileExistsError:
+            continue
+    raise PipelineError(f"1000 run directories already exist for {stamp} under {parent}")
 
 
 def execute_run(

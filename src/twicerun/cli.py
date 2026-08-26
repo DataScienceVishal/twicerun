@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import traceback
 from pathlib import Path
 
 from twicerun.runner import PipelineError, run_pipeline
@@ -13,6 +14,9 @@ def build_parser() -> argparse.ArgumentParser:
         prog="twicerun",
         description="Run a pipeline several times on the same input and report, "
         "per step, how often it failed to give the same answer.",
+        epilog="Exit codes: 0 nothing diverged, 1 something diverged, "
+        "2 bad input, 3 the run crashed. 1 means only divergence, so a release "
+        "gate keyed on it does not also trip on a broken pipeline.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -37,19 +41,32 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if not args.pipeline.is_file():
+        print(f"twicerun: no pipeline file at {args.pipeline}", file=sys.stderr)
+        return 2
+
     try:
         report, _ = run_pipeline(args.pipeline, runs=args.runs, parent=args.run_dir)
     except (PipelineError, MissingArtifact) as exc:
         print(f"twicerun: {exc}", file=sys.stderr)
         return 2
-    except FileNotFoundError as exc:
-        print(f"twicerun: {exc}", file=sys.stderr)
-        return 2
+    except Exception:  # noqa: BLE001
+        # A blanket catch is correct at exactly one place, and this is it. A
+        # user's step can raise anything, and the point of catching is to give
+        # a crash its own exit code rather than let it share 1 with divergence,
+        # which would make a CI gate record the two as the same event. Nothing
+        # is swallowed: the traceback goes to stderr unchanged.
+        traceback.print_exc()
+        print(
+            "twicerun: the run crashed. Exit 3 is a crash, not a divergence.",
+            file=sys.stderr,
+        )
+        return 3
 
     print(report.render())
-    # Non-zero when anything diverged, so this is usable as a gate. On the
-    # reference pipeline that includes the benign float drift, which is the
-    # point of slice 1 rather than a bug in it.
+    # 1 is reserved for divergence so this can gate a release. On the reference
+    # pipeline that includes the benign float drift, which is the point of slice
+    # 1 rather than a bug in it.
     return 1 if any(step.fired for step in report.steps) else 0
 
 

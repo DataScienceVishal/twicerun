@@ -60,6 +60,31 @@ def test_nothing_in_the_report_claims_a_step_is_deterministic(tmp_path, capsys):
         assert forbidden not in printed
 
 
+def test_a_crashing_step_exits_three_not_one(tmp_path, capsys):
+    """1 has to mean divergence and nothing else, or a gate cannot trust it."""
+    body = (
+        "def broken(ctx):\n"
+        "    raise ValueError('the pipeline itself is wrong')\n\n\n"
+        "STEPS = [broken]\n"
+    )
+    code = main(["run", str(pipeline(tmp_path, body)), "--run-dir", str(tmp_path / "artifacts")])
+    assert code == 3
+    printed = capsys.readouterr().err
+    assert "the pipeline itself is wrong" in printed
+    assert "Exit 3 is a crash" in printed
+
+
+def test_two_invocations_in_the_same_second_do_not_collide(tmp_path, capsys):
+    """Second-resolution stamps used to raise FileExistsError out of the CLI."""
+    where = pipeline(tmp_path, CLEAN)
+    codes = [
+        main(["run", str(where), "--runs", "2", "--run-dir", str(tmp_path / "artifacts")])
+        for _ in range(3)
+    ]
+    assert codes == [0, 0, 0]
+    assert len(list((tmp_path / "artifacts").iterdir())) == 3
+
+
 def test_a_missing_pipeline_file_exits_two(tmp_path, capsys):
     code = main(["run", str(tmp_path / "absent.py"), "--run-dir", str(tmp_path / "artifacts")])
     assert code == 2
