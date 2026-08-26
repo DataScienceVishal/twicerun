@@ -92,23 +92,27 @@ class StepMeasurement:
         that this column is byte-identical under --policy strict and --policy
         reduction-order, and there is a test that runs both and diffs them.
 
-        None has two causes and they are different. Amplification was off, in
-        which case a zero is four comparisons on one input and no status is
-        claimed for it; or nothing was compared at all, which is the case a
-        report must never call clean, since `any([])` is False and a step that
-        wrote no artifacts would otherwise read exactly like a step that wrote
-        matching ones.
+        None has three causes and they are all the same refusal. The main loop
+        compared nothing, so `any([])` is False and a step that wrote no
+        artifacts would otherwise read exactly like a step that wrote matching
+        ones. Amplification was off, in which case a zero is four comparisons on
+        one input. Or amplification ran and not one amplifier produced a usable
+        rate, which is the same evidence as it being off and has to get the same
+        answer: three amplifiers that all declined, or all compared nothing,
+        leave a step knowing exactly what --no-amplify leaves it knowing, and
+        the difference between those two reports was a property of the machine
+        rather than of the pipeline.
         """
         if self.artifacts_compared == 0:
             return None
         if self.fired:
             return DIVERGENT
-        if not self.amplifications:
-            return None
         if any(a.fired for a in self.amplifications if a.measured):
             return STABLE_ON_THIS_INPUT
         if any(a.error for a in self.amplifications):
             return AMPLIFICATION_FAILED
+        if not any(a.measured for a in self.amplifications):
+            return None
         return NO_DIVERGENCE_OBSERVED
 
     @property

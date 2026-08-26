@@ -356,7 +356,40 @@ class Report:
             here = by_status.get(status)
             if here:
                 lines += ["", *explain(here)]
-        return lines
+        return lines + self._no_evidence_either_way()
+
+    def _no_evidence_either_way(self) -> list[str]:
+        """Steps that were amplified and got nothing usable out of any amplifier.
+
+        Every amplifier declined, or every one of them compared no artifact.
+        That leaves the step knowing exactly what --no-amplify leaves it
+        knowing, so it gets the same answer: no status, and a paragraph saying
+        what the zero above it is worth instead. Printing
+        NO_DIVERGENCE_OBSERVED here made the difference between two identical
+        bodies of evidence a property of the machine, since a box whose DuckDB
+        default is already 64 threads has all three amplifiers decline.
+        """
+        blind = [
+            s
+            for s in self.steps
+            if s.status is None and s.amplifications and s.artifacts_compared
+        ]
+        if not blind:
+            return []
+        comparisons = self.runs - 1
+        return [
+            "",
+            *_wrap(
+                f"No status on {_named(blind)}. Amplification ran and not one amplifier came back "
+                f"with a rate, so each of those is {_plural(comparisons, 'comparison')} on the "
+                f"one input this pipeline was given and nothing else. "
+                f"{_bound_words(comparisons)} {NO_DIVERGENCE_OBSERVED} needs a zero from at "
+                f"least one amplifier, and there is none to have."
+            ),
+            *(f"  {s.index} {s.name}: " + "; ".join(
+                f"{a.amplifier} {_why_not(a)}" for a in s.amplifications
+            ) for s in blind),
+        ]
 
     def _stable_on_this_input(self, steps: list[StepMeasurement]) -> list[str]:
         """The status the whole slice exists for, and the one most able to overclaim.
@@ -375,8 +408,9 @@ class Report:
         return [
             *_wrap(
                 f"{STABLE_ON_THIS_INPUT} on {_named(steps)}. Each of those gave the same "
-                f"answer {self.runs - 1} times out of {self.runs - 1} on the input this pipeline "
-                f"was handed, and stopped giving the same answer once that input was stressed:"
+                f"answer on {_plural(self.runs - 1, 'comparison')} against the input this "
+                f"pipeline was handed, and stopped giving the same answer once that input was "
+                f"stressed:"
             ),
             *hits,
             *_wrap(
@@ -395,6 +429,8 @@ class Report:
             for a in step.amplifications
             if a.error
         ]
+        # A step reaching this status has no amplifier that fired, by the order
+        # in StepMeasurement.status, so there is no rate here to lose.
         return [
             *_wrap(
                 f"{AMPLIFICATION_FAILED} on {_named(steps)}. An amplified input made the step "
@@ -419,36 +455,20 @@ class Report:
         what was moved against what was not is the only version of that
         difference a black-box tester can produce.
 
-        The lists are per step because they differ per step. A generator step
-        has no input for two of the three amplifiers to touch, and folding that
-        into one summary put the same amplifier in both lists at once.
+        Everything below the first sentence is per step, because it differs per
+        step. A generator has no input for two of the three amplifiers to touch.
+        Summarising the comparison count across the group took the smallest
+        anyone had managed and printed it as though every step had it, so a step
+        whose only evidence was a thread count inherited a sentence about
+        somebody else's tie collapse.
         """
-        smallest = min(
-            (a.comparisons for step in steps for a in step.amplifications if a.measured),
-            default=0,
+        lines = _wrap(
+            f"{NO_DIVERGENCE_OBSERVED} on {_named(steps)}. It is a fire rate and two lists, "
+            f"and it is not a verdict about the code."
         )
-        lines = [
-            *_wrap(
-                f"{NO_DIVERGENCE_OBSERVED} on {_named(steps)}. It is a fire rate and two lists, "
-                f"and it is not a verdict about the code."
-            ),
-            *_wrap(
-                f"0 of {self.runs - 1} on the real input"
-                + (f", and 0 of {smallest} under each amplifier that ran. " if smallest else ". ")
-                + _bound_words(self.runs - 1)
-                + (
-                    f" An amplifier's {smallest} rule out one above "
-                    f"{upper_bound(smallest) * 100:.0f} percent."
-                    if smallest and smallest != self.runs - 1
-                    else ""
-                )
-                + " That assumes an independence these runs do not have, since they share a "
-                "process, a page cache and a machine.",
-                indent="  ",
-            ),
-        ]
         for step in steps:
             lines.append(f"  {step.index} {step.name}")
+            lines += _wrap(self._what_a_zero_here_rules_out(step), indent="      ")
             varied = ["how many times the pipeline ran"]
             varied += [a.amplifier for a in step.amplifications if a.measured]
             lines += _wrap("varied: " + ", ".join(varied), indent="      ")
@@ -459,8 +479,26 @@ class Report:
             ]
             if missed:
                 lines += _wrap("not varied: " + ", ".join(missed), indent="      ")
-        lines += _wrap("Not varied anywhere: " + ", ".join(NOT_VARIED) + ".", indent="  ")
+        lines += _wrap(
+            "Not varied anywhere: " + ", ".join(NOT_VARIED) + ". Every bound above assumes an "
+            "independence these runs do not have, since they share a process, a page cache and a "
+            "machine.",
+            indent="  ",
+        )
         return lines
+
+    def _what_a_zero_here_rules_out(self, step: StepMeasurement) -> str:
+        smallest = min((a.comparisons for a in step.amplifications if a.measured), default=0)
+        rate = f"0 of {self.runs - 1} on the real input"
+        if smallest:
+            rate += f", and 0 of {smallest} under each amplifier that ran"
+        sentence = f"{rate}. {_bound_words(self.runs - 1)}"
+        if smallest and smallest != self.runs - 1:
+            sentence += (
+                f" An amplifier's {smallest} rule out one above "
+                f"{upper_bound(smallest) * 100:.0f} percent."
+            )
+        return sentence
 
     def _bounds(self, verdicts: list[StepVerdict]) -> list[str]:
         drifting = [v for v in verdicts if v.bound is not None]
@@ -530,14 +568,21 @@ def _bound_words(comparisons: int) -> str:
 
 
 def _attempt_line(attempt: Amplification) -> str:
-    if attempt.error:
-        return f"{attempt.amplifier:<19} raised: {attempt.error}"
+    """One amplifier's row, which can carry a rate and an error at the same time.
+
+    That combination is a probe that fired and then raised while escalating. It
+    used to print the error alone, which lost the only interesting fact in the
+    row: that the step had already given two different answers.
+    """
+    name = f"{attempt.amplifier:<19}"
     if not attempt.ran:
-        return f"{attempt.amplifier:<19} not run: {attempt.note}"
+        return f"{name} {'raised' if attempt.error else 'not run'}: {_why_not(attempt)}"
     rate = f"{attempt.fired} of {attempt.comparisons}"
     if not attempt.measured:
-        return f"{attempt.amplifier:<19} {rate}, {_why_not(attempt)}"
-    return f"{attempt.amplifier:<19} {rate}, {attempt.note}"
+        return f"{name} {rate}, {_why_not(attempt)}"
+    if attempt.error:
+        return f"{name} {rate}, {attempt.note}, then raised: {attempt.error}"
+    return f"{name} {rate}, {attempt.note}"
 
 
 def _why_not(attempt: Amplification) -> str:
@@ -548,7 +593,7 @@ def _why_not(attempt: Amplification) -> str:
     and this is the third loop where that could have been let through.
     """
     if attempt.error:
-        return "it raised"
+        return attempt.error
     if attempt.ran:
         return "over no artifact: the step wrote nothing when re-executed on its own"
     return attempt.note
