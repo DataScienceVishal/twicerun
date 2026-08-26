@@ -12,6 +12,11 @@ The trials here are built out of `StepMeasurement` rather than measured, because
 the conditions read counts the oracle already computed and nothing that points
 at a Parquet file. Ten real trials take six minutes; these take milliseconds and
 can be given the shape that never happens on a healthy laptop.
+
+Having the whole report on tap for the price of a fixture is also what lets the
+last two tests read the terminal output rather than the source, which is where
+`test_eval.py` cannot follow: text a helper composes at runtime is not a literal
+anywhere.
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from twicerun.amplify import Amplification
+from twicerun.amplify import STABLE_ON_THIS_INPUT, Amplification
 from twicerun.measurement import StepMeasurement
 from twicerun.oracle import ArtifactFindings
 from twicerun.policy import Policy
@@ -30,6 +35,7 @@ from eval import (  # noqa: E402
     BENIGN,
     INTERMITTENT,
     PAIRS,
+    WIDTH,
     NaiveScore,
     Trial,
     report_attribution,
@@ -206,3 +212,33 @@ def test_a_twin_that_fires_beats_an_incomplete_twin_sample():
     loud.twins[2] = a_step(2, PAIRS[2][1], fired=1)
     ten = [a_trial(artifacts=0) for _ in range(9)] + [loud]
     assert verdict_for(verdicts(ten), "any twin fired") == "TRIGGERED"
+
+
+def test_nothing_the_eval_prints_claims_a_step_is_deterministic(capsys):
+    """The four words `test_cli.py` holds the report to, applied to the eval's output.
+
+    Both fixtures, because the silent one reaches six sentences the healthy one
+    never prints and "compared nothing" prose is exactly where one of these
+    words gets in. The status token comes out of the text first, the same way
+    the CLI's version of this test does it, because STABLE_ON_THIS_INPUT is
+    allowed and the bare word is not.
+    """
+    verdicts([a_trial() for _ in range(10)])
+    verdicts([a_trial(artifacts=0) for _ in range(10)])
+    printed = capsys.readouterr().out.replace(STABLE_ON_THIS_INPUT, "").lower()
+    for forbidden in ("deterministic", "stable", "reproducible", "passed"):
+        assert forbidden not in printed
+
+
+def test_no_printed_line_runs_past_the_width_the_eval_wraps_to(capsys):
+    """Every long line in the eval is hand-broken, and hand-broken lines rot.
+
+    Two of them went to 106 and 115 characters within an hour of being written,
+    both because a denominator picked up a clause. This holds at the ten trials
+    and five runs the eval defaults to: a fire rate out of nine buckets, which
+    is what --runs 10 would print, is wider than anything measured here.
+    """
+    verdicts([a_trial() for _ in range(10)])
+    verdicts([a_trial(artifacts=0) for _ in range(10)])
+    over = [line for line in capsys.readouterr().out.splitlines() if len(line) > WIDTH]
+    assert not over, over[:3]

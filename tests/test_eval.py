@@ -15,12 +15,14 @@ from pathlib import Path
 
 import pytest
 
-from twicerun.amplify import STABLE_ON_THIS_INPUT, Amplification
+from twicerun.amplify import DIVERGENT, STABLE_ON_THIS_INPUT, Amplification
 from twicerun.cause import Bisect
 from twicerun.measurement import StepMeasurement
 from twicerun.oracle import ArtifactFindings
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+EVAL = Path(__file__).resolve().parent.parent / "scripts" / "eval.py"
+
+sys.path.insert(0, str(EVAL.parent))
 
 from eval import (  # noqa: E402
     BROKEN,
@@ -206,39 +208,72 @@ def test_the_eval_makes_the_directory_it_is_going_to_delete(tmp_path):
 
 
 def printed_prose() -> str:
-    """Every literal the eval hands to `say`, and nothing else in the file.
+    """Every string literal in the eval that is prose rather than an identifier.
 
-    Walked rather than grepped. Scanning lines that look like strings picked up
-    the JSON key "stable_trials", which is written to a file and never printed,
-    and a test that fails on a dict key is a test that gets deleted.
+    Inclusive rather than call by call, which is the correction. The first
+    version of this collected constants inside `say(...)` and nothing else, so
+    it reached none of the eight condition texts, none of the eight evidence
+    lines, the specificity table or baseline 3's per-step lines, which all go
+    through `hang`, and nothing a helper composes and returns. Three mutations
+    putting a forbidden word where the eval really prints it left every test in
+    this file green.
+
+    Dict keys and subscript keys come back out, because they are identifiers
+    rather than words and one of them is `stable_trials`, which goes to the JSON
+    file and is never printed. A test that fails on a dict key is a test that
+    gets deleted. Docstrings come out because nothing prints them, and the
+    runtime half of this check is in `test_eval_conditions.py`, which reads the
+    terminal output itself.
     """
-    tree = ast.parse((Path(__file__).resolve().parent.parent / "scripts" / "eval.py")
-                     .read_text(encoding="utf-8"))
-    said = []
+    tree = ast.parse(EVAL.read_text(encoding="utf-8"))
+    not_prose = set()
     for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and getattr(node.func, "id", "") == "say"):
-            continue
-        for piece in ast.walk(node):
-            if isinstance(piece, ast.Constant) and isinstance(piece.value, str):
-                said.append(piece.value)
-    return "\n".join(said)
+        if isinstance(node, ast.Dict):
+            not_prose.update(k for k in node.keys if isinstance(k, ast.Constant))
+        elif isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
+            not_prose.add(node.slice)
+        elif isinstance(node, ast.Module | ast.FunctionDef | ast.ClassDef):
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                not_prose.add(first.value)
+    return "\n".join(
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node not in not_prose
+    )
 
 
 @pytest.mark.parametrize("word", ["deterministic", "stable", "reproducible", "passed"])
 def test_the_eval_never_claims_a_step_is_deterministic(word):
-    """The same check the CLI report carries, on the other thing this repo prints.
+    """The same four words `test_cli.py` holds the report to, on the other thing this repo prints.
 
-    `stable` is in the list here where the CLI has to strip a token out first,
-    because the eval never spells STABLE_ON_THIS_INPUT as text: it interpolates
-    the constant, so the literals below hold none of it.
+    `stable` is in the list here where the CLI report has to strip a token out
+    of its output first, because the eval spells no status as text at all: it
+    interpolates the constant. The test below is what keeps that true.
     """
     assert word not in printed_prose().lower()
 
 
-def test_the_status_reaches_the_terminal_by_its_name_rather_than_as_text():
-    """Which is what makes the word check above a check rather than a spelling accident."""
-    source = (Path(__file__).resolve().parent.parent / "scripts" / "eval.py").read_text(
-        encoding="utf-8"
-    )
-    assert f'"{STABLE_ON_THIS_INPUT}"' not in source
-    assert source.count(STABLE_ON_THIS_INPUT) >= 3
+@pytest.mark.parametrize("status", [DIVERGENT, STABLE_ON_THIS_INPUT])
+def test_no_status_reaches_the_terminal_as_typed_text(status):
+    """Which is what makes the word check above a check rather than a spelling accident.
+
+    This used to count occurrences of the identifier in the source and assert
+    there were at least three, which is satisfied by any three lines that
+    mention it. Hardcoding the status as a literal string in the one place the
+    conditions print it left the old assertion green, so what it measured was
+    that the file imports the constant, not that it never types the text.
+    """
+    assert status not in printed_prose()
+
+
+def test_the_statuses_are_referenced_by_name_somewhere_in_the_eval():
+    """The other half of the check above, which is otherwise satisfied by never printing them."""
+    used = {
+        node.id
+        for node in ast.walk(ast.parse(EVAL.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Name)
+    }
+    assert {"DIVERGENT", "STABLE_ON_THIS_INPUT"} <= used
