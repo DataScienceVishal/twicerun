@@ -29,6 +29,12 @@ chromadb_data/
 .idea/
 
 .twicerun/
+# The eval's trial directories and the amplification-gap script's passes. Both
+# are removed on the way out, but only on the success path, so a Ctrl-C six
+# minutes into a run used to leave up to 1,292 MB of TLC-derived Parquet
+# stageable in a repository that commits no data bytes.
+.twicerun-eval/
+.twicerun-gap/
 
 # NYC TLC trip records. Fetched by scripts/fetch_tlc.py, never committed:
 # TLC publishes no licence for them, only a disclaimer that it did not create

@@ -33,6 +33,9 @@ from twicerun.amplify import AMPLIFIERS
 from twicerun.runner import amplify_runs, load_steps, run_pipeline, scored_runs
 
 LOOP = "the five-run loop"
+# In .gitignore and checked by a test, for the same reason the eval's is: the
+# rmtree below is on the success path only.
+WORKSPACE = Path(".twicerun-gap")
 REFERENCE = Path(__file__).resolve().parent.parent / "pipelines" / "reference.py"
 INTERMITTENT = 6
 
@@ -59,7 +62,7 @@ def one_pass(into: Path) -> dict[str, tuple[int, int]]:
 def main(passes: int) -> int:
     collected: list[dict[str, tuple[int, int]]] = []
     for n in range(passes):
-        collected.append(one_pass(Path(".twicerun-gap")))
+        collected.append(one_pass(WORKSPACE))
         print(f"pass {n + 1} of {passes}", file=sys.stderr, flush=True)
 
     names = [LOOP, *(name for name, _ in AMPLIFIERS)]

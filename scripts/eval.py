@@ -83,6 +83,11 @@ DOWNSTREAM = "roll_up_keys"
 
 BUDGET_SECONDS = 600.0
 
+# Where the trial directories go. Named in .gitignore, which is checked by a
+# test, because an interrupted run leaves up to 1,292 MB of TLC-derived Parquet
+# here and this repository commits no data bytes.
+WORKSPACE = Path(".twicerun-eval")
+
 NOT_MEASURED = "NOT MEASURED"
 
 
@@ -1119,7 +1124,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--trials", type=int, default=10)
     parser.add_argument("--runs", type=int, default=5)
-    parser.add_argument("--into", type=Path, default=Path(".twicerun-eval"))
+    parser.add_argument("--into", type=Path, default=WORKSPACE)
     parser.add_argument("--json", type=Path, help="write the figures out as well as printing them")
     args = parser.parse_args(argv)
     if not claim_workspace(args.into):
