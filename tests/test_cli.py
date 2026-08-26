@@ -208,7 +208,7 @@ def test_no_key_spelling_can_delete_the_pre_registered_check(tmp_path, capsys):
     """
     where = pipeline(tmp_path, TOLERABLE_DRIFT)
     main(["run", str(where), "--runs", "3", "--run-dir", str(tmp_path / "a")])
-    assert "pre-registered check" in capsys.readouterr().out
+    assert "of headroom was fixed" in capsys.readouterr().out
 
     code = main(["run", str(where), "--runs", "3", "--key", "total=g,v",
                  "--run-dir", str(tmp_path / "b")])
@@ -225,4 +225,15 @@ def test_a_key_that_leaves_the_float_out_still_measures_it(tmp_path, capsys):
     printed = capsys.readouterr().out
     assert code == 1
     assert "VALUE_DRIFT" in printed
-    assert "pre-registered check" in printed
+    assert "of headroom was fixed" in printed
+
+
+def test_the_headroom_threshold_is_printed_from_the_constant_that_enforces_it(tmp_path, capsys):
+    """A project whose argument is that the threshold has not moved cannot print it twice."""
+    from twicerun.policy import HEADROOM_REQUIRED
+
+    main(["run", str(pipeline(tmp_path, TOLERABLE_DRIFT)), "--runs", "2",
+          "--run-dir", str(tmp_path / "artifacts")])
+    printed = capsys.readouterr().out
+    assert f"{HEADROOM_REQUIRED:,.0f}x of headroom was fixed" in printed
+    assert "CLEARS" in printed or "FAILS" in printed

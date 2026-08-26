@@ -102,7 +102,18 @@ class Report:
         drifting = [v for v in verdicts if v.bound is not None]
         if not drifting:
             return []
-        lines = ["", "reassociation bound, computed rather than picked:"]
+        lines = [
+            "",
+            "reassociation bound, computed rather than picked:",
+            f"  {HEADROOM_REQUIRED:,.0f}x of headroom was fixed before any of this was "
+            f"written and has not moved since.",
+            "  Below is that one check at two choices of n. The first is the count the spec "
+            "settled on and carries a",
+            "  factor of the output row count in slack. The second is the terms behind one "
+            "output value, has no slack",
+            "  in it, and is expected to fail. Both print so the slack is visible rather than "
+            "described.",
+        ]
         for verdict in drifting:
             lines.append(f"  {verdict.step.index} {verdict.step.name}")
             lines.extend(f"      {line}" for line in _bound_lines(verdict.bound))
@@ -220,17 +231,23 @@ def _bound_lines(bound: DriftBound) -> list[str]:
     Two ratios, because they answer different questions. The first uses the n
     the spec settled on and is the check as written. The second uses the terms
     behind one output value, which is the version with no slack in it, and if
-    the two disagree the margin in the first one came from the slack rather
-    than from the drift being small.
+    the two disagree the margin in the first came from the slack rather than
+    from the drift being small.
+
+    Both verdicts read CLEARS or FAILS in the same column, and both ratios use
+    the same fixed-point format. They did not: the second printed lowercase at
+    the end of the longest sentence in the block, and switched to scientific
+    notation in exactly the case where it cleared, so the block read as one
+    assertion breaking rather than as two answers to the same question.
     """
-    verdict = "clears" if bound.ratio >= HEADROOM_REQUIRED else "FAILS"
-    tight = "clears" if bound.tight_ratio >= HEADROOM_REQUIRED else "fails"
     return [
-        f"n = {bound.terms:,} rows read by the step, so the bound is "
-        f"{bound.bound:.4e} relative",
-        f"observed max relative drift {bound.observed:.4e}, which is "
-        f"{bound.ratio:.3g}x inside the bound",
-        f"pre-registered check wanted 1000x of headroom and {verdict} it",
-        f"at n = {bound.tight_terms:,} terms per output row the bound is "
-        f"{bound.tight_bound:.4e} and the headroom is {bound.tight_ratio:.3g}x, which {tight}",
+        f"observed furthest relative drift {bound.observed:.4e}",
+        f"n = {bound.terms:,} rows read by the step, bound {bound.bound:.4e}, "
+        f"headroom {bound.ratio:,.0f}x  {_verdict(bound.ratio)}",
+        f"n = {bound.tight_terms:,} terms per output row, bound {bound.tight_bound:.4e}, "
+        f"headroom {bound.tight_ratio:,.0f}x  {_verdict(bound.tight_ratio)}",
     ]
+
+
+def _verdict(headroom: float) -> str:
+    return "CLEARS" if headroom >= HEADROOM_REQUIRED else "FAILS"
