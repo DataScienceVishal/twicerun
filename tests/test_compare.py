@@ -86,7 +86,7 @@ def test_a_new_column_stops_the_row_comparison(con, make_artifact):
     right = make_artifact("t", "SELECT 1 AS a, 2 AS b", run=2)
     diff = compare(con, left, right)
     assert diff.diverged is True
-    assert "added ['b']" in diff.note
+    assert diff.note == "schema changed: columns added b"
     assert (diff.only_in_reference, diff.only_in_candidate) == (0, 0)
 
 
@@ -94,7 +94,16 @@ def test_a_widened_column_is_reported_as_a_type_change(con, make_artifact):
     left = make_artifact("t", "SELECT 1::INTEGER AS a", run=1)
     right = make_artifact("t", "SELECT 1::BIGINT AS a", run=2)
     diff = compare(con, left, right)
-    assert diff.note == "column types changed: a INTEGER to BIGINT"
+    assert diff.note == "schema changed: types changed a INTEGER to BIGINT"
+
+
+def test_a_drop_and_a_widening_are_both_reported(con, make_artifact):
+    """Reporting only the first difference found hid the other one."""
+    left = make_artifact("t", "SELECT 1::INTEGER AS a, 2 AS b, 3 AS c", run=1)
+    right = make_artifact("t", "SELECT 1::BIGINT AS a, 3 AS c", run=2)
+    assert compare(con, left, right).note == (
+        "schema changed: columns dropped b; types changed a INTEGER to BIGINT"
+    )
 
 
 def test_digest_sql_quotes_awkward_column_names():

@@ -118,13 +118,25 @@ def compare(
 
 
 def _schema_change(reference: Artifact, candidate: Artifact) -> str:
+    """Every way the two schemas differ, not the first one found.
+
+    A run that drops one column and widens another has done two things and the
+    report should say both. Only reached when the column dictionaries differ, so
+    at least one of the three clauses always fires.
+    """
     gone = sorted(set(reference.columns) - set(candidate.columns))
     added = sorted(set(candidate.columns) - set(reference.columns))
-    if gone or added:
-        return f"schema changed, columns dropped {gone or 'none'}, added {added or 'none'}"
-    changed = [
+    retyped = [
         f"{column} {reference.columns[column]} to {candidate.columns[column]}"
         for column in reference.columns
-        if reference.columns[column] != candidate.columns[column]
+        if column in candidate.columns and reference.columns[column] != candidate.columns[column]
     ]
-    return f"column types changed: {', '.join(changed)}"
+
+    parts = []
+    if gone:
+        parts.append(f"columns dropped {', '.join(gone)}")
+    if added:
+        parts.append(f"columns added {', '.join(added)}")
+    if retyped:
+        parts.append(f"types changed {', '.join(retyped)}")
+    return "schema changed: " + "; ".join(parts)
