@@ -21,12 +21,13 @@ import os
 import re
 import shutil
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
 
+from twicerun.cause import BISECT_THREADS, Bisect
 from twicerun.manifest import Artifact, Environment, Manifest, RunRecord, StepRecord
 from twicerun.measurement import StepMeasurement
 from twicerun.oracle import ArtifactFindings, compare
@@ -180,19 +181,31 @@ def execute_run(
     run_dir: Path,
     carried: dict[str, Artifact],
     reference: RunRecord | None = None,
+    only: Collection[int] | None = None,
+    threads: int | None = None,
 ) -> tuple[RunRecord, dict[str, Artifact]]:
-    """One execution of the pipeline.
+    """One execution of the pipeline, or of the steps in `only`.
 
     `reference` is run 1's record and turns containment on: every read resolves
     against what run 1 had written by that point. Run 1 itself passes None, and
     so does every run under --no-containment.
+
+    `only` and `threads` are the bisect's. Executing one step out of the middle
+    of a pipeline works for the same reason containment works: whatever the
+    skipped steps would have written is already on disk under run 1. Each run
+    gets its own in-memory database, so setting threads here changes this
+    execution and nothing else.
     """
     con = duckdb.connect()
+    if threads is not None:
+        con.execute(f"SET threads={threads}")
     written: dict[str, Artifact] = {}
     record = RunRecord(run=run)
     began = time.perf_counter()
     try:
         for index, step in enumerate(steps):
+            if only is not None and index not in only:
+                continue
             ctx = StepContext(
                 con,
                 run=run,
@@ -311,6 +324,69 @@ def compare_runs(
         con.close()
 
 
+def bisect_runs(
+    steps: list[Step], reference: RunRecord, divergent: Sequence[int], run_dir: Path, runs: int
+) -> list[RunRecord]:
+    """Re-execute the divergent steps `runs` times at threads=1, under containment.
+
+    The same `runs` as the main loop, so the two fire rates share a denominator.
+    A three-run bisect under a five-run loop would print two fractions that
+    cannot be compared with each other, which is most of the value gone.
+
+    Cost is `len(divergent) * runs` step executions and no more: the steps that
+    never fired are not re-executed, because there is nothing about them for a
+    thread count to explain.
+
+    The state a step carries starts empty here, exactly as it did for run 1 of
+    the main loop, and every later single-threaded run reads the first one's.
+    Seeding it from the main loop's run 1 instead was wrong in a way that took a
+    reference-pipeline run to see: `append_audit_log` then read the same log in
+    all five single-threaded executions, agreed with itself five times, and was
+    labelled PARALLEL_ORDER. Duplicating a log on rerun has nothing to do with
+    threads. The bisect has to be the main loop again at one thread, or its
+    zero answers a different question from the one the other rate asked.
+    """
+    carried: dict[str, Artifact] = {}
+    first: dict[str, Artifact] = {}
+    records = []
+    for run in range(1, runs + 1):
+        record, written = execute_run(
+            steps,
+            run,
+            run_dir / f"threads-{BISECT_THREADS}" / f"run-{run:02d}",
+            carried,
+            reference=reference,
+            only=set(divergent),
+            threads=BISECT_THREADS,
+        )
+        records.append(record)
+        if run == 1:
+            first = written
+        carried = first
+    return records
+
+
+def attach_bisect(
+    manifest: Manifest, measured: list[StepMeasurement], keys: Mapping[str, Sequence[str]]
+) -> None:
+    """Score the single-threaded runs against each other and hang the rate on each step.
+
+    Run in `measure`, so a saved run judged again gets the same cause line from
+    the same comparison code rather than from a number copied into the manifest.
+    """
+    if len(manifest.bisect) < 2:
+        return
+    reference, *later = manifest.bisect
+    fired = dict.fromkeys((s.index for s in reference.steps), 0)
+    for run in later:
+        for step, found in zip(reference.steps, compare_runs(reference, run, keys), strict=True):
+            if any(f.diverged for f in found):
+                fired[step.index] += 1
+    for step in measured:
+        if step.index in fired:
+            step.bisect = Bisect(comparisons=len(later), fired=fired[step.index])
+
+
 def measure(
     manifest: Manifest, keys: Mapping[str, Sequence[str]]
 ) -> list[StepMeasurement]:
@@ -334,6 +410,7 @@ def measure(
         for step, ran, found in zip(measured, later.steps, found_here, strict=True):
             step.observe(found)
             step.uncontained_reads.update(ran.uncontained_reads)
+    attach_bisect(manifest, measured, keys)
     return measured
 
 
@@ -345,7 +422,7 @@ def rejudge(
         raise PipelineError(f"{manifest_path} holds one run, so there is nothing to compare")
     missing = [
         a.path
-        for run in manifest.runs
+        for run in (*manifest.runs, *manifest.bisect)
         for step in run.steps
         for a in step.artifacts
         if not Path(a.path).exists()
@@ -414,6 +491,13 @@ def run_pipeline(
             carried = reference_written if contained else written
 
         measured = measure(manifest, keys or {})
+        divergent = [step.index for step in measured if step.fired]
+        if divergent:
+            # Which steps get bisected comes off the measured fire rate rather
+            # than off the verdict, so the same pipeline under two policies
+            # re-executes the same steps and produces the same artifacts.
+            manifest.bisect = bisect_runs(steps, reference, divergent, run_dir, runs)
+            attach_bisect(manifest, measured, keys or {})
         manifest.save()
         report = Report(
             pipeline=str(pipeline),

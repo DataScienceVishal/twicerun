@@ -226,7 +226,7 @@ def test_the_same_drift_exits_one_under_strict_and_zero_under_reduction_order(tm
                      "--run-dir", str(tmp_path / "b")])
     downgraded = capsys.readouterr().out
     assert tolerant == 0
-    assert "0 of 2  VALUE_DRIFT TOLERATED on 2 of 2" in downgraded
+    assert "0 of 2  VALUE_DRIFT PARALLEL_ORDER TOLERATED on 2 of 2" in downgraded
 
     # The measured size is the same string in both, which is the whole argument
     # for splitting measurement from policy.
@@ -363,7 +363,7 @@ def test_judging_one_saved_run_twice_shows_the_measurement_holding_still(tmp_pat
     tolerant = capsys.readouterr().out
 
     assert "2 of 2  VALUE_DRIFT" in strict
-    assert "0 of 2  VALUE_DRIFT TOLERATED on 2 of 2" in tolerant
+    assert "0 of 2  VALUE_DRIFT PARALLEL_ORDER TOLERATED on 2 of 2" in tolerant
     assert measured_lines(strict) == measured_lines(tolerant)
     assert measured_lines(strict), "the comparison would be vacuous with nothing measured"
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from twicerun.cause import Bisect
 from twicerun.oracle import ArtifactFindings, ColumnDrift, Divergence
 
 # Ordered so a report lists the classes the same way every time, loudest first.
@@ -36,6 +37,7 @@ class StepMeasurement:
     terms: int = 0
     rounds: list[list[ArtifactFindings]] = field(default_factory=list)
     uncontained_reads: set[str] = field(default_factory=set)
+    bisect: Bisect | None = None
 
     def observe(self, findings: list[ArtifactFindings]) -> None:
         self.rounds.append(findings)
@@ -56,6 +58,18 @@ class StepMeasurement:
         beside this one and never overwrites it.
         """
         return sum(1 for round_ in self.diverged if round_)
+
+    @property
+    def cause(self) -> str | None:
+        """What the single-threaded re-execution made of this step's divergence.
+
+        None where there is nothing to explain, which is a step that never
+        fired, and where nothing was measured, which is a manifest written
+        before the bisect existed.
+        """
+        if self.bisect is None or not self.fired:
+            return None
+        return self.bisect.label
 
     @property
     def classes(self) -> frozenset[Divergence]:

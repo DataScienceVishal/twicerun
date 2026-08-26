@@ -112,6 +112,11 @@ class Manifest:
     contained: bool = True
     started: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
     runs: list[RunRecord] = field(default_factory=list)
+    # The single-threaded re-executions, holding only the steps that diverged.
+    # Recorded rather than summarised into a fire rate, so `judge` re-derives
+    # that rate from the artifacts through the same comparison code the run
+    # used instead of trusting a number this file could have got wrong.
+    bisect: list[RunRecord] = field(default_factory=list)
 
     def save(self) -> Path:
         where = self.root / "manifest.json"
@@ -140,6 +145,7 @@ class Manifest:
             contained=body.get("contained", False),
             started=body["started"],
             runs=[_run_record(run) for run in body["runs"]],
+            bisect=[_run_record(run) for run in body.get("bisect", [])],
         )
 
 

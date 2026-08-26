@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from twicerun.cause import BISECT_THREADS, CONFIDENCE, PARALLEL_ORDER, upper_bound
 from twicerun.manifest import Environment
 from twicerun.measurement import StepMeasurement, name_classes
 from twicerun.oracle import ArtifactFindings, KeyEffect
@@ -52,6 +53,7 @@ class Report:
         sections = [
             self._header(judged),
             self._steps(judged),
+            self._causes(),
             self._bounds(judged),
             self._footer(judged),
         ]
@@ -94,7 +96,7 @@ class Report:
             step = verdict.step
             label = f"{step.index} {step.name}".ljust(width)
             rate = f"{verdict.fired} of {step.comparisons}"
-            tail = name_classes(step.classes)
+            tail = " ".join(filter(None, (name_classes(step.classes), step.cause)))
             if verdict.tolerated:
                 tail = f"{tail} TOLERATED on {verdict.tolerated} of {step.comparisons}"
             lines.append(f"  {label}  {rate:>8}  {tail}".rstrip())
@@ -111,6 +113,51 @@ class Report:
             lines.extend(f"      {line}" for line in _fallbacks(step))
             if verdict.blocked:
                 lines.append(f"      {verdict.blocked}")
+        return lines
+
+    def _causes(self) -> list[str]:
+        """The two matched fire rates per divergent step, and what the zero is worth.
+
+        The caveat is printed once above the table rather than under each row.
+        Every rate shares a denominator, so the sentence would be identical on
+        every line, and six copies of a warning is how a warning stops being
+        read.
+        """
+        bisected = [s for s in self.steps if s.cause is not None]
+        if not bisected:
+            return []
+        comparisons = bisected[0].bisect.comparisons
+        rules_out = upper_bound(comparisons) * 100
+        lines = [
+            "",
+            f"cause, from re-executing each divergent step {self.runs} times at "
+            f"threads={BISECT_THREADS}:",
+            f"  Both rates are out of {comparisons}, which is what lets them be read against "
+            f"each other.",
+            f"  A zero is {comparisons} clean comparisons and no more than that: it rules out "
+            f"a per-comparison rate",
+            f"  above {rules_out:.0f} percent, {CONFIDENCE * 100:.0f} percent one-sided, "
+            f"assuming an independence these runs do not have",
+            "  since they share a process, a page cache and a machine.",
+        ]
+        if not self.contained:
+            lines.append(
+                "  Containment is off for the loop above but not here: a step cannot be "
+                "re-executed on its own"
+            )
+            lines.append(
+                "  without run 1's artifacts to read, so a step that only inherited a "
+                "divergence can read as "
+                f"{PARALLEL_ORDER} below."
+            )
+        width = max(len(f"{s.index} {s.name}") for s in bisected)
+        for step in bisected:
+            lines.append(
+                f"  {f'{step.index} {step.name}'.ljust(width)}  {step.cause:<24}  "
+                f"{step.fired} of {step.comparisons} at threads={self.environment.threads}, "
+                f"{step.bisect.fired} of {step.bisect.comparisons} at "
+                f"threads={step.bisect.threads}"
+            )
         return lines
 
     def _bounds(self, verdicts: list[StepVerdict]) -> list[str]:
