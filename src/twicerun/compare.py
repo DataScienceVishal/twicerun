@@ -22,6 +22,7 @@ from pathlib import Path
 
 import duckdb
 
+from twicerun.columns import schema_difference
 from twicerun.manifest import Artifact
 from twicerun.storage import quote
 
@@ -80,7 +81,7 @@ def compare(
     con: duckdb.DuckDBPyConnection, reference: Artifact, candidate: Artifact
 ) -> ArtifactDiff:
     if reference.columns != candidate.columns:
-        note = _schema_change(reference, candidate)
+        note = schema_difference(reference.columns, candidate.columns)
         return ArtifactDiff(
             name=reference.name,
             reference_rows=reference.rows,
@@ -115,28 +116,3 @@ def compare(
         only_in_reference=int(unmatched[0]),
         only_in_candidate=int(unmatched[1]),
     )
-
-
-def _schema_change(reference: Artifact, candidate: Artifact) -> str:
-    """Every way the two schemas differ, not the first one found.
-
-    A run that drops one column and widens another has done two things and the
-    report should say both. Only reached when the column dictionaries differ, so
-    at least one of the three clauses always fires.
-    """
-    gone = sorted(set(reference.columns) - set(candidate.columns))
-    added = sorted(set(candidate.columns) - set(reference.columns))
-    retyped = [
-        f"{column} {reference.columns[column]} to {candidate.columns[column]}"
-        for column in reference.columns
-        if column in candidate.columns and reference.columns[column] != candidate.columns[column]
-    ]
-
-    parts = []
-    if gone:
-        parts.append(f"columns dropped {', '.join(gone)}")
-    if added:
-        parts.append(f"columns added {', '.join(added)}")
-    if retyped:
-        parts.append(f"types changed {', '.join(retyped)}")
-    return "schema changed: " + "; ".join(parts)

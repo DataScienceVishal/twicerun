@@ -161,3 +161,31 @@ def _checked_override(
 
 def clock_columns(columns: Mapping[str, str], among: Iterable[str]) -> tuple[str, ...]:
     return tuple(c for c in among if is_clock(columns[c]))
+
+
+def schema_difference(
+    reference: Mapping[str, str], candidate: Mapping[str, str]
+) -> str | None:
+    """Every way two column sets differ, not the first one found.
+
+    A run that drops one column and widens another has done two things and the
+    report should say both.
+    """
+    if reference == candidate:
+        return None
+    gone = sorted(set(reference) - set(candidate))
+    added = sorted(set(candidate) - set(reference))
+    retyped = [
+        f"{column} {reference[column]} to {candidate[column]}"
+        for column in reference
+        if column in candidate and reference[column] != candidate[column]
+    ]
+
+    parts = []
+    if gone:
+        parts.append(f"columns dropped {', '.join(gone)}")
+    if added:
+        parts.append(f"columns added {', '.join(added)}")
+    if retyped:
+        parts.append(f"types changed {', '.join(retyped)}")
+    return "schema changed: " + "; ".join(parts)
