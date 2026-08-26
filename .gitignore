@@ -29,3 +29,8 @@ chromadb_data/
 .idea/
 
 .twicerun/
+
+# NYC TLC trip records. Fetched by scripts/fetch_tlc.py, never committed:
+# TLC publishes no licence for them, only a disclaimer that it did not create
+# the data, so the repository carries the checksums and the address instead.
+data/
