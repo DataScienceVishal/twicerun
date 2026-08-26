@@ -91,8 +91,8 @@ class Report:
             worst = step.worst
             if worst is not None:
                 lines.append(f"      {worst.describe()}")
-                lines.extend(f"      {line}" for line in _magnitudes(worst))
                 lines.extend(f"      {line}" for line in _attribution(worst))
+            lines.extend(f"      {line}" for line in _magnitudes(step))
             lines.extend(f"      {hint}" for hint in step.hints)
             if verdict.blocked:
                 lines.append(f"      {verdict.blocked}")
@@ -131,17 +131,25 @@ class Report:
         return lines
 
 
-def _magnitudes(findings: ArtifactFindings) -> list[str]:
-    """The two numbers next to each other, for someone tracing a total by hand.
+def _magnitudes(step: StepMeasurement) -> list[str]:
+    """The furthest a float moved anywhere in the step, and the pair that did it.
 
     A verdict is what a build gate needs. Someone reconciling a figure that did
-    not add up needs the pair of values that disagreed, so the pair is printed
-    rather than summarised.
+    not add up needs the two values that disagreed, so they are printed rather
+    than summarised. All three figures come off one ColumnDrift, so the
+    magnitude here and the one the bound is checked against cannot drift apart.
     """
-    worst = findings.worst_drift
-    if worst is None or worst.example[0] is None:
+    furthest = step.furthest_drift
+    if furthest is None:
         return []
-    return [f"worst pair on {worst.column}: {worst.example[0]} against {worst.example[1]}"]
+    scope = _plural(step.comparisons)
+    line = (
+        f"furthest move over {scope}: {furthest.column}, "
+        f"{furthest.max_ulps} ulp and {furthest.max_relative:.2e} relative"
+    )
+    if furthest.example[0] is None:
+        return [line]
+    return [line, f"{furthest.example[0]} against {furthest.example[1]}"]
 
 
 def _attribution(findings: ArtifactFindings) -> list[str]:

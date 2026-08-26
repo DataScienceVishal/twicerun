@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from twicerun.oracle import ArtifactFindings, Divergence
+from twicerun.oracle import ArtifactFindings, ColumnDrift, Divergence
 
 # Ordered so a report lists the classes the same way every time, loudest first.
 CLASS_ORDER = [
@@ -67,15 +67,31 @@ class StepMeasurement:
         return max(every, key=_rank, default=None)
 
     @property
-    def max_relative(self) -> float | None:
-        seen = [
-            d.max_relative
+    def furthest_drift(self) -> ColumnDrift | None:
+        """The single pair that moved furthest, anywhere in this step.
+
+        One object rather than a set of independent maxima, so the magnitude on
+        the step line, the magnitude in the bound section and the pair of values
+        printed underneath are all the same observation. They were not: the step
+        line showed the comparison with the most drifting rows and the bound
+        section the largest magnitude across comparisons, both labelled as
+        maxima, and on the reference pipeline they disagreed on about one float
+        step-pass in six. Always understating, so a reader tracing a total saw
+        less drift than had occurred.
+        """
+        every = [
+            d
             for round_ in self.rounds
             for f in round_
             for d in f.drift
             if d.max_relative is not None
         ]
-        return max(seen) if seen else None
+        return max(every, key=lambda d: d.max_relative, default=None)
+
+    @property
+    def max_relative(self) -> float | None:
+        furthest = self.furthest_drift
+        return None if furthest is None else furthest.max_relative
 
     @property
     def max_ulps(self) -> int | None:

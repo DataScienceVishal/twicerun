@@ -173,16 +173,12 @@ class ArtifactFindings:
                 f"{self.unmatched_candidate:,} later rows found no partner, "
                 f"against {self.reference_rows:,} reference rows"
             )
+        # Row counts only. This describes one comparison, and a magnitude here
+        # read as a maximum over the step while the bound section printed a real
+        # one, so the two disagreed by design about one float step-pass in six.
         worst = self.worst_drift
         if worst is not None:
-            parts.append(
-                f"{worst.rows:,} of {self.matched:,} paired rows moved on {worst.column}"
-                + (
-                    f", up to {worst.max_ulps} ulp and {worst.max_relative:.2e} relative"
-                    if worst.approximate
-                    else ""
-                )
-            )
+            parts.append(f"{worst.rows:,} of {self.matched:,} paired rows moved on {worst.column}")
         if not parts:
             return f"{self.name}: {self.matched:,} rows paired, none differing"
         return f"{self.name}: " + ", ".join(parts)

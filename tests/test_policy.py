@@ -260,3 +260,22 @@ def test_an_unmeasurable_ulp_distance_does_not_block_a_relative_threshold():
     """The two thresholds test different figures, so one missing is not both."""
     lenient = Policy(STRICT, tolerance_relative=1.0)
     assert judge(step([drifting(0.5, ulps=None)]), lenient).tolerated == 1
+
+
+def test_the_step_line_and_the_bound_quote_the_same_observation():
+    """Two maxima under one word was worth about a 25 percent understatement.
+
+    The step line printed the comparison with the most drifting rows and the
+    bound section the largest magnitude across every comparison, both called a
+    maximum. Here the loudest comparison by row count is not the one that moved
+    furthest, which is the shape that used to disagree.
+    """
+    loudest = replace(drifting(3.6e-16), drift_rows=900)
+    loudest = replace(loudest, drift=(replace(loudest.drift[0], rows=900),))
+    furthest = replace(drifting(4.6e-16), drift_rows=100)
+    furthest = replace(furthest, drift=(replace(furthest.drift[0], rows=100),))
+
+    measured = step([loudest], [furthest])
+    assert measured.worst.drift_rows == 900
+    assert measured.furthest_drift.max_relative == 4.6e-16
+    assert judge(measured, Policy(STRICT)).bound.observed == measured.furthest_drift.max_relative

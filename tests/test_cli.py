@@ -181,7 +181,7 @@ def test_the_same_drift_exits_one_under_strict_and_zero_under_reduction_order(tm
 
     # The measured size is the same string in both, which is the whole argument
     # for splitting measurement from policy.
-    magnitude = "up to 1 ulp"
+    magnitude = "1 ulp and 1.16e-16 relative"
     assert magnitude in printed and magnitude in downgraded
 
 
