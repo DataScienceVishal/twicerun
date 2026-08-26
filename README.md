@@ -80,7 +80,7 @@ Three files carry the idea.
 
 ## Why five runs and not two
 
-A two-run tool cannot tell "deterministic" from "non-deterministic and lucky this time". Step 6 of the reference pipeline is the proof. It is the same `row_number()` bug as step 2 at a lower tie density, and across five invocations it fired 1, 1, 2, 4 and 4 times out of 4. At 1 of 4, a two-run checker reports nothing three times in four.
+A two-run tool cannot tell "deterministic" from "non-deterministic and lucky this time". Step 6 of the reference pipeline is the proof. It is the same `row_number()` bug as step 2 at a lower tie density, and across 13 invocations it fired between 1 and 4 times out of 4. At 1 of 4, a two-run checker reports nothing three times in four.
 
 With `m` comparisons and a per-comparison divergence probability `p`, a step is missed with probability `(1-p)^m`. At `p = 0.5`, going from two runs to five takes the miss rate from 50 percent to 6.3 percent for 2.5 times the runtime. Going from five to ten takes it to 0.2 percent for twice as much again. The first trade is obviously worth making, the second is a judgement call, so five is the default and `--runs` moves it.
 

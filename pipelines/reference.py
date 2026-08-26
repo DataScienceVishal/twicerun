@@ -68,8 +68,13 @@ def customer_keys(ctx: StepContext) -> None:
     500 rows share every value of `cust`, and nothing in the ORDER BY decides
     which of them comes first, so the parallel sort is free to order them
     differently on a rerun. Measured at 275,280 to 491,520 rows of 500,000
-    getting a different key, firing on every attempt. The fix is one word:
-    ORDER BY cust, event_id.
+    getting a different key. The fix is one word: ORDER BY cust, event_id.
+
+    Two queries in one session diverged on every attempt. Two separate runs
+    reading the same Parquet file do not: across 13 invocations of the five-run
+    loop this step fired 2 to 4 times out of 4, never fewer than 2 and not
+    always 4. The spec has it firing every time, which was true of the narrower
+    measurement it came from.
     """
     ctx.read("customers")
     ctx.write(
@@ -99,6 +104,10 @@ def apply_price_updates(ctx: StepContext) -> None:
     Parquet or over range(), the merge gave one answer in 10 of 10 at every
     thread count. And the columns have to be BIGINT. The identical merge on
     INTEGER columns gave 1 to 3 distinct answers where BIGINT gave 4 to 8.
+
+    In the pipeline it fires 1 to 4 times out of 4 across 13 invocations. The
+    first five invocations all gave 4 of 4 and the sixth gave 1 of 4, which is
+    a small reminder that five samples of an intermittent thing is not many.
     """
     ctx.read("price_updates")
     ctx.state(
@@ -148,11 +157,12 @@ def mean_basket(ctx: StepContext) -> None:
 def sparse_customer_keys(ctx: StepContext) -> None:
     """Bug 2's code at two rows per tie group, where it fires only sometimes.
 
-    Eighteen attempts on this machine landed on roughly 0, 8,480, or a quarter
-    of the table, with zero coming up about a third of the time. A two-run
-    checker would call this clean on a third of its attempts, which is the
-    argument for running five times rather than twice, and the argument for
-    slice 4's amplification on top of that.
+    Eighteen standalone attempts landed on roughly 0, 8,480, or a quarter of
+    the table, with zero coming up about a third of the time. Inside the
+    five-run loop it fires 1 to 4 times out of 4 across 13 invocations, so at
+    its worst a two-run checker has a 3 in 4 chance of reporting nothing. That
+    gap is the argument for running five times rather than twice, and slice 4's
+    amplification exists because five runs still cannot close it.
     """
     ctx.read("sparse_customers")
     ctx.write(
