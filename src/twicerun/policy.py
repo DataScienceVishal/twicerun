@@ -30,6 +30,13 @@ from twicerun.oracle import ArtifactFindings, Divergence
 STRICT = "strict"
 REDUCTION_ORDER = "reduction-order"
 
+# Which of the two routes downgraded a finding. They carry different claims, so
+# the report cannot describe one in the other's terms: the derived route asserts
+# a mechanism and is the one missing a condition, while a manual threshold is a
+# user saying a difference of that size does not matter to them.
+BY_BOUND = "the derived reassociation bound"
+BY_THRESHOLD = "a --tolerance threshold"
+
 # The unit roundoff for float64. Half an ulp at 1.0.
 UNIT_ROUNDOFF = 2.0**-53
 
@@ -167,15 +174,23 @@ def judge(step: StepMeasurement, policy: Policy) -> StepVerdict:
     # merely reassociated in the others.
     pure = step.classes == frozenset({Divergence.VALUE_DRIFT})
     fired = tolerated = 0
+    routes: set[str] = set()
     for round_ in step.diverged:
         if not round_:
             continue
-        if all(_tolerable(f, policy, bound, pure) for f in round_):
+        took = [_tolerable(f, policy, bound, pure) for f in round_]
+        if all(took):
             tolerated += 1
+            routes.update(took)
         else:
             fired += 1
 
-    unverified = (MISSING_CONDITION,) if tolerated and policy.name == REDUCTION_ORDER else ()
+    # Gated on the route that actually downgraded something, not on the policy
+    # name. --policy reduction-order --tolerance-rel 0.001 sends a difference
+    # thousands of times outside the bound down the manual route, and gating on
+    # the name printed "every TOLERATED rests on conditions 1 and 3" over a
+    # downgrade that had cleared neither.
+    unverified = (MISSING_CONDITION,) if BY_BOUND in routes else ()
     return StepVerdict(
         step=step,
         fired=fired,
@@ -204,30 +219,43 @@ def _bound_for(step: StepMeasurement) -> DriftBound | None:
 
 def _tolerable(
     findings: ArtifactFindings, policy: Policy, bound: DriftBound | None, pure: bool
-) -> bool:
-    """Whether one artifact's findings can be downgraded.
+) -> str | None:
+    """Which route downgrades one artifact's findings, or None if neither does.
 
-    Anything other than VALUE_DRIFT blocks it outright, and so does drift on an
-    exact column: no reordering of a fixed-point addition or a string
-    concatenation changes the answer, so a DECIMAL that moved is a wrong answer
-    whatever its size.
+    Returning the route rather than a bool is what lets the report say what a
+    downgrade rests on. The two are not interchangeable: the derived bound is a
+    claim about a mechanism and is short a condition until slice 3, while a
+    manual threshold is a user's claim about their own data and is complete as
+    it stands.
+
+    Anything other than VALUE_DRIFT blocks both routes outright, and so does
+    drift on an exact column: no reordering of a fixed-point addition or a
+    string concatenation changes the answer, so a DECIMAL that moved is a wrong
+    answer whatever its size.
     """
     if findings.classes != frozenset({Divergence.VALUE_DRIFT}):
-        return False
+        return None
     if any(not moved.approximate for moved in findings.drift):
-        return False
+        return None
 
     worst_relative = max((m.max_relative or 0.0) for m in findings.drift)
     worst_ulps = max((m.max_ulps or 0) for m in findings.drift)
 
-    if policy.manual and _inside_manual(policy, worst_relative, worst_ulps):
-        return True
-    return (
+    # The derived bound is tried first so that whenever it can explain a
+    # difference it is the reason on record, and a manual threshold only ever
+    # covers what the bound could not. Checking manual first hid the bound's
+    # work behind a user's threshold and made the note on the missing condition
+    # depend on flag order.
+    if (
         policy.name == REDUCTION_ORDER
         and pure
         and bound is not None
         and worst_relative <= bound.bound
-    )
+    ):
+        return BY_BOUND
+    if policy.manual and _inside_manual(policy, worst_relative, worst_ulps):
+        return BY_THRESHOLD
+    return None
 
 
 def _inside_manual(policy: Policy, relative: float, ulps: int) -> bool:

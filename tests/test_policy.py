@@ -154,6 +154,35 @@ def test_nothing_is_unverified_when_nothing_was_downgraded():
     assert judge(step([losing_rows()]), Policy(REDUCTION_ORDER)).unverified == ()
 
 
+def test_a_manual_downgrade_under_reduction_order_does_not_claim_the_bound():
+    """The note has to follow the route that downgraded, not the policy name.
+
+    --policy reduction-order --tolerance-rel 0.001 sends a difference thousands
+    of times outside the bound down the manual route. Gating the note on the
+    policy name printed "every TOLERATED rests on conditions 1 and 3" over a
+    downgrade that had cleared neither, in a report that stated the magnitude
+    was outside the bound nine lines further down.
+    """
+    outside = step([drifting(1e-6)])
+    verdict = judge(outside, Policy(REDUCTION_ORDER, tolerance_relative=1e-3))
+    assert verdict.tolerated == 1
+    assert verdict.unverified == ()
+
+
+def test_a_step_using_both_routes_still_names_the_missing_condition():
+    """One comparison the bound explains, one only the manual threshold does."""
+    mixed = step([drifting(4.5e-16)], [drifting(1e-6)])
+    verdict = judge(mixed, Policy(REDUCTION_ORDER, tolerance_relative=1e-3))
+    assert verdict.tolerated == 2
+    assert any("threads=1" in note for note in verdict.unverified)
+
+
+def test_the_bound_is_the_reason_on_record_when_it_can_explain_the_difference():
+    """Order matters. A threshold wide enough to cover everything used to hide it."""
+    wide = Policy(REDUCTION_ORDER, tolerance_relative=1.0, tolerance_ulps=10**9)
+    assert judge(step([drifting(4.5e-16)]), wide).unverified != ()
+
+
 def test_a_manual_tolerance_works_under_strict_because_it_is_a_domain_claim():
     """--tolerance-ulps is someone saying they know their data, not a mechanism claim.
 
