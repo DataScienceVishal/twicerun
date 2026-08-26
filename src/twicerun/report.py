@@ -22,9 +22,11 @@ class StepVerdict:
     name: str
     comparisons: int
     fired: int = 0
+    artifacts_compared: int = 0
     worst: ArtifactDiff | None = field(default=None)
 
     def observe(self, diffs: list[ArtifactDiff]) -> None:
+        self.artifacts_compared += len(diffs)
         diverged = [d for d in diffs if d.diverged]
         if not diverged:
             return
@@ -71,14 +73,25 @@ class Report:
         for step in self.steps:
             label = f"{step.index} {step.name}".ljust(label_width)
             rate = f"{step.fired} of {step.comparisons}"
-            detail = step.worst.describe() if step.worst else ""
+            if step.artifacts_compared == 0:
+                detail = "wrote no artifacts, so nothing was compared"
+            else:
+                detail = step.worst.describe() if step.worst else ""
             lines.append(f"  {label}  {rate:>8}  {detail}".rstrip())
 
         fired = sum(1 for s in self.steps if s.fired)
+        silent = [s.name for s in self.steps if s.artifacts_compared == 0]
         footer = [
             "",
             f"{fired} of {len(self.steps)} steps diverged in {self.seconds:.1f}s.",
             "Comparison is bit-exact over a canonical row hash, so a float aggregate that",
             "reassociates under parallelism counts here exactly as a wrong answer does.",
         ]
+        if silent:
+            footer += [
+                "",
+                f"{len(silent)} step(s) wrote nothing and were therefore not checked at all: "
+                f"{', '.join(silent)}.",
+                "A 0 of 4 from a step with no artifacts is not evidence about that step.",
+            ]
         return "\n".join([*header, *lines, *footer])

@@ -77,6 +77,19 @@ STEPS = [two_outputs]
 '''
 
 
+WRITES_NOTHING = '''
+def real_work(ctx):
+    ctx.write("rows", "SELECT i FROM range(3) AS s(i)")
+
+
+def forgot_to_write(ctx):
+    ctx.sql("CREATE TABLE scratch AS SELECT i FROM range(3) AS s(i)")
+
+
+STEPS = [real_work, forgot_to_write]
+'''
+
+
 def write_pipeline(tmp_path: Path, body: str, name: str = "fake") -> Path:
     where = tmp_path / f"{name}.py"
     where.write_text(body, encoding="utf-8")
@@ -195,3 +208,21 @@ def test_the_reference_pipeline_still_loads():
         "mean_basket",
         "sparse_customer_keys",
     ]
+
+
+def test_a_step_that_wrote_nothing_is_not_reported_as_four_clean_comparisons(tmp_path):
+    """0 of 4 from a step with no artifacts is not evidence about that step.
+
+    A typo in a ctx.write name, or a step that only ever calls ctx.sql, used to
+    render identically to a step that compared four artifacts bit-exactly.
+    """
+    report, _ = run_pipeline(
+        write_pipeline(tmp_path, WRITES_NOTHING), runs=5, parent=tmp_path / "artifacts"
+    )
+    did, did_not = report.steps
+    assert did.artifacts_compared == 4
+    assert did_not.artifacts_compared == 0
+
+    printed = report.render()
+    assert "wrote no artifacts, so nothing was compared" in printed
+    assert "not checked at all: forgot_to_write" in printed
