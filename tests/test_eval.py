@@ -229,6 +229,30 @@ def test_the_pairs_name_steps_that_exist_in_both_pipelines():
         assert name in broken, name
 
 
+def test_every_twin_but_the_merge_loses_a_pattern_its_partner_carries():
+    """A twin quietly reverted to its partner's shape would fail nothing in here.
+
+    The specificity table rests entirely on `pipelines/twins.py` being the
+    one-line fix for each bug, so a twin that stopped being one would print zero
+    fires for the wrong reason and read as the strongest result in the eval.
+    Sabotaging a twin left all 305 tests green.
+
+    This is the shape check and not the behaviour: three of the four patterns
+    are visible in the text, and `apply_price_updates_deduped` is the exception
+    because no pattern separates a `MERGE` from its own fix, which is baseline
+    2's headline. A twin broken in a way the patterns cannot see, say a
+    tie-break on a second column that is also not unique, still gets past this,
+    and the eval's specificity table is what would catch that.
+    """
+    broken_flags, twin_flags = static_flags(REFERENCE), static_flags(TWINS)
+    unseparated = [
+        broken
+        for broken, twin in PAIRS
+        if broken != twin and not set(broken_flags[broken]) - set(twin_flags[twin])
+    ]
+    assert unseparated == ["apply_price_updates"]
+
+
 def test_baseline_one_counts_two_sides_against_a_total_that_can_hold_them(tmp_path):
     """A ceiling cannot be beaten, and baseline 1 beat its own by a factor of 1.27.
 
