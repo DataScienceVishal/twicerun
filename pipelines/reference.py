@@ -105,9 +105,15 @@ def apply_price_updates(ctx: StepContext) -> None:
     thread count. And the columns have to be BIGINT. The identical merge on
     INTEGER columns gave 1 to 3 distinct answers where BIGINT gave 4 to 8.
 
-    In the pipeline it fires 1 to 4 times out of 4 across 13 invocations. The
-    first five invocations all gave 4 of 4 and the sixth gave 1 of 4, which is
-    a small reminder that five samples of an intermittent thing is not many.
+    In the pipeline it fires 0 to 4 times out of 4 over 20 invocations, and one
+    of those 20 was a flat 0. So the five-run loop can report nothing at all on
+    a step that is definitely broken. Magnitude when it does fire ranges from
+    9,184 to 41,952 rows of 100,000.
+
+    The floor has now been wrong twice. The first five invocations all gave 4 of
+    4 and it went in as "every time"; the next eight put the floor at 1; twenty
+    put it at 0. Each correction came from widening the sample, which is the
+    same mistake this project exists to catch, one layer up.
     """
     ctx.read("price_updates")
     ctx.state(
@@ -159,10 +165,15 @@ def sparse_customer_keys(ctx: StepContext) -> None:
 
     Eighteen standalone attempts landed on roughly 0, 8,480, or a quarter of
     the table, with zero coming up about a third of the time. Inside the
-    five-run loop it fires 1 to 4 times out of 4 across 13 invocations, so at
-    its worst a two-run checker has a 3 in 4 chance of reporting nothing. That
-    gap is the argument for running five times rather than twice, and slice 4's
-    amplification exists because five runs still cannot close it.
+    five-run loop it fires 0 to 4 times out of 4 over 20 invocations, and it was
+    a flat 0 on two of them.
+
+    That floor is the real argument for slice 4. Five runs are much better than
+    two, but they are not enough: on 2 invocations in 20 this step is broken,
+    the tool ran it five times, and the report said nothing. Raising the number
+    of runs cannot fix that, because it lowers the miss rate for a given firing
+    probability without changing the probability. Amplification changes the
+    probability, which is why both exist.
     """
     ctx.read("sparse_customers")
     ctx.write(
