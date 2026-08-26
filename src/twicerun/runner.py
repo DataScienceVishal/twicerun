@@ -97,31 +97,57 @@ def execute_run(
     return record, written
 
 
+def step_diffs(
+    con: duckdb.DuckDBPyConnection, reference: StepRecord, candidate: StepRecord
+) -> list[ArtifactDiff]:
+    """Diffs for one step, over the union of the artifact names both runs wrote.
+
+    The union matters. Walking only the reference run's names misses a step that
+    starts producing an extra output on a later run, which is a divergence and
+    would otherwise exit 0.
+    """
+    left = {a.name: a for a in reference.artifacts}
+    right = {a.name: a for a in candidate.artifacts}
+    names = list(left) + [name for name in right if name not in left]
+
+    diffs = []
+    for name in names:
+        before, after = left.get(name), right.get(name)
+        if after is None:
+            diffs.append(
+                ArtifactDiff(
+                    name=name,
+                    reference_rows=before.rows,
+                    candidate_rows=0,
+                    only_in_reference=before.rows,
+                    only_in_candidate=0,
+                    schema_note="written by the reference run, absent from this one",
+                )
+            )
+        elif before is None:
+            diffs.append(
+                ArtifactDiff(
+                    name=name,
+                    reference_rows=0,
+                    candidate_rows=after.rows,
+                    only_in_reference=0,
+                    only_in_candidate=after.rows,
+                    schema_note="written by this run, absent from the reference run",
+                )
+            )
+        else:
+            diffs.append(compare(con, before, after))
+    return diffs
+
+
 def compare_runs(reference: RunRecord, candidate: RunRecord) -> list[list[ArtifactDiff]]:
     """Per step, the diffs between one later run and the reference run."""
     con = duckdb.connect()
     try:
-        per_step = []
-        for ref_step, cand_step in zip(reference.steps, candidate.steps, strict=True):
-            by_name = {a.name: a for a in cand_step.artifacts}
-            diffs = []
-            for artifact in ref_step.artifacts:
-                twin = by_name.get(artifact.name)
-                if twin is None:
-                    diffs.append(
-                        ArtifactDiff(
-                            name=artifact.name,
-                            reference_rows=artifact.rows,
-                            candidate_rows=0,
-                            only_in_reference=artifact.rows,
-                            only_in_candidate=0,
-                            schema_note="written by the reference run, absent from this one",
-                        )
-                    )
-                    continue
-                diffs.append(compare(con, artifact, twin))
-            per_step.append(diffs)
-        return per_step
+        return [
+            step_diffs(con, ref_step, cand_step)
+            for ref_step, cand_step in zip(reference.steps, candidate.steps, strict=True)
+        ]
     finally:
         con.close()
 

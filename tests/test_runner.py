@@ -57,6 +57,10 @@ def sometimes(ctx):
 STEPS = [sometimes]
 '''
 
+ADDS_AN_ARTIFACT = DROPS_AN_ARTIFACT.replace('CALLS["n"] == 1', 'CALLS["n"] != 1').replace(
+    "only_on_the_first_run", "only_after_the_first_run"
+)
+
 
 def write_pipeline(tmp_path: Path, body: str, name: str = "fake") -> Path:
     where = tmp_path / f"{name}.py"
@@ -88,6 +92,21 @@ def test_a_step_that_stops_writing_an_artifact_is_a_divergence(tmp_path):
     step = report.steps[0]
     assert step.fired == 2
     assert "absent from this one" in step.worst.schema_note
+
+
+def test_a_step_that_starts_writing_an_extra_artifact_is_a_divergence(tmp_path):
+    """The mirror of the case above, and the one that used to exit 0.
+
+    Walking only the reference run's artifact names never visits a name that
+    appears for the first time on a later run, so a pipeline whose second run
+    produced an output its first did not was reported clean.
+    """
+    report, _ = run_pipeline(
+        write_pipeline(tmp_path, ADDS_AN_ARTIFACT), runs=3, parent=tmp_path / "artifacts"
+    )
+    step = report.steps[0]
+    assert step.fired == 2
+    assert "absent from the reference run" in step.worst.schema_note
 
 
 def test_the_manifest_records_every_run_and_the_environment(tmp_path):
