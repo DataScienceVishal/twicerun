@@ -29,13 +29,20 @@ class StepVerdict:
         if not diverged:
             return
         self.fired += 1
-        loudest = max(diverged, key=lambda d: d.only_in_reference + d.only_in_candidate)
-        if self.worst is None or _volume(loudest) > _volume(self.worst):
+        loudest = max(diverged, key=_rank)
+        if self.worst is None or _rank(loudest) > _rank(self.worst):
             self.worst = loudest
 
 
-def _volume(diff: ArtifactDiff) -> int:
-    return diff.only_in_reference + diff.only_in_candidate
+def _rank(diff: ArtifactDiff) -> tuple[bool, int]:
+    """How interesting a diff is, given only one of them gets printed.
+
+    A schema change comes first regardless of size. It carries no row counts at
+    all, because the row comparison is skipped when the columns do not line up,
+    so ranking on volume alone sorted the one class that is never noise below a
+    two-row drift on a sibling artifact and dropped it out of the report.
+    """
+    return (diff.schema_note is not None, diff.only_in_reference + diff.only_in_candidate)
 
 
 @dataclass

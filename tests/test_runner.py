@@ -62,6 +62,21 @@ ADDS_AN_ARTIFACT = DROPS_AN_ARTIFACT.replace('CALLS["n"] == 1', 'CALLS["n"] != 1
 )
 
 
+SCHEMA_CHANGE_BESIDE_A_TINY_DRIFT = '''
+CALLS = {"n": 0}
+
+
+def two_outputs(ctx):
+    CALLS["n"] += 1
+    widened = "BIGINT" if CALLS["n"] > 1 else "INTEGER"
+    ctx.write("noisy", f"SELECT i + {CALLS['n']} AS i FROM range(2) AS s(i)")
+    ctx.write("schema", f"SELECT 1::{widened} AS v")
+
+
+STEPS = [two_outputs]
+'''
+
+
 def write_pipeline(tmp_path: Path, body: str, name: str = "fake") -> Path:
     where = tmp_path / f"{name}.py"
     where.write_text(body, encoding="utf-8")
@@ -107,6 +122,22 @@ def test_a_step_that_starts_writing_an_extra_artifact_is_a_divergence(tmp_path):
     step = report.steps[0]
     assert step.fired == 2
     assert "absent from the reference run" in step.worst.schema_note
+
+
+def test_a_schema_change_outranks_a_bigger_row_drift_in_the_report(tmp_path):
+    """Only one diff per step gets printed, so the ranking decides what is seen.
+
+    The schema diff carries no row counts, so ranking purely on volume hid a
+    column type change behind a two-row drift on a sibling artifact.
+    """
+    report, _ = run_pipeline(
+        write_pipeline(tmp_path, SCHEMA_CHANGE_BESIDE_A_TINY_DRIFT),
+        runs=3,
+        parent=tmp_path / "artifacts",
+    )
+    worst = report.steps[0].worst
+    assert worst.name == "schema"
+    assert "INTEGER to BIGINT" in worst.schema_note
 
 
 def test_the_manifest_records_every_run_and_the_environment(tmp_path):
