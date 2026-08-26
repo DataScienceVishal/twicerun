@@ -19,6 +19,7 @@ import pytest
 from twicerun.runner import (
     RUNNING,
     PipelineError,
+    UnknownArtifact,
     load_steps,
     prune_run_dirs,
     run_pipeline,
@@ -352,6 +353,37 @@ def test_only_the_last_few_run_directories_are_kept(tmp_path):
     for _ in range(5):
         run_pipeline(where, runs=2, parent=parent, keep=2)
     assert len(list(parent.glob("run-*"))) == 2
+
+
+def test_a_bad_key_does_not_take_the_previous_run_with_it(tmp_path):
+    """--key can only be checked against artifacts, which exist after run 1.
+
+    Pruning ran before the executions, so a typo deleted the run the user could
+    have judged, then exited 2 after five more executions, leaving 260 MB with
+    no manifest. The refusal is right; deleting the evidence first was not.
+    """
+    where = write_pipeline(tmp_path, ALWAYS_CLEAN)
+    parent = tmp_path / "artifacts"
+    run_pipeline(where, runs=2, parent=parent, keep=1)
+    survivor = next(parent.glob("run-*"))
+
+    with pytest.raises(UnknownArtifact):
+        run_pipeline(where, runs=2, parent=parent, keep=1, keys={"no_such_thing": ("i",)})
+
+    assert survivor.is_dir()
+    assert (survivor / "manifest.json").is_file()
+
+
+def test_a_crashing_run_does_not_take_the_previous_one_with_it(tmp_path):
+    parent = tmp_path / "artifacts"
+    run_pipeline(write_pipeline(tmp_path, ALWAYS_CLEAN), runs=2, parent=parent, keep=1)
+    survivor = next(parent.glob("run-*"))
+
+    broken = "def broken(ctx):\n    ctx.write('x', 'SELECT * FROM nope')\n\n\nSTEPS = [broken]\n"
+    with pytest.raises(duckdb.CatalogException):
+        run_pipeline(write_pipeline(tmp_path, broken, name="broken"), runs=2, parent=parent, keep=1)
+
+    assert survivor.is_dir()
 
 
 def test_keep_zero_keeps_everything(tmp_path):

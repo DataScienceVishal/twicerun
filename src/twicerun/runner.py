@@ -500,7 +500,6 @@ def run_pipeline(
     steps = load_steps(pipeline)
     run_dir = new_run_dir(parent)
     marker = mark_running(run_dir)
-    dropped = prune_run_dirs(parent, keep, current=run_dir)
     try:
         probe = duckdb.connect()
         environment = Environment.observe(probe)
@@ -549,6 +548,13 @@ def run_pipeline(
                 manifest.bisect_error = f"{type(exc).__name__}: {exc}".strip()
         attach_bisect(manifest, measured, keys or {})
         manifest.save()
+        # Pruning is last rather than first, which costs one run directory of
+        # peak disk and buys the previous run surviving anything that goes
+        # wrong in this one. --key is only checkable against artifacts that
+        # exist, so a typo raises after five executions have finished, and
+        # pruning up front had already deleted the run the user could have
+        # judged instead. A crashing step lost it the same way.
+        dropped = prune_run_dirs(parent, keep, current=run_dir)
         report = Report(
             pipeline=str(pipeline),
             run_dir=str(run_dir),

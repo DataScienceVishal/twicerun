@@ -293,7 +293,9 @@ It refuses a float column, and the reason is worth stating because the flag look
 
 `--no-containment` is the ablation described above. It is the only flag here that changes what gets measured rather than how it is judged, which is why `judge` does not have it: a saved run was executed one way or the other and cannot be re-scored into the other.
 
-One pass writes about 260 MB of Parquet under `.twicerun/`, which is gitignored: 205 MB for the five runs and 53 MB for the single-threaded bisect. By default only the current run directory is kept, so the footprint stays at roughly that however many times you run it. `--keep 0` turns pruning off, and `rm -rf .twicerun` reclaims the lot.
+One pass writes about 260 MB of Parquet under `.twicerun/`, which is gitignored: 205 MB for the five runs and 53 MB for the single-threaded bisect. Retention keeps one directory **per concurrent invocation**, so run it serially and the footprint stays at roughly 260 MB however many times you run it. `--keep 0` turns pruning off, and `rm -rf .twicerun` reclaims the lot.
+
+Two things that follow from how retention works, both deliberate and neither obvious. Pruning happens at the end of a successful run, not the start, so a run that fails cannot delete the run you would have judged instead, and peak disk during a pass is one directory more than `--keep` says. And a run still writing is never a deletion candidate, because deleting it would pull the Parquet out from under another process, so three parallel invocations leave three directories and 778 MB. The header says when that happened rather than repeating a promise it suspended.
 
 The tests run with no credentials and no network:
 
