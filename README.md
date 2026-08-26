@@ -178,6 +178,8 @@ uv run python scripts/eval.py --json out.json
 
 Run A's wall clock is the odd one because the laptop was running other things, which the cost section further down is already about.
 
+A fifth ten-trial run, in a fresh clone outside the working tree, is the independent one and it is not in the table because it is not the same code path being questioned. It gave `customer_keys` 4x6 3x4, `apply_price_updates` 4x6 3x3 2x1, `sparse_customer_keys` 4x4 3x1 2x3 1x2, the other five steps unchanged, zero twin fires, 30 of 30 on attribution, and every condition not triggered, in 370s.
+
 | step | run A | run B | run C | run D |
 |---|---|---|---|---|
 | 0 `generate_inputs` | `0 of 4` on all 10 | on all 10 | on all 10 | on all 10 |
@@ -633,6 +635,8 @@ uv run python scripts/check_fingerprint.py
 ```
 
 CI runs all three. The pre-commit hook runs the second and third, not the tests, because a suite that takes twenty seconds on every commit gets disabled within a day. So a change that passes locally and skips the hook can still fail on push, and the hook is the cheap half rather than the whole gate.
+
+`--disable-socket` is in `addopts`, and it is live rather than configured. Drop a test that opens a TCP connection into `tests/` and the suite fails with `SocketBlockedError: A test tried to use socket.socket.` before the connection is attempted. That matters more since slice 5, because `scripts/fetch_tlc.py` now exists and does open one: nothing under `tests/` imports it for a download, and the guard is what enforces that rather than the intention.
 
 The hook resolves both tools out of `.venv/bin` and refuses to commit if ruff is missing rather than skipping it. That is not fussiness: it used `command -v ruff`, which on a machine following this README finds nothing at all, because `uv sync` does not put ruff on `PATH`. It skipped silently and let three lint errors through. Where `PATH` did have a ruff it was an unrelated 0.12.0 against the 0.16.4 pinned here, so the hook was running a different linter from CI and never said which. It prints its version now.
 
