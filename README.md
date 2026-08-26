@@ -14,40 +14,33 @@ contained  on, so runs 2 to 5 read run 1's artifacts and a divergence at one ste
 policy     strict, so any difference at all is a divergence
 duckdb     1.5.5, threads=10
 platform   macOS-26.5.2-arm64-arm-64bit
-artifacts  .twicerun/run-20260826-131018
+artifacts  .twicerun/run-20260826-142450
 retention  keeping 1 run directory
 
-  0 generate_inputs         0 of 4
-  1 daily_revenue           4 of 4  VALUE_DRIFT  cause PARALLEL_ORDER
-      daily_revenue: 714 of 1,000 paired rows moved on revenue
-      furthest move over 4 comparisons: revenue, 4 ulp and 4.77e-16 relative
-      488567.08646427933 against 488567.0864642791
-  2 customer_keys           4 of 4  ROW_MISSING ROW_EXTRA  cause PARALLEL_ORDER
+  0 generate_inputs         0 of 4  NO_DIVERGENCE_OBSERVED
+  1 daily_revenue           4 of 4  DIVERGENT  VALUE_DRIFT  cause PARALLEL_ORDER
+      daily_revenue: 748 of 1,000 paired rows moved on revenue
+      furthest move over 4 comparisons: revenue, 6 ulp and 6.88e-16 relative
+      507275.3538700737 against 507275.35387007403
+  2 customer_keys           4 of 4  DIVERGENT  ROW_MISSING ROW_EXTRA  cause PARALLEL_ORDER
       customer_keys: 491,520 of 500,000 reference rows and 491,520 later rows found no partner
       dropping surrogate_id from the key takes unmatched reference rows from 491,520 to 0
       event_id does the same, so surrogate_id is named first because it is the one no input to this step carries
-  3 apply_price_updates     2 of 4  ROW_MISSING ROW_EXTRA  cause PARALLEL_ORDER
-      prices: 18,720 of 125,000 reference rows and 18,720 later rows found no partner
-      dropping price_cents from the key takes unmatched reference rows from 18,720 to 0
-  4 append_audit_log        4 of 4  MULTIPLICITY  cause PERSISTS_SINGLE_THREADED
+  3 apply_price_updates     0 of 4  STABLE_ON_THIS_INPUT
+  4 append_audit_log        4 of 4  DIVERGENT  MULTIPLICITY  cause PERSISTS_SINGLE_THREADED
       audit_log: 3,953 later rows found no partner, against 3,953 reference rows
-  5 mean_basket             4 of 4  VALUE_DRIFT  cause PARALLEL_ORDER
-      mean_basket: 625 of 1,000 paired rows moved on mean_amount
-      furthest move over 4 comparisons: mean_amount, 4 ulp and 4.61e-16 relative
-      246.6479063732773 against 246.6479063732774
-  6 sparse_customer_keys    1 of 4  ROW_MISSING ROW_EXTRA  cause PARALLEL_ORDER
-      sparse_customer_keys: 237,280 of 500,000 reference rows and 237,280 later rows found no partner
-      dropping surrogate_id from the key takes unmatched reference rows from 237,280 to 0
-      event_id does the same, so surrogate_id is named first because it is the one no input to this step carries
-  7 roll_up_keys            0 of 4
+  5 mean_basket             4 of 4  DIVERGENT  VALUE_DRIFT  cause PARALLEL_ORDER
+      mean_basket: 640 of 1,000 paired rows moved on mean_amount
+      furthest move over 4 comparisons: mean_amount, 4 ulp and 4.59e-16 relative
+      247.6771335188818 against 247.67713351888167
+  6 sparse_customer_keys    0 of 4  STABLE_ON_THIS_INPUT
+  7 roll_up_keys            0 of 4  NO_DIVERGENCE_OBSERVED
 
 cause, from re-executing each divergent step 5 times at threads=1:
-  1 daily_revenue         PARALLEL_ORDER            4 of 4 at threads=10, 0 of 4 at threads=1
-  2 customer_keys         PARALLEL_ORDER            4 of 4 at threads=10, 0 of 4 at threads=1
-  3 apply_price_updates   PARALLEL_ORDER            2 of 4 at threads=10, 0 of 4 at threads=1
-  4 append_audit_log      PERSISTS_SINGLE_THREADED  4 of 4 at threads=10, 4 of 4 at threads=1
-  5 mean_basket           PARALLEL_ORDER            4 of 4 at threads=10, 0 of 4 at threads=1
-  6 sparse_customer_keys  PARALLEL_ORDER            1 of 4 at threads=10, 0 of 4 at threads=1
+  1 daily_revenue     PARALLEL_ORDER            4 of 4 at threads=10, 0 of 4 at threads=1
+  2 customer_keys     PARALLEL_ORDER            4 of 4 at threads=10, 0 of 4 at threads=1
+  4 append_audit_log  PERSISTS_SINGLE_THREADED  4 of 4 at threads=10, 4 of 4 at threads=1
+  5 mean_basket       PARALLEL_ORDER            4 of 4 at threads=10, 0 of 4 at threads=1
 
   Both rates are out of 4, which is what lets them be read against each other.
   PARALLEL_ORDER means the step stopped diverging with one thread. That is 4 clean comparisons and no
@@ -58,6 +51,53 @@ cause, from re-executing each divergent step 5 times at threads=1:
   than guessing between a clock read, a data-dependent branch, appended state and something
   outside the pipeline.
 
+amplification, 3 runs per amplifier on the 4 steps that never fired:
+  0 generate_inputs
+      tie collapse        not run: this step reads no artifact, so there is no input to substitute
+      thread count        0 of 2, threads raised to 20 from the 10 in the loop above
+      row multiplication  not run: this step reads no artifact, so there is no input to substitute
+  3 apply_price_updates
+      tie collapse        0 of 2, price_updates.sku into 400 buckets, from 2 to 500 rows per value
+      thread count        4 of 4, threads raised to 20 from the 10 in the loop above
+      row multiplication  0 of 2, price_updates 200,000 rows to 400,000
+  6 sparse_customer_keys
+      tie collapse        4 of 4, sparse_customers.cust into 1,000 buckets, from 2 to 500 rows per value
+      thread count        2 of 4, threads raised to 20 from the 10 in the loop above
+      row multiplication  1 of 4, sparse_customers 500,000 rows to 1,000,000
+  7 roll_up_keys
+      tie collapse        0 of 2, customer_keys.surrogate_id into 1,000 buckets, from 1 to 500 rows per value
+      thread count        0 of 2, threads raised to 20 from the 10 in the loop above
+      row multiplication  0 of 2, customer_keys 500,000 rows to 1,000,000
+
+  Tie collapse leaves each artifact's most distinct column alone, so a correct tiebreak survives
+  it, and every value it substitutes is another real value from the same column. Anything that
+  fires here is re-run at 5 runs so its rate can be read against the one above it.
+
+STABLE_ON_THIS_INPUT on 3 apply_price_updates, 6 sparse_customer_keys. Each of those gave the same
+answer 4 times out of 4 on the input this pipeline was handed, and stopped giving the same answer
+once that input was stressed:
+  3 apply_price_updates: 4 of 4 under thread count
+  6 sparse_customer_keys: 4 of 4 under tie collapse, 2 of 4 under thread count, 1 of 4 under row multiplication
+  That is the case a plain 5-run loop reports as a clean zero, which is the case this tool exists
+  for. It is not a milder DIVERGENT, and it is not this tool saying the step is fine. It says the
+  step did not fire under these particular stresses, the ones named above, and nothing beyond
+  that.
+
+NO_DIVERGENCE_OBSERVED on 0 generate_inputs, 7 roll_up_keys. It is a fire rate and two lists, and
+it is not a verdict about the code.
+  0 of 4 on the real input, and 0 of 2 under each amplifier that ran. 4 clean comparisons rule out
+  a per-comparison divergence probability above 53 percent, 95 percent one-sided. An amplifier's 2
+  rule out one above 78 percent. That assumes an independence these runs do not have, since they
+  share a process, a page cache and a machine.
+  0 generate_inputs
+      varied: how many times the pipeline ran, thread count
+      not varied: tie collapse (this step reads no artifact, so there is no input to substitute),
+      row multiplication (this step reads no artifact, so there is no input to substitute)
+  7 roll_up_keys
+      varied: how many times the pipeline ran, tie collapse, thread count, row multiplication
+  Not varied anywhere: input distribution beyond what the amplifiers above changed, memory limit
+  and spill behaviour, DuckDB version, wall clock, filesystem.
+
 reassociation bound, computed rather than picked:
   1,000x of headroom was fixed before any of this was written and has not moved since.
   Below is that one check at two choices of n. The first is the count the spec settled on and carries a
@@ -65,20 +105,22 @@ reassociation bound, computed rather than picked:
   in it, so it is normally the one that fails: it cleared on 1 of 40 step-passes here, at 1,229x. Both
   print so the slack is visible rather than described.
   1 daily_revenue
-      observed furthest relative drift 4.7656e-16
-      n = 2,000,000 rows read by the step, bound 4.4409e-10, headroom 931,868x  CLEARS
-      n = 2,000 terms per output row, bound 4.4409e-13, headroom 932x  FAILS
+      observed furthest relative drift 6.8847e-16
+      n = 2,000,000 rows read by the step, bound 4.4409e-10, headroom 645,034x  CLEARS
+      n = 2,000 terms per output row, bound 4.4409e-13, headroom 645x  FAILS
   5 mean_basket
-      observed furthest relative drift 4.6093e-16
-      n = 2,000,000 rows read by the step, bound 4.4409e-10, headroom 963,468x  CLEARS
-      n = 2,000 terms per output row, bound 4.4409e-13, headroom 963x  FAILS
+      observed furthest relative drift 4.5901e-16
+      n = 2,000,000 rows read by the step, bound 4.4409e-10, headroom 967,489x  CLEARS
+      n = 2,000 terms per output row, bound 4.4409e-13, headroom 967x  FAILS
 
-6 of 8 steps diverged in 6.8s.
+4 of 8 steps diverged in 13.4s.
 ```
 
-Step 5 is a correct float average. All 625 of those findings are the arithmetic behaving normally, and `--policy reduction-order` is the opt-in that says so.
+Step 5 is a correct float average. All 640 of those findings are the arithmetic behaving normally, and `--policy reduction-order` is the opt-in that says so.
 
 Step 4 is the one to read twice. `cause PERSISTS_SINGLE_THREADED` next to `4 of 4 at threads=1` is the tool saying the thread count is not the problem, on the one bug in the file that a rerun causes rather than parallelism.
+
+Steps 3 and 6 are the ones to read three times. Both are broken, both gave the same answer four times out of four on the input they were handed, and a five-run loop that stopped there would have printed two clean zeros. `STABLE_ON_THIS_INPUT` is what the tool prints instead, and the amplification block says which stress made each of them disagree with itself: tie collapse for one, a raised thread count for the other.
 
 **Your numbers will not match that transcript, and neither will mine on the next run.** This is a tool about non-determinism and its own output is non-deterministic, so quoting any single figure as fixed would be the wrong thing to do twice over.
 
@@ -97,15 +139,17 @@ So the table below publishes **medians over 20 passes of the five-run loop**, wh
 
 The two float steps go to zero under `reduction-order` and nothing else moves. That is the whole claim for the oracle: the false positives disappear and the four real bugs are caught by the same code that dismissed them.
 
+That table is the main loop and the amplifiers do not change it. What they add is a status per step, and over a separate 12 passes with amplification on, steps 0 and 7 came out `NO_DIVERGENCE_OBSERVED` every time and steps 1 to 5 `DIVERGENT` every time. Steps 3 and 6 are the ones that move: each reads `DIVERGENT` when the loop catches it and `STABLE_ON_THIS_INPUT` when it does not, and the amplification section below puts a number on how often that happens.
+
 The `threads=1` column is what slice 3 added, and one row of it is not like the others. Six steps stop diverging with one thread and one does not, which is the difference between a step whose answer depends on how the work was divided and a step whose answer depends on it having run before. No number of runs separates those two; a second thread count does it in one column.
 
 Every `threads=1` figure here was either 0 of 4 or 4 of 4, never anything between, across 166 bisected step-passes. That was not designed and it is not explained.
 
 ## Status
 
-Slice 3 of 7. What runs today: the storage interface, the run layout, the artifact manifest, the five-run loop, the typed oracle, leave-one-out attribution, the policy layer, containment, and the single-threaded bisect.
+Slice 4 of 7. What runs today: the storage interface, the run layout, the artifact manifest, the five-run loop, the typed oracle, leave-one-out attribution, the policy layer, containment, the single-threaded bisect, the three input amplifiers and the four statuses.
 
-What does not exist yet, in the order it arrives: input amplification and the four statuses (slice 4), the NYC TLC backfill and the eval numbers (slice 5), crash injection (slice 6), and the report generator that keeps this file's tables honest (slice 7).
+What does not exist yet, in the order it arrives: the NYC TLC backfill and the eval numbers (slice 5), crash injection (slice 6), and the report generator that keeps this file's tables honest (slice 7). `pipelines/twins.py` arrived early, in slice 4 rather than with the eval, because the twins are what stops an amplifier being a chaos generator and that had to be checkable the day the amplifiers landed.
 
 Slice 2 shipped with a disclosure in the header of every report that downgraded anything, because `reduction-order` is a conjunction of three conditions and only two of them existed:
 
@@ -167,11 +211,124 @@ Same denominator on both sides, which is the only reason the two halves of that 
 
 `PERSISTS_SINGLE_THREADED` is where the tool stops. It says the thread count is not the explanation and does not guess between a clock read, a data-dependent branch, appended state and something outside the pipeline.
 
-**A zero at `threads=1` is not proof of anything, and the report says so on the line above the rates.** Four clean comparisons put a 95 percent one-sided upper bound of 53 percent on the per-comparison rate, which is the same arithmetic that argues for five runs rather than two, applied to the bisect's own evidence. It also assumes the comparisons are independent, and they are not: they share a process, a page cache and a machine. So `PARALLEL_ORDER` is a reading of two measured rates, not a finding that single-threaded execution cannot diverge, and a test asserts that neither shape of report contains the words deterministic, stable, reproducible or passed.
+**A zero at `threads=1` is not proof of anything, and the report says so on the line above the rates.** Four clean comparisons put a 95 percent one-sided upper bound of 53 percent on the per-comparison rate, which is the same arithmetic that argues for five runs rather than two, applied to the bisect's own evidence. It also assumes the comparisons are independent, and they are not: they share a process, a page cache and a machine. So `PARALLEL_ORDER` is a reading of two measured rates, not a finding that single-threaded execution cannot diverge, and a test asserts that no shape of report contains the words deterministic, stable, reproducible or passed. `STABLE_ON_THIS_INPUT` has one of those words inside it, so the test strips the token out of the text first and what is left still has to be clean, and a second test requires the token to be printed with the paragraph saying what it does not mean.
 
 The bisect starts each single-threaded sequence from no carried state, exactly as run 1 of the main loop did, and its later runs carry run 1's artifacts with anything the bisect itself re-produced laid over the top. Both halves of that were wrong once and each cost the same mislabelling.
 
 Seeding the sequence from run 1's state was the first implementation: all five single-threaded executions of `append_audit_log` then read the same log, agreed with each other, and the step came out `PARALLEL_ORDER`. Duplicating a log on rerun has nothing to do with threads. Carrying only what the bisect re-produced was the second: a step carrying state under a name a *non-divergent* step wrote found nothing there, because the bisect skips steps that did not fire, so all five runs fell back to the seed and agreed for the same empty reason. The regression test for the first shape could not catch the second, because its state name and its write name belong to one step.
+
+## Amplification, because more runs cannot fix this
+
+Running the pipeline more times lowers the chance of missing a step that diverges with probability `p`. It does not touch `p`. That is the ceiling, and the arithmetic states it plainly: at `p = 0.2` five runs still miss 41 percent of the time, and even twenty runs leave a 15 percent upper bound on `p` when nothing fires. No practical number of runs settles the question.
+
+Amplification changes `p` instead, by handing a step an input built to make the mechanism fire. Every step the main loop found nothing in is re-executed against that substituted input, three runs each, escalating to the full five on a hit so the amplified rate and the main-loop rate share a denominator. Cost only rises where something was found.
+
+Substituting the input is allowed because this tool is not checking that the answer is right. Reproducibility is a property of the code rather than of the data, so an input with the same types and the same row count is a fair question to ask of a step, and a step that only reproduces on the data it happened to be handed is fragile.
+
+| amplifier | what it does | the bug it is aimed at |
+|---|---|---|
+| tie collapse | hashes a column's values into buckets until the artifact holds 500 rows per distinct value, leaving the most distinct column alone | `row_number() OVER (ORDER BY cust)`, which cannot disagree with itself unless `cust` has ties |
+| thread count | re-executes on the same input at twice the machine's default, floor 4, ceiling 64 | parallel reduction and parallel scan order |
+| row multiplication | duplicates every input row once | the append with no unique key, and the `MERGE`, whose source has to carry a repeated key before it can pick wrongly |
+
+Two numbers in that table were measured rather than picked. The thread floor of 4 is where the float sum switches on: over eight comparisons each it fired once at `threads=2` and eight times at `threads=4`, and it is flat from there to 40, which is also why doubling a default of 10 was expected to find nothing.
+
+500 rows per distinct value is the density at which the surrogate-key bug fired on every attempt of the standalone measurement this project started from. Inside the tool it takes that step's per-comparison rate from 0.54 to 0.96, which is the table further down. A standalone re-measurement made while building this found much less of a gap, 10 of 12 comparisons at 2 rows per value against 11 of 12 at 500, and the distance between those two pictures is the rest of the pipeline running between one execution of the step and the next. Back to back in one process the bug fires most of the time at either density; inside a five-run loop over eight steps it does not.
+
+Tie collapse replaces a value with another real value from the same column, the minimum of its hash bucket, so the type, the row count and the value domain all survive. Casting a hash back to the column's type would have worked for integers and not for `DATE` or `DECIMAL`.
+
+### The property that separates this from a chaos generator
+
+**Each amplifier is built so that the bug's own fix survives it.** Tie collapse leaves the most distinct column alone, which is exactly what `ORDER BY cust, event_id` needs to stay decided. Row multiplication does not trouble a `CREATE OR REPLACE TABLE`, and a `MERGE` over a deduplicated source gives the same answer on twice the rows. An amplifier that made correct code fail would be measuring its own violence and the tool would be worthless.
+
+That is checkable rather than assertable, because `pipelines/twins.py` is the one-line fix for every bug in the reference pipeline. Exit 1 there means the amplifiers are broken, not the twins:
+
+```bash
+uv run twicerun run pipelines/twins.py
+```
+
+Over 12 passes of that file, 72 step-passes, every step came out `NO_DIVERGENCE_OBSERVED` and nothing fired anywhere:
+
+| amplifier | twin step-passes it ran on | comparisons | fired | raised |
+|---|---|---|---|---|
+| tie collapse | 24 of 72 | 48 | 0 | 0 |
+| thread count | 72 of 72 | 144 | 0 | 0 |
+| row multiplication | 60 of 72 | 120 | 0 | 0 |
+
+**The first column is the honest part of that table.** Tie collapse declined 48 of its 72 chances, and the report says why each time rather than printing a zero. `orders.day` and `customers.cust` already hold 2,000 and 500 rows per value, which is at or past what the amplifier targets, so there is nothing for it to raise; `generate_inputs` reads no artifact at all, so two of the three amplifiers have nothing to substitute. A twin an amplifier never touched is not evidence that the amplifier is safe on it, and folding those into the zero would have made the table look twice as strong as it is.
+
+### The step this was built for
+
+Step 6 of the reference pipeline is the surrogate-key bug at 2 rows per tie group, the density where it fires only sometimes. Over 40 fresh passes on this machine, with the amplifiers pointed at that step whether or not the main loop had already caught it:
+
+| | fired | per-comparison rate |
+|---|---|---|
+| the plain five-run loop | 87 of 160 comparisons, and **7 of the 40 passes were a flat 0 of 4** | 0.54 |
+| tie collapse | 153 of 160, firing on 40 of 40 passes | 0.96 |
+| row multiplication | 145 of 160, firing on 40 of 40 passes | 0.91 |
+| thread count | 91 of 144, firing on 32 of 40 passes | 0.63 |
+
+Medians and counts over 40 passes, on DuckDB 1.5.5 at `threads=10`. Not bounds, and a larger sample will move them.
+
+**On all 7 of the passes where the five-run loop reported nothing, at least one amplifier fired**, and on all 7 that included tie collapse. That is the gap the feature exists to close, measured rather than argued: a step that is definitely broken, a loop that says nothing about it roughly one pass in six, and a per-comparison rate that goes from 0.54 to 0.96 when the input is stressed.
+
+The thread-count amplifier was the one I expected to find nothing. This machine already runs DuckDB at 10 threads, and the float aggregate is flat from 4 threads upward, so doubling to 20 looked like a second look at the same thing. It is not: it fires on the surrogate-key step 63 percent of the time, and it is the amplifier that catches the `MERGE` bug when the main loop misses it. The transcript at the top of this file is one of those passes, `3 apply_price_updates  0 of 4  STABLE_ON_THIS_INPUT` with `4 of 4 under thread count` underneath.
+
+### The four statuses
+
+| status | condition |
+|---|---|
+| `DIVERGENT` | the step fired on the real input, `k >= 1` of `m` |
+| `STABLE_ON_THIS_INPUT` | 0 of `m` on the real input, `k >= 1` under at least one amplifier |
+| `NO_DIVERGENCE_OBSERVED` | 0 of `m` on the real input and 0 under every amplifier that ran |
+| `AMPLIFICATION_FAILED` | an amplified input made the step raise rather than diverge |
+
+`STABLE_ON_THIS_INPUT` is not a milder `DIVERGENT` and it is not a pass. It is the case that a plain five-run loop reports as a clean zero, which is the case this whole tool is about, so the report prints it as loudly as anything else and prints the sentence saying what it does not mean:
+
+```
+  It says the step did not fire under these particular stresses, the ones named above, and
+  nothing beyond that.
+```
+
+That sentence is enforced by a test, and so is the absence of the bare words deterministic, stable, reproducible and passed. The status token itself contains one of them, so the test strips the token out first and what is left still has to be clean.
+
+`AMPLIFICATION_FAILED` exists so that a step which raises under amplification can never fall back to green. Collapsing a column can violate a downstream uniqueness constraint, and the honest report of that is the amplifier's name and the error, not a zero:
+
+```
+  1 insists_on_uniqueness    0 of 4  AMPLIFICATION_FAILED
+      tie collapse        raised: ConstraintException: Constraint Error: PRIMARY KEY or UNIQUE constraint violation: duplicate key "0"
+      thread count        0 of 2, threads raised to 20 from the 10 in the loop above
+      row multiplication  raised: ConstraintException: Constraint Error: PRIMARY KEY or UNIQUE constraint violation: duplicate key "0"
+```
+
+Note the thread count line in the middle. One amplifier came back with a clean `0 of 2` and the step still does not get a clean status, because two of the three could not answer at all.
+
+**The status is read off the measurement, never off the policy.** A policy decides whether a difference matters and must not be able to decide whether one happened, so a step whose drift was entirely downgraded still reads `DIVERGENT` with the `TOLERATED` count beside it. Judging one saved run under `strict`, under `reduction-order` and under `--tolerance-ulps 4` gives three different reports with the same status column, and there is a test that does exactly that and diffs it.
+
+### What `NO_DIVERGENCE_OBSERVED` prints
+
+Never alone, and never as a verdict. Always the rate, the bound in words, and the list of axes that were varied against the list that were not:
+
+```
+NO_DIVERGENCE_OBSERVED on 0 generate_inputs, 7 roll_up_keys. It is a fire rate and two lists, and
+it is not a verdict about the code.
+  0 of 4 on the real input, and 0 of 2 under each amplifier that ran. 4 clean comparisons rule out
+  a per-comparison divergence probability above 53 percent, 95 percent one-sided. An amplifier's 2
+  rule out one above 78 percent. That assumes an independence these runs do not have, since they
+  share a process, a page cache and a machine.
+  0 generate_inputs
+      varied: how many times the pipeline ran, thread count
+      not varied: tie collapse (this step reads no artifact, so there is no input to substitute),
+      row multiplication (this step reads no artifact, so there is no input to substitute)
+  7 roll_up_keys
+      varied: how many times the pipeline ran, tie collapse, thread count, row multiplication
+  Not varied anywhere: input distribution beyond what the amplifiers above changed, memory limit
+  and spill behaviour, DuckDB version, wall clock, filesystem.
+```
+
+The pair of lists is the part that cannot be dropped. "Never fired in four comparisons" and "cannot fire" are different sentences, and naming what was moved against what was not is the only version of that difference a black-box tester can honestly produce. The lists are per step because they differ per step: a generator reads no artifact, so two of the three amplifiers have nothing to work with, and folding that into one summary put the same amplifier in both lists at once.
+
+An amplifier that ran and compared no artifact goes in the second list too. That is the guard the main loop and the bisect already carry, arriving in the third loop: `any([])` is False, so a step that wrote nothing when re-executed on its own scores `0 of 2` out of two comparisons of nothing and reads exactly like two clean ones. The report shows the rate and disqualifies it on the same line.
 
 ## How the comparison works
 
@@ -276,22 +433,24 @@ Running `twicerun run` twice under two policies does not show you that, because 
 
 ```
 $ uv run twicerun run pipelines/reference.py --runs 3
-$ uv run twicerun judge .twicerun/run-20260826-124119 --policy strict
-  1 daily_revenue    2 of 2  VALUE_DRIFT PARALLEL_ORDER
-      daily_revenue: 711 of 1,000 paired rows moved on revenue
-      furthest move over 2 comparisons: revenue, 5 ulp and 5.88e-16 relative
-      494720.69950346916 against 494720.6995034689
+$ uv run twicerun judge .twicerun/run-20260826-142816 --policy strict
+  1 daily_revenue           2 of 2  DIVERGENT  VALUE_DRIFT  cause PARALLEL_ORDER
+      daily_revenue: 602 of 1,000 paired rows moved on revenue
+      furthest move over 2 comparisons: revenue, 3 ulp and 3.56e-16 relative
+      490922.43387865723 against 490922.43387865706
 
-$ uv run twicerun judge .twicerun/run-20260826-124119 --policy reduction-order
-  1 daily_revenue    0 of 2  VALUE_DRIFT PARALLEL_ORDER TOLERATED on 2 of 2
-      daily_revenue: 711 of 1,000 paired rows moved on revenue
-      furthest move over 2 comparisons: revenue, 5 ulp and 5.88e-16 relative
-      494720.69950346916 against 494720.6995034689
+$ uv run twicerun judge .twicerun/run-20260826-142816 --policy reduction-order
+  1 daily_revenue           0 of 2  DIVERGENT  VALUE_DRIFT  cause PARALLEL_ORDER  TOLERATED on 2 of 2 by the derived reassociation bound
+      daily_revenue: 602 of 1,000 paired rows moved on revenue
+      furthest move over 2 comparisons: revenue, 3 ulp and 3.56e-16 relative
+      490922.43387865723 against 490922.43387865706
 ```
 
-Same 711, same 5 ulp, same 5.88e-16, same pair of values. The fire rate moves and nothing under it does. A test compares those detail lines rather than describing them.
+Same 602, same 3 ulp, same 3.56e-16, same pair of values, and the same `DIVERGENT`. The fire rate moves, the `TOLERATED` note appears, and nothing else does. A test compares those detail lines rather than describing them.
 
-The bisect is measurement too, so it holds still as well. Judging that one saved run under `strict`, under `reduction-order` and under `--tolerance-ulps 4` gave 21 identical detail lines and an identical cause table across all three, with only the fire rate and the `TOLERATED` count moving. `judge` re-derives the `threads=1` rate from the saved single-threaded artifacts rather than reading a number out of the manifest, so it goes through the same comparison code the run did.
+`DIVERGENT` staying put under `reduction-order` next to a fire rate of `0 of 2` is the deliberate half. The step did produce two different answers; the policy decided the difference did not matter. Letting the policy rewrite the status would have put it in the same negotiable pile as every figure a tolerance touches.
+
+The bisect and the amplifiers are measurement too, so they hold still as well. Judging one saved run under `strict`, under `reduction-order` and under `--tolerance-ulps 4` gives three different reports with an identical cause table, an identical amplification table and an identical status column, and only the fire rate and the `TOLERATED` count moving. `judge` re-derives both the `threads=1` rate and every amplifier's rate from the saved artifacts rather than reading a number out of the manifest, so all three go through the comparison code the run used.
 
 ## Running it
 
@@ -304,9 +463,12 @@ uv sync --all-extras
 uv run twicerun run pipelines/reference.py
 uv run twicerun judge .twicerun/run-* --policy reduction-order   # newest, if the glob matches several
 uv run twicerun run pipelines/reference.py --no-containment
+uv run twicerun run pipelines/twins.py                           # the fixed pipeline: exit 0 or the amplifiers are broken
 ```
 
 Exit codes are 0 for nothing diverged, 1 for something diverged, 2 for bad input and 3 for a crash. 2 covers a column the oracle refuses to compare and a `--key` naming a column that is not there, because both are facts about the pipeline's output rather than crashes. 1 means divergence and only divergence, so a release gate keyed on it does not also trip on a broken pipeline. A comparison downgraded to `TOLERATED` does not set it.
+
+**A step that only diverged under an amplifier sets 1 as well**, and that call went the other way from the first instinct. `STABLE_ON_THIS_INPUT` means the step agreed with itself on the data you gave it, so a narrow reading of the exit code would leave it at 0. But the tool watched that step give two different answers, and a tool whose whole argument is that a green five-run loop lies about exactly this case cannot then go green on it. `AMPLIFICATION_FAILED` stays at 0: nothing there was seen giving two answers, and 1 has to keep meaning one thing.
 
 `twicerun judge <run directory>` re-scores a saved run under a different policy without executing anything, which is how the paragraph above is checkable rather than assertable. It takes several directories and judges the newest, saying which on stderr, because the glob above matches one only while retention is 1 and `--keep 0` is a documented flag. It refuses a manifest whose artifacts retention has already dropped rather than reporting on files that are not there.
 
@@ -314,9 +476,22 @@ Exit codes are 0 for nothing diverged, 1 for something diverged, 2 for bad input
 
 It refuses a float column, and the reason is worth stating because the flag looks harmless. Matching on a float joins with bit equality, so one ulp of reassociation comes back as a missing row plus an extra row, which no policy can downgrade. The step then reports no drift, and a step with no drift has no reassociation bound to print, so `--key daily_revenue=day,revenue` used to delete the whole bound section including the headroom figure that fails. A flag that quietly removes the tool's own falsifiable check is worse than no flag.
 
-`--no-containment` is the ablation described above. It is the only flag here that changes what gets measured rather than how it is judged, which is why `judge` does not have it: a saved run was executed one way or the other and cannot be re-scored into the other.
+`--no-containment` is the ablation described above. It is the only flag here that changes what gets measured rather than how it is judged, which is why `judge` does not have it: a saved run was executed one way or the other and cannot be re-scored into the other. `--no-amplify` is the second such flag, for the same reason.
 
-One pass writes about 260 MB of Parquet under `.twicerun/`, which is gitignored: 205 MB for the five runs and 53 MB for the single-threaded bisect. Retention keeps one directory **per concurrent invocation**, so run it serially and the footprint stays at roughly 260 MB however many times you run it. `--keep 0` turns pruning off, and `rm -rf .twicerun` reclaims the lot.
+`--no-amplify` turns the amplifiers off, and what it takes away with them is the point. No step gets a status, because three of the four are defined by what an amplifier did and the fourth needs a zero under every amplifier. So the report says that in place of the status, and prints the bound the status would have been resting on:
+
+```
+amplification is off (--no-amplify), so no status is printed for the 2 steps that never fired:
+  0 generate_inputs, 7 roll_up_keys
+  Each of those is 4 comparisons on the one input this pipeline was given and nothing else. 4 clean
+  comparisons rule out a per-comparison divergence probability above 53 percent, 95 percent
+  one-sided. NO_DIVERGENCE_OBSERVED needs a zero under every amplifier as well, so it is not
+  claimed, and neither is anything weaker.
+```
+
+That paragraph exists because two earlier flags failed the same audit. `--key` with a float column deleted the whole reassociation bound section, including the pre-registered check that is allowed to fail in it, and `--tolerance` deleted the sentence explaining why the mechanism story did not hold. A flag that quietly removes the tool's own falsifiable claim is worse than no flag, so there is a test asserting the bound sentence survives `--no-amplify`.
+
+One pass writes a median 376 MB of Parquet under `.twicerun/`, which is gitignored, over 12 passes: 272 MB for the five runs and the single-threaded bisect, and 104 MB more for the amplified inputs and the runs over them. `--no-amplify` takes it back to 272 MB. Retention keeps one directory **per concurrent invocation**, so run it serially and the footprint stays there however many times you run it. `--keep 0` turns pruning off, and `rm -rf .twicerun` reclaims the lot.
 
 Two things that follow from how retention works, both deliberate and neither obvious. Pruning happens at the end of a successful run, not the start, so a run that fails cannot delete the run you would have judged instead, and peak disk during a pass is one directory more than `--keep` says. And a run still writing is never a deletion candidate, because deleting it would pull the Parquet out from under another process, so three parallel invocations leave three directories and 778 MB. The header says when that happened rather than repeating a promise it suspended.
 
@@ -344,7 +519,7 @@ Its counts will not match these, for the same reason the transcript above will n
 
 Measured, because the spec estimated it by counting step executions and the estimate was three times out.
 
-A pass over the reference pipeline is five executions of eight steps, plus five single-threaded executions of each step that fired. That is 65 to 70 step executions against 8 for running the pipeline once, so **8.1x to 8.8x by step count**. The spec called it 5x to 15x on that arithmetic and the arithmetic is right.
+A pass over the reference pipeline is five executions of eight steps, plus five single-threaded executions of each step that fired, plus three to five executions of each step that did not, once per amplifier. That is roughly 65 to 95 step executions against 8 for running the pipeline once. The spec called it 5x to 15x on that arithmetic and the arithmetic is right.
 
 The wall clock is not. Over 20 passes, one pass took a **median 25 times as long as a single execution of the same pipeline**, the extremes being 21x and 43x. The denominator is run 1's own recorded time out of the manifest, because the tool cannot produce it: `--runs 1` exits 2, since one run has nothing to compare against. Where that goes, at the median:
 
@@ -360,7 +535,24 @@ The spread is wide because that two thirds is IO-bound, and it moves with what e
 
 The bisect is the 15% row: 4.0x one execution. Containment added nothing measurable, since it changes which file a read opens and not how much work is done.
 
-So this is a thing you run deliberately, before a release or on a schedule. `--runs` is the lever that moves it most, and it moves the miss rate with it.
+### What amplification added
+
+Measured the same way, 12 fresh passes each, alternating so that whatever else the machine was doing lands on both:
+
+| | multiple of one plain execution | seconds | Parquet written |
+|---|---|---|---|
+| `--no-amplify` | median 28.0x [23.8 to 36.6] | 6.7s | 272 MB |
+| with the amplifiers | median 37.2x [30.4 to 45.0] | 9.0s | 376 MB |
+
+Medians over 12, spread in brackets, and the brackets are not bounds. **Amplification cost 1.33 times the pass**, which is a quarter of the amplified pass and more than the single-threaded bisect's 15 percent.
+
+That ordering is not what the execution counts predict, and the reason is worth having. The bisect re-executed six steps five times each, 30 executions; amplification re-executed two steps three times against each of three amplifiers, 18. It still cost more, because which steps land in which loop is decided by the fire rate and not by what they cost, and on this pipeline the one expensive step is `generate_inputs`, which writes 205 MB, never fires, and therefore always lands in amplification.
+
+The shape of the cost is the same surprise as the pass as a whole. Executing the amplified steps is a **median 6 percent of the amplified pass**, so most of the quarter is materialising the substituted inputs and then comparing the artifacts that come out of them. The oracle again. Reasoning about this tool's cost from the number of executions it does will be wrong in the same direction the spec was.
+
+The two loops do partition the work. Amplification only touches steps that found nothing and the bisect only touches steps that did, so between them every step is re-executed once more and neither covers a step twice.
+
+So this is a thing you run deliberately, before a release or on a schedule. `--runs` is the lever that moves it most, and it moves the miss rate with it. `--no-amplify` is the second lever and it is the one that costs the most evidence for what it saves.
 
 ## The condition under which this project is unnecessary
 
@@ -378,7 +570,7 @@ Stating the condition matters more than the outcome. A tool whose author cannot 
 
 Watching a pipeline's writes without its cooperation needs either a kernel block-layer wrapper or system-call interception. Both are out of budget and both are worse on macOS. What is left is an interface the pipeline reads and writes through, which is portable, needs no root, and only sees pipelines that opted in.
 
-What that buys back is why it is a design choice rather than a workaround. One abstraction carries five jobs: it is where artifacts get captured, where reads get redirected for containment, where input rows get counted for the tolerance bound, where the column names feeding attribution come from, and where amplified inputs will be substituted. A step calling `ctx.write()` gets all five. A step calling `duckdb.execute("COPY ... TO ...")` behind its back gets none.
+What that buys back is why it is a design choice rather than a workaround. One abstraction carries five jobs: it is where artifacts get captured, where reads get redirected for containment, where input rows get counted for the tolerance bound, where the column names feeding attribution come from, and where amplified inputs get substituted. A step calling `ctx.write()` gets all five. A step calling `duckdb.execute("COPY ... TO ...")` behind its back gets none.
 
 ## What else it gets wrong
 
@@ -396,6 +588,14 @@ What that buys back is why it is a design choice rather than a workaround. One a
 
 **The bisect resolves its reads against run 1 even under `--no-containment`.** A single step cannot be re-executed on its own without something to read, so the ablation ablates the main loop and not the bisect. A step that only inherited a divergence can therefore come out `PARALLEL_ORDER` in an uncontained report, and the report says so where it happens.
 
+**Tie collapse declines more often than it applies.** It targets 500 rows per distinct value and refuses to touch a column that is already at or past that, since raising tie density is the whole job and there is nothing to raise. On the twins that meant 24 of 72 chances taken. The refusal is printed with its reason on the same line as the amplifier, and the declined amplifier goes in the not-varied list, but a reader skimming for zeros should know that most of the boxes tie collapse leaves are unticked rather than green.
+
+**An amplifier only sees a step's `ctx.read` inputs.** State pulled in through `ctx.state` resolves against the previous run's copy rather than an upstream step's output, so there is nothing for an amplifier to substitute that the step's own last execution did not already decide. On the append bug that is the right answer and on some other shape of bug it may not be.
+
+**Amplified runs are only ever compared with each other.** The outputs differ from the real run's by construction, so the fire rate under an amplifier is a statement about that amplified input and not about your data. That is the entire content of `STABLE_ON_THIS_INPUT` and the reason it is spelled the way it is.
+
+**Three amplifiers is three, and there is no argument that they are the right three.** Each is aimed at a bug that was measured here. A pipeline whose non-determinism comes from a clock read, a hash seed, a file listing order or a network response gets nothing from any of them, and the not-varied list is where the report admits it.
+
 ## How the pieces fit
 
 `src/twicerun/storage.py` is the interface. `ctx.read` and `ctx.write` address artifacts by `(run, step index, name)`. The method worth understanding is `ctx.state(name, initial)`, which resolves the *previous run's* copy of an artifact rather than this run's. Without it, a checker starts every run from an empty directory and can never see the two bugs that only exist because a pipeline runs against state its own last execution left behind.
@@ -405,6 +605,8 @@ What that buys back is why it is a design choice rather than a workaround. One a
 `src/twicerun/policy.py` is the decision, kept apart from the comparison on purpose.
 
 `src/twicerun/cause.py` is the second axis: the label vocabulary, the one-sided bound, and the reasoning about what a zero out of four can support. The execution that produces it lives in the runner, because re-executing a pipeline is the runner's job.
+
+`src/twicerun/amplify.py` is the third: the three input transformations, the status vocabulary, and the list of axes this tool does not vary. Each amplifier is a pure function from one Parquet file to another, which is what lets the properties that have to hold every time be tested every time.
 
 `src/twicerun/runner.py` is the loop. Run 1 is the reference and runs 2 to N are each compared against it, giving `k of m`. All-pairs clustering was the alternative, and it is rejected because tolerance-based equality is not transitive, so "how many distinct answers" stops being well defined the moment any tolerance exists.
 
@@ -416,7 +618,7 @@ That split, 3 flat zeros in the first 10 passes and none in the next 20, is itse
 
 With `m` comparisons and a per-comparison divergence probability `p`, a step is missed with probability `(1-p)^m`. At `p = 0.5`, going from two runs to five takes the miss rate from 50 percent to 6.3 percent for 2.5 times the runtime. Going from five to ten takes it to 0.2 percent for twice as much again. The first trade is obviously worth making, the second is a judgement call, so five is the default and `--runs` moves it.
 
-Those zero results are also the argument for slice 4. More runs lower the miss rate for a given `p`; they do not change `p`. Amplification changes `p`, by feeding the step an input built to make it fire.
+Those zero results are the argument for amplification, and it now has a number. Over 40 fresh passes the plain loop was a flat 0 of 4 on that step 7 times, and on all 7 of those an amplifier fired. More runs lower the miss rate for a given `p` and do not change `p`; tie collapse takes `p` on that step from 0.54 to 0.96.
 
 No practical number of runs proves determinism, which is why the tool never prints the word. There is a test asserting the report contains neither "deterministic" nor "stable".
 
@@ -438,6 +640,8 @@ The response after the third one was to stop publishing ranges. Stating the samp
 ## The reference pipeline ships broken
 
 A checker that finds nothing is indistinguishable from a checker that is broken. `pipelines/reference.py` carries four bugs, one step that drifts benignly, one step that fires intermittently, one control step that must never fire, and one step whose only job is to sit downstream of a bug so the containment ablation has something to measure.
+
+`pipelines/twins.py` is the matched half: the same four bugs plus the intermittent one, each with the single line that fixes it. It is what the specificity half of slice 5's eval will score against, and it is already load-bearing, because an amplifier that made those twins fire would be a chaos generator rather than a detector.
 
 Two of the eight steps are constructed rather than observed, and both say so where they are defined: the `MERGE` bug below, and `roll_up_keys`, which exists to be fed a diverging artifact. Three of the four bugs are failures Vishal has actually been bitten by running Databricks pipelines and SQL migrations: duplicate rows after a retry, IDs changing between runs, and totals not matching between runs. The fourth, the non-idempotent `MERGE`, is not a war story. It came out of an experiment for this project and he has never seen it. Its distinction is how narrow its window turned out to be: it needs a target somewhere around 100,000 to 125,000 rows, a source staged into a real table and `BIGINT` columns, and at 50,000 rows and again at 200,000 it gives the same answer every time.
 
