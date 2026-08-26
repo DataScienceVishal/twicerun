@@ -16,12 +16,15 @@ project is about needs more rows than a month of green taxi trips contains, and
 `README.md` publishes the row count where that switches on.
 
 Licence, which is the reason no Parquet is committed here. TLC publishes no
-licence for the trip records. The trip record page carries a disclaimer that TLC
-did not create the data, that the data is collected by authorised technology
-providers, and that TLC makes no representations about its accuracy. That is a
-disclaimer of responsibility, not a grant of rights, and it does not say
-anything about redistribution. So this repository ships the checksums and the
-address, and never the bytes.
+licence for the trip records. Searching the trip record page for the word finds
+"base license number", which is a field in the data. What it carries instead is:
+
+    The trip data was not created by the TLC, and TLC makes no representations
+    as to the accuracy of these data.
+
+That disclaims responsibility. It grants nothing and says nothing about
+redistribution either way, so this repository ships the checksums and the
+address and never the bytes.
 
 The digests below were taken on 2026-08-26 from the files this script fetches.
 They are here so a reader can tell "TLC republished the month" apart from "the

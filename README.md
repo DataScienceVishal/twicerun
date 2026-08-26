@@ -128,16 +128,18 @@ So the maxima get a median and a sample size and nothing else. The quantities th
 
 | step | fires under `strict`, 40 passes | at `threads=1` | under `reduction-order` | what the oracle called it, and how far it moved |
 |---|---|---|---|---|
-| 0 `generate_inputs` | 0 of 4 on all 40 | not bisected | 0 of 4 | the control, and it has never fired |
-| 1 `daily_revenue` | 4 of 4 on all 40 | 0 of 4 on all 40 | 0 of 4 | `VALUE_DRIFT`, `PARALLEL_ORDER`, median 4.5 ulp and 5.3e-16 relative, n=40 |
-| 2 `customer_keys` | 4 of 4 x28, 3 of 4 x9, 2 of 4 x3 | 0 of 4 on all 40 | unchanged | `ROW_MISSING` `ROW_EXTRA`, `PARALLEL_ORDER`, median 491,520 of the 500,000 rows compared |
-| 3 `apply_price_updates` | 4 of 4 x27, 3 x5, 2 x5, 1 x3 | 0 of 4 on all 40 | unchanged | `ROW_MISSING` `ROW_EXTRA`, `PARALLEL_ORDER`, median 21,328 of the 125,000 rows compared |
-| 4 `append_audit_log` | 4 of 4 on all 40 | **4 of 4 on all 40** | unchanged | `MULTIPLICITY`, `PERSISTS_SINGLE_THREADED`, 3,953 extra rows in every comparison |
-| 5 `mean_basket` | 4 of 4 on all 40 | 0 of 4 on all 40 | 0 of 4 | `VALUE_DRIFT`, `PARALLEL_ORDER`, median 5 ulp and 5.7e-16 relative, n=40 |
-| 6 `sparse_customer_keys` | 2 of 4 x9, 4 x9, 1 x8, 3 x7, **0 x7** | 0 of 4 on all 33 that fired | unchanged | `ROW_MISSING` `ROW_EXTRA`, `PARALLEL_ORDER`, median 245,760 of the 500,000 rows compared |
-| 7 `roll_up_keys` | 0 of 4 on all 40 | not bisected | 0 of 4 | downstream of step 2, and contained, so it sees the same input every run |
+| 0 `generate_inputs` | `0 of 4` on all 40 | not bisected | 0 of 4 | the control, and it has never fired |
+| 1 `daily_revenue` | `4 of 4` on all 40 | 0 of 4 on all 40 | 0 of 4 | `VALUE_DRIFT`, `PARALLEL_ORDER`, median 4.5 ulp and 5.3e-16 relative, n=40 |
+| 2 `customer_keys` | 4x28 3x9 2x3 1x0 0x0 | 0 of 4 on all 40 | unchanged | `ROW_MISSING` `ROW_EXTRA`, `PARALLEL_ORDER`, median 491,520 of the 500,000 rows compared |
+| 3 `apply_price_updates` | 4x27 3x5 2x5 1x3 **0x0** | 0 of 4 on all 40 | unchanged | `ROW_MISSING` `ROW_EXTRA`, `PARALLEL_ORDER`, median 21,328 of the 125,000 rows compared |
+| 4 `append_audit_log` | `4 of 4` on all 40 | **4 of 4 on all 40** | unchanged | `MULTIPLICITY`, `PERSISTS_SINGLE_THREADED`, 3,953 extra rows in every comparison |
+| 5 `mean_basket` | `4 of 4` on all 40 | 0 of 4 on all 40 | 0 of 4 | `VALUE_DRIFT`, `PARALLEL_ORDER`, median 5 ulp and 5.7e-16 relative, n=40 |
+| 6 `sparse_customer_keys` | 4x9 3x7 2x9 1x8 **0x7** | 0 of 4 on all 33 that fired | unchanged | `ROW_MISSING` `ROW_EXTRA`, `PARALLEL_ORDER`, median 245,760 of the 500,000 rows compared |
+| 7 `roll_up_keys` | `0 of 4` on all 40 | not bisected | 0 of 4 | downstream of step 2, and contained, so it sees the same input every run |
 
-Every number in the fire-rate column is a complete distribution rather than a summary of one, so there is nothing there for a longer run to beat. The medians on the right will move, and the ulp medians will move by a whole ulp on a sample this size, which is why they carry an n.
+`4x27 3x5 2x5 1x3 0x0` reads as twenty-seven of the forty passes at four fires out of four, five at three, five at two, three at one, and none where the step stayed silent. **The zero counts are printed rather than left out**, which they were not when this table first appeared, and slice 5 is where that cost something: the eval's own ten-trial runs later produced a `0 of 4` on this step. Leaving a bucket out reads as the value being impossible when it only means unobserved, and the section at the end of this file is about not making that mistake in a new shape.
+
+The medians on the right will move, and the ulp medians will move by a whole ulp on a sample this size, which is why they carry an n.
 
 The two float steps go to zero under `reduction-order` and nothing else moves. That is the whole claim for the oracle: the false positives disappear and the four real bugs are caught by the same code that dismissed them.
 
@@ -149,9 +151,9 @@ Every `threads=1` figure here was either 0 of 4 or 4 of 4, never anything betwee
 
 ## Status
 
-Slice 4 of 7. What runs today: the storage interface, the run layout, the artifact manifest, the five-run loop, the typed oracle, leave-one-out attribution, the policy layer, containment, the single-threaded bisect, the three input amplifiers and the four statuses.
+Slice 5 of 7. What runs today: the storage interface, the run layout, the artifact manifest, the five-run loop, the typed oracle, leave-one-out attribution, the policy layer, containment, the single-threaded bisect, the three input amplifiers, the four statuses, the NYC TLC backfill and the eval.
 
-What does not exist yet, in the order it arrives: the NYC TLC backfill and the eval numbers (slice 5), crash injection (slice 6), and the report generator that keeps this file's tables honest (slice 7). `pipelines/twins.py` arrived early, in slice 4 rather than with the eval, because the twins are what stops an amplifier being a chaos generator and that had to be checkable the day the amplifiers landed.
+What does not exist yet: crash injection (slice 6), and the report generator that keeps this file's tables honest (slice 7). `scripts/eval.py --json` already writes every figure it prints, so slice 7 has something to read. `pipelines/twins.py` arrived early, in slice 4 rather than with the eval, because the twins are what stops an amplifier being a chaos generator and that had to be checkable the day the amplifiers landed.
 
 Slice 2 shipped with a disclosure in the header of every report that downgraded anything, because `reduction-order` is a conjunction of three conditions and only two of them existed:
 
@@ -161,6 +163,89 @@ policy     reduction-order, so drift inside the reassociation bound is TOLERATED
 ```
 
 That line is gone, because the condition it stood in for is now measured and enforced. What a `TOLERATED` claims changed with it. It used to mean the drift was float-only and small enough that reassociation could account for it. It now means the drift also disappeared when the parallelism did, which is the difference between "small enough to be reassociation" and "demonstrably is reassociation". A step drifting inside the bound that keeps drifting at `threads=1` is now reported, with that rate as the reason.
+
+## The eval
+
+A trial is three passes: the broken pipeline at the defaults, its matched twin at the defaults, and the broken pipeline again with containment off. Ten trials, four baselines, and eight failure conditions that were written into the spec before any of this existed.
+
+```bash
+uv run python scripts/eval.py               # ten trials, about six minutes, 1.3 GB of peak disk
+uv run python scripts/eval.py --trials 2    # the same shape, quicker
+uv run python scripts/eval.py --json out.json
+```
+
+**Four ten-trial runs went into this section and they disagree with each other about the headline number.** All four are below, in the order they happened. A and B are the same code. C and D followed two changes to how a rate is printed and nothing else, which is why they are here rather than replacing anything: a display change is not a reason to drop a measurement, and the run that breached a pre-registered threshold is the second column.
+
+Run A's wall clock is the odd one because the laptop was running other things, which the cost section further down is already about.
+
+| step | run A | run B | run C | run D |
+|---|---|---|---|---|
+| 0 `generate_inputs` | `0 of 4` on all 10 | on all 10 | on all 10 | on all 10 |
+| 1 `daily_revenue` | `4 of 4` on all 10 | on all 10 | on all 10 | on all 10 |
+| 2 `customer_keys` | 4x8 3x1 2x1 1x0 0x0 | 4x9 3x1 2x0 1x0 0x0 | 4x8 3x2 2x0 1x0 0x0 | 4x7 3x3 2x0 1x0 0x0 |
+| 3 `apply_price_updates` | 4x5 3x1 2x2 1x2 0x0 | 4x5 3x2 2x0 1x2 **0x1** | 4x6 3x3 2x1 1x0 0x0 | 4x6 3x4 2x0 1x0 0x0 |
+| 4 `append_audit_log` | `4 of 4` on all 10 | on all 10 | on all 10 | on all 10 |
+| 5 `mean_basket` | `4 of 4` on all 10 | on all 10 | on all 10 | on all 10 |
+| 6 `sparse_customer_keys` | 4x2 3x4 2x2 1x2 0x0 | 4x1 3x2 2x2 1x5 0x0 | 4x0 3x4 2x2 1x3 **0x1** | 4x3 3x2 2x2 1x2 **0x1** |
+| 7 `roll_up_keys` | `0 of 4` on all 10 | on all 10 | on all 10 | on all 10 |
+| six twins, every step | nothing fired | nothing fired | nothing fired | nothing fired |
+| wall clock | 536s | 363s | 406s | 356s |
+
+`4x5 3x2 2x0 1x2 0x1` reads as five trials at four fires of four, two at three, none at two, two at one, and one trial where a definitely broken step gave the same answer four times running. **The cells carry the counts that came out zero**, which is the method correction slice 5 forced and the section at the end of this file explains.
+
+Run B breached the spec's sensitivity threshold, which fixed 10 of 10 on the four broken steps. `apply_price_updates` came out 9 of 10. The eval printed `TRIGGERED` next to it and exited 0, because a triggered condition is a result and not a failed run.
+
+Twin specificity held in every run: **zero fires across 240 main-loop comparisons and 260 amplified ones per run**, with 50 amplifier attempts declining rather than passing, which the eval counts separately so a decline is never read as a clean result.
+
+### The four baselines, implemented rather than named
+
+| baseline | what it is | what it gave |
+|---|---|---|
+| 1 | two runs, bit-exact multiset equality, no tolerance and no classes. Rescored from each trial's own runs 1 and 2, so the comparison is the only thing that differs from the oracle | fired on `mean_basket` in 10 of 10 trials in all four runs, at medians of 1,265, 1,270, 1,269 and 1,208 unmatched rows out of the 1,000 on each side, on a step where nothing is wrong. Caught the intermittent step in 7, 5, 4 and 6 of 10, against the five-run loop's 10, 10, 9 and 9 |
+| 2 | four static patterns over the pipeline source, parsed per step | separated 4 of the 5 matched pairs, flagged `mean_basket` which has no bug, and could not separate the `MERGE` from its own fix |
+| 3 | the same oracle with `--no-containment` | `roll_up_keys` fires on 10 of 10 trials uncontained and never contained, and is given `cause PARALLEL_ORDER`. `append_audit_log` reports 15,812 extra rows uncontained against 3,953 contained, on every trial of every run |
+| 4 | the same measurements with the amplifiers dropped, scored through the tool's own `exit_code` | 0 of 10 trials would exit 0 in any of the four runs, because the loop caught something on every one. Per comparison on the intermittent step the loop ran 0.65, 0.47, 0.47 and 0.60, against row multiplication's 0.95, 0.93, 1.00 and 0.87 |
+
+**Baseline 2 is the one worth reading twice, and it is stronger than the spec predicted.** The spec expected a static check to catch the `INSERT`-shaped bug and miss the other three. It catches four of the five, because the patterns were written here after the bugs were known, which is the largest thumb anyone could put on a static checker's scale. What it still cannot do is the result:
+
+- It flags `apply_price_updates` and `apply_price_updates_deduped` identically. Both contain `MERGE INTO ... ON t.sku = s.sku`; the fix is a `GROUP BY` in a different statement that makes the source unique on the join key. Telling them apart is data-flow analysis, not a pattern.
+- It flags `mean_basket`, which is a correct average. That is the same false positive baseline 1 makes, and neither can be fixed by looking harder at the text, because whether a float aggregate is a bug depends on whether the answer was supposed to be exact.
+- Its hits are a fact about the query text. Three of the five bugs are facts about the data.
+
+The patterns run against parsed function bodies rather than the file. That is not tidiness: `grep` the twins file for the append pattern and it hits, because `apply_price_updates_deduped` reads and writes `prices`. A file-level check reports an append bug in the file whose entire purpose is that it has none.
+
+### What the pre-registered conditions returned
+
+Three of these declare a piece of this project unnecessary if they fire. All eight print on every run whatever they say.
+
+| condition, as written in the spec | A | B | C | D |
+|---|---|---|---|---|
+| the naive baseline's false positives on correct code are zero, so the oracle is unnecessary | held | held | held | held |
+| the amplification gap on the intermittent step is zero, so amplification is unmotivated | held | held | held | held |
+| observed drift is not 1000x inside the computed bound | held | held | held | held |
+| containment removes no falsely divergent step, so the Spot borrowing did not earn its place | held | held | held | held |
+| sensitivity below 10 of 10 on the four broken steps | held | **TRIGGERED** | held | held |
+| any twin fired at all | held | held | held | held |
+| the intermittent step reached neither `DIVERGENT` nor `STABLE_ON_THIS_INPUT` in a trial | held | held | held | held |
+| the whole eval took longer than 10 minutes | held | held | held | held |
+
+The bound check clears at `n = rows read by the step` on 20 of 20 float step-passes in all four runs, at medians of 760,794x, 770,836x, 762,196x and 843,671x. At the tight `n`, the terms behind one output value, it clears on 0, 0, 1 and 1 of 20. That is the same split slice 4 measured and it has not moved: the check as pre-registered passes, and the honest reading of it fails, so both print.
+
+Attribution named the column the step invented, rather than one it copied in, on 30 of 30, 29 of 29, 29 of 29 and 29 of 29. The denominators are below 30 where a step went quiet for a whole trial and produced no attribution to score.
+
+**The amplification gap has to be forced to be visible at all.** Amplification only touches steps the main loop found nothing in, which is the whole cost argument for it, so on a trial where the loop catches the intermittent step there is no amplified rate to compare against. Waiting for a quiet trial throws away nine in ten. So the eval points the shipped amplifiers at that one step every trial, through the same `amplify_runs` the runner calls:
+
+```
+  Per comparison on sparse_customer_keys, with the amplifiers pointed at it every trial:
+    the five-run loop       24 of 40   0.60   1 of 10 trials with nothing at all
+    tie collapse            32 of 40   0.80   0 of 10 trials with nothing at all
+    thread count            22 of 34   0.65   3 of 10 trials with nothing at all
+    row multiplication      33 of 38   0.87   1 of 10 trials with nothing at all
+```
+
+That is run D. On its one trial where the five-run loop said nothing, an amplifier fired and the step came out `STABLE_ON_THIS_INPUT`, which is the case the whole feature exists for, seen inside the eval rather than argued for.
+
+**The eval always exits 0, including on a triggered condition.** A script that failed on one would be a script with a reason to stop publishing it, and there is no CI job running this: it takes six minutes and 1.3 GB.
 
 ## Containment, and what it is worth
 
@@ -195,14 +280,16 @@ The assert is there because the obvious way to get this wrong is to run it after
 
 Uncontained that gives `[3953, 7906, 11859, 15812, 19765]`, one run per entry, and contained it gives `[3953, 7906, 7906, 7906, 7906]`. The bug is the same bug either way and the fire rate is 4 of 4 either way, so what containment bought here is the magnitude being a fact about the step rather than about how many times the tool ran.
 
-The second number is the count of steps reported divergent, and getting it took a change to the reference pipeline that is worth being explicit about. Every step in that file read the control step's artifacts, which never differ, so nothing in it ever read a diverging artifact and the cascade could not happen. The ablation scored zero on the quantity slice 5's baseline 3 was pre-registered to use, which reads as evidence against a feature that was simply never exercised.
+The second number is the count of steps reported divergent, and getting it took a change to the reference pipeline that is worth being explicit about. Every step in that file read the control step's artifacts, which never differ, so nothing in it ever read a diverging artifact and the cascade could not happen. The ablation scored zero on the quantity baseline 3 was pre-registered to use, which reads as evidence against a feature that was simply never exercised.
 
-So `roll_up_keys` exists. It reads `customer_keys`, whose surrogate ids shuffle between runs, and computes an integer minimum that cannot reassociate, so a fire rate above zero there means it was fed something different and never that it computed something different. **It is constructed to exercise containment and is not a failure anyone here has been bitten by**, unlike three of the four bugs beside it. Over 20 contained and 10 ablated passes:
+So `roll_up_keys` exists. It reads `customer_keys`, whose surrogate ids shuffle between runs, and computes an integer minimum that cannot reassociate, so a fire rate above zero there means it was fed something different and never that it computed something different. **It is constructed to exercise containment and is not a failure anyone here has been bitten by**, unlike three of the four bugs beside it. The eval's four ten-trial runs are the larger sample of it:
 
-| | `roll_up_keys` fires | steps reported divergent |
-|---|---|---|
-| `--no-containment` | 4 of 4 [3 to 4], on all 10 passes | 7 of 8 on 9 passes, 6 of 8 on one |
-| contained | 0 of 4 on all 20 passes | 6 of 8 on 16 passes, 5 of 8 on four |
+| `roll_up_keys` fires | run A | run B | run C | run D |
+|---|---|---|---|---|
+| `--no-containment` | 4x6 3x4 2x0 1x0 0x0 | 4x6 3x4 2x0 1x0 0x0 | 4x7 3x2 2x1 1x0 0x0 | 4x7 3x3 2x0 1x0 0x0 |
+| contained | `0 of 4` on all 10 | on all 10 | on all 10 | on all 10 |
+
+Forty trials with containment on, forty with it off, and the step never once fired with it on. Counting steps-divergent-per-pass and subtracting was the first way this was measured and it was noise: two other steps in the pipeline are intermittent, so the difference between one contained pass and one uncontained pass is dominated by which of those happened to fire. The quantity has to be per step, which is how the eval prints it.
 
 That one step is the whole difference. It is a small number and it is the honest one: on a pipeline where nothing reads a diverging artifact, containment removes no false step at all, and this pipeline had to be given a step that does.
 
@@ -486,7 +573,12 @@ uv run twicerun run pipelines/reference.py
 uv run twicerun judge .twicerun/run-* --policy reduction-order   # newest, if the glob matches several
 uv run twicerun run pipelines/reference.py --no-containment
 uv run twicerun run pipelines/twins.py                           # the fixed pipeline: exit 0 or the amplifiers are broken
+
+uv run python scripts/eval.py                                    # the eval, six minutes and 1.3 GB
+uv run python scripts/fetch_tlc.py && uv run twicerun run pipelines/tlc_backfill.py
 ```
+
+The backfill exits 3 with a traceback if the partitions are not there, because the data being absent is a crash rather than a divergence, and 1 is the code a release gate keys on. The traceback names the script that fetches them.
 
 | exit | meaning |
 |---|---|
@@ -580,12 +672,12 @@ The bisect is the 15% row: 4.0x one execution. Containment added nothing measura
 
 Measured the same way, 12 fresh passes each, alternating so that whatever else the machine was doing lands on both:
 
-| | multiple of one plain execution | seconds | Parquet written |
-|---|---|---|---|
-| `--no-amplify` | median 28.0x [23.8 to 36.6] | 6.7s | 272 MB |
-| with the amplifiers | median 37.2x [30.4 to 45.0] | 9.0s | 376 MB |
+| | multiple of one plain execution | slowest of the 12 | seconds | Parquet written |
+|---|---|---|---|---|
+| `--no-amplify` | median 28.0x | 36.6x | 6.7s | 272 MB |
+| with the amplifiers | median 37.2x | 45.0x | 9.0s | 376 MB |
 
-Medians over 12, spread in brackets, and the brackets are not bounds. **Amplification cost 1.33 times the pass**, which is a quarter of the amplified pass and more than the single-threaded bisect's 15 percent.
+Medians over 12 passes each. The third column is the slowest pass that happened rather than a ceiling, and a thirteenth pass can exceed it: this is wall clock on a laptop with other things running, so it has no bound at all. **Amplification cost 1.33 times the pass**, which is a quarter of the amplified pass and more than the single-threaded bisect's 15 percent.
 
 That ordering is not what the execution counts predict, and the reason is worth having. The bisect re-executed six steps five times each, 30 executions; amplification re-executed two steps three times against each of three amplifiers, 18. It still cost more, because which steps land in which loop is decided by the fire rate and not by what they cost, and on this pipeline the one expensive step is `generate_inputs`, which writes 205 MB, never fires, and therefore always lands in amplification.
 
@@ -599,11 +691,13 @@ So this is a thing you run deliberately, before a release or on a schedule. `--r
 
 Pre-registered with the rest, and it belongs here rather than in a footnote: **if the naive baseline's false-positive count on correct code had come out at zero, the oracle would be more machinery than the problem needs**, and this section would say so.
 
-It did not. Over 20 fresh passes, bit-exact comparison of `mean_basket` between two runs reported a median of 1,203 differing rows [1,110 to 1,554], which is about 600 of the 1,000 groups counted on both sides at once, on a step where nothing is wrong. `src/twicerun/compare.py` is that comparison, kept as the eval's baseline 1 rather than deleted.
+It did not. Baseline 1 fired on `mean_basket` in 10 of 10 trials in every one of the eval's four runs, at medians of 1,265, 1,270, 1,269 and 1,208 unmatched rows out of the 1,000 on each side, on a step where nothing is wrong. Those numbers are counted on both sides at once, so they are roughly 600 of the 1,000 groups.
 
-It has no command of its own yet, so checking it through this repo means importing `compare` in four lines of Python. The raw-DuckDB version in `scripts/measure_duckdb.py` needs no such thing and takes two seconds, and it is the better check anyway: it is a fact about DuckDB rather than about my code. Baseline 1 gets a command when slice 5 builds the eval that runs it.
+`src/twicerun/compare.py` is that comparison, kept rather than deleted, and `scripts/eval.py` runs it against each trial's own runs 1 and 2. Pointing it at the same bytes the oracle saw is what makes the pair a comparison of comparisons rather than of two separate experiments.
 
-Stating the condition matters more than the outcome. A tool whose author cannot say what would have made it pointless has not tested the premise.
+The two-second version needs none of this repo: `scripts/measure_duckdb.py` re-derives it in raw DuckDB, and it is the better check, because it is a fact about DuckDB rather than about my code.
+
+Stating the condition matters more than the outcome. A tool whose author cannot say what would have made it pointless has not tested the premise, and there are eight of these now, printed on every eval run whatever they say.
 
 ## The limitation that goes first, not in a footnote
 
@@ -679,13 +773,17 @@ Number 4 is the worst of them, because it is the falsifiable check the tolerance
 
 The structural reason: **the ulp count and the relative drift are maxima**, over 1,000 groups times four comparisons. They are extreme-value statistics. The observed range of a maximum grows with the number of observations by construction, so there is no sample size at which a bracket on one becomes safe, and every previous fix had been to take a bigger sample and publish a wider bracket. That is the same move five times.
 
-So the maxima carry a median and an n and no range at all, and the quantities with a real ceiling carry the ceiling instead: a step comparing 500,000 rows cannot lose more than 500,000 of them, and a fire rate out of four has five possible values, so the whole distribution goes in the cell and there is nothing left to beat. What remains beatable is the medians, which will move, and which say so.
+So the maxima carry a median and an n and no range at all, and the quantities with a real ceiling carry the ceiling instead: a step comparing 500,000 rows cannot lose more than 500,000 of them, and a fire rate out of four has five possible values, so the whole distribution goes in the cell. What remains beatable is the medians, which will move, and which say so.
+
+**That method needed one more correction and slice 5 supplied it, which is why the table above still has five rows and not six.** The sentence that stood here read "the whole distribution goes in the cell and there is nothing left to beat", and it was wrong in a way none of the five entries covers. What went in the cell was every rate that *came up*, so `apply_price_updates` printed as `4 of 4 x27, 3 x5, 2 x5, 1 x3` and never mentioned zero. Four ten-trial runs of the eval later, one of them gave that step a flat `0 of 4`. Nothing about the earlier figures was wrong: those forty passes really did produce twenty-seven, five, five and three. The claim of completeness was wrong, because an omitted bucket reads as impossible when it only means unobserved.
+
+So every bucket prints, including the ones at zero, and a step whose rate never varied collapses to `0 of 4 on all 10`, which accounts for every trial in the sentence and leaves nothing unstated either. It is the same failure as number 5 wearing a distribution's clothes rather than a bracket's, which is the whole reason it is written down here instead of being quietly fixed.
 
 ## The reference pipeline ships broken
 
 A checker that finds nothing is indistinguishable from a checker that is broken. `pipelines/reference.py` carries four bugs, one step that drifts benignly, one step that fires intermittently, one control step that must never fire, and one step whose only job is to sit downstream of a bug so the containment ablation has something to measure.
 
-`pipelines/twins.py` is the matched half: the same four bugs plus the intermittent one, each with the single line that fixes it. It is what the specificity half of slice 5's eval will score against, and it is already load-bearing, because an amplifier that made those twins fire would be a chaos generator rather than a detector.
+`pipelines/twins.py` is the matched half: the same four bugs plus the intermittent one, each with the single line that fixes it. It is what the eval's specificity half scores against, at zero fires across 240 main-loop and 260 amplified comparisons per ten-trial run, and it was already load-bearing before that, because an amplifier that made those twins fire would be a chaos generator rather than a detector.
 
 Two of the eight steps are constructed rather than observed, and both say so where they are defined: the `MERGE` bug below, and `roll_up_keys`, which exists to be fed a diverging artifact. Three of the four bugs are failures Vishal has actually been bitten by running Databricks pipelines and SQL migrations: duplicate rows after a retry, IDs changing between runs, and totals not matching between runs. The fourth, the non-idempotent `MERGE`, is not a war story. It came out of an experiment for this project and he has never seen it. Its distinction is how narrow its window turned out to be: it needs a target somewhere around 100,000 to 125,000 rows, a source staged into a real table and `BIGINT` columns, and at 50,000 rows and again at 200,000 it gives the same answer every time.
 
@@ -701,4 +799,87 @@ No model calls either: no LLM adapter, no `openai` dependency, no `AZURE_OPENAI_
 
 The reference pipeline runs on generated data, and synthetic is the point here rather than a convenience. Its bugs are parameterised by tie density, group count and row count, and those parameters are the experiment. Real data would fix the tie density at whatever the file happens to contain and make the intermittency measurement impossible to produce.
 
-Values come from `hash(i)` rather than `random()`, so all five runs read byte-identical inputs and any divergence is the pipeline's rather than the data's. Slice 5 adds real NYC TLC trip records for the backfill and schema-change work.
+Values come from `hash(i)` rather than `random()`, so all five runs read byte-identical inputs and any divergence is the pipeline's rather than the data's.
+
+The other pipeline runs on NYC TLC trip records, which is the next section.
+
+## NYC TLC, and the licence position stated rather than implied
+
+**TLC publishes no licence for the trip records.** Searching the trip record page for the word finds only "base license number", which is a field in the data. What the page carries instead, verbatim, is:
+
+> The data used in the attached datasets were collected and provided to the NYC Taxi and Limousine Commission (TLC) by technology providers authorized under the Taxicab & Livery Passenger Enhancement Programs (TPEP/LPEP). The trip data was not created by the TLC, and TLC makes no representations as to the accuracy of these data.
+
+That disclaims responsibility. It grants nothing, and it says nothing about redistribution either way.
+
+So **no TLC bytes are committed here**. `scripts/fetch_tlc.py` is the only file in this repository that opens a socket. It fetches three monthly Parquet files and verifies a SHA-256 recorded on 2026-08-26 against each, so a reader can tell "the download was cut short" from "TLC restated the month", which are the same missing bytes to everything else. TLC does restate months: the yellow 2024-12 file was last modified 2025-02-21.
+
+```bash
+uv run python scripts/fetch_tlc.py                 # green, 3.6 MB
+uv run python scripts/fetch_tlc.py --taxi yellow   # yellow, 181 MB
+uv run python scripts/fetch_tlc.py --check         # verify what is on disk, fetch nothing
+```
+
+Nothing in `tests/` imports it for a download, and `--disable-socket` would fail the test if anything tried. What the suite runs against instead is three partitions generated from `pipelines/tlc_green_schema.sql`, which holds the real column lists read off the real Parquet with `DESCRIBE` rather than transcribed from the data dictionary PDF. `RatecodeID` is `BIGINT` and `PULocationID` is `INTEGER` in the same file, which is the kind of thing a hand transcription gets wrong.
+
+Sources: the [trip record page](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page) and the [green data dictionary](https://www.nyc.gov/assets/tlc/downloads/pdf/data_dictionary_trip_records_green.pdf), updated 2025-03-18 to document `cbd_congestion_fee`.
+
+### The schema change, which is real and was not invented here
+
+TLC added `cbd_congestion_fee` to the Yellow, Green and High Volume FHV trip records for 2025 onward, carrying the Congestion Relief Zone charge that took effect on 5 January 2025. So a backfill over 2024-12, 2025-01 and 2025-02 spans a column that two of its three partitions have and one does not. Green goes from 20 columns to 21, yellow from 19 to 20.
+
+```bash
+uv run python scripts/tlc_schema.py
+```
+
+```
+  green_tripdata_2024-12.parquet       53,994 rows  20 columns  cbd_congestion_fee: absent
+  green_tripdata_2025-01.parquet       48,326 rows  21 columns  cbd_congestion_fee: present
+  green_tripdata_2025-02.parquet       46,621 rows  21 columns  cbd_congestion_fee: present
+
+read_parquet over the three as one list, which is what a backfill hands it:
+  oldest partition first  20 columns  cbd_congestion_fee: DROPPED, silently
+  newest partition first  21 columns  cbd_congestion_fee: present
+```
+
+**That is a revenue column disappearing on file order, with no error and no warning.** DuckDB takes the column set from the first file in the list. Put the 2024 partition first, which is the order a backfill walks its months in, and the fee is gone from the answer. Reverse the list and it is back. The two spellings that do not do that are `INSERT INTO` a target built from the older partition, which raises `Binder Error: table target has 20 columns but 21 values were supplied`, and `UNION ALL BY NAME`, which fills the missing column with NULL.
+
+**twicerun cannot catch it, and that is the sharpest limitation this project has.** The wrong answer is wrong the same way on every run, so five runs agree with each other perfectly and the report is a clean zero. A rerun checker is blind to a deterministic wrong answer by construction. `scripts/tlc_schema.py` asserts its three facts and exits non-zero if any stops being true, which is the most this repository can do about a bug its main tool is structurally unable to see.
+
+`UNION ALL BY NAME` costs something too, and the script prints it. After the union, a NULL fee on a 2024 row means the column did not exist, and a NULL fee on a 2025 row means the trip was never charged. 46,490 of 48,326 January rows carry a fee. Nothing distinguishes the two kinds of NULL afterwards.
+
+### What twicerun found on the backfill
+
+`pipelines/tlc_backfill.py` is four steps: land the three months keeping each one's own column set, union them by name, sum the fares by partition and pickup zone, then append to a cumulative ledger that never asks what is already in it.
+
+```bash
+uv run python scripts/fetch_tlc.py
+uv run twicerun run pipelines/tlc_backfill.py
+```
+
+| | green, 148,941 rows | yellow, 10,721,140 rows |
+|---|---|---|
+| `land_partitions` | `0 of 4`, `NO_DIVERGENCE_OBSERVED` | `0 of 4`, `NO_DIVERGENCE_OBSERVED` |
+| `unify_partitions` | `0 of 4`, `NO_DIVERGENCE_OBSERVED` | `0 of 4`, `NO_DIVERGENCE_OBSERVED` |
+| `zone_revenue` | `0 of 4`, `NO_DIVERGENCE_OBSERVED` | `4 of 4`, `VALUE_DRIFT`, `PARALLEL_ORDER`, 498 of 776 zone totals moved |
+| `revenue_ledger` | `4 of 4`, `MULTIPLICITY`, `PERSISTS_SINGLE_THREADED`, 657 extra rows | `4 of 4`, same, 776 extra rows |
+| wall clock, disk | 3.7s, 59 MB | 124s, 3.0 GB |
+
+**The negative result is the more useful half.** The parallel float reduction that this whole project is built around does not fire on a month of green taxi trips. It is not absent, it is under the row count at which DuckDB divides the work. Cross-joining the green union against `range(k)` and comparing `sum(total_amount)` grouped by pickup zone, four comparisons at each size, 236 groups:
+
+| rows | groups that differed, four comparisons |
+|---|---|
+| 148,941 | 0, 0, 0, 0 |
+| 297,882 | 41, 0, 0, 0 |
+| 595,764 | 60, 61, 60, 77 |
+| 1,191,528 | 103, 111, 113, 123 |
+| 2,383,056 | 149, 156, 144, 151 |
+| 4,766,112 | 189, 175, 167, 183 |
+| 9,532,224 | 197, 196, 198, 195 |
+
+Those are the observations rather than a summary of them. The switch-on sits between 148,941 and 595,764 rows on this machine, and **297,882 is exactly what the row-multiplication amplifier produces from the green input**, which is why the green report shows that amplifier at `0 of 2` on a step whose mechanism is present.
+
+Two consequences worth being plain about. The reference pipeline's 2,000,000 rows are not decoration: at a tenth of that the same bug is silent. And the one bug of the four that fires on green is the ledger, because an append with no key duplicates whatever it is given at any scale, so a reader who runs the 3.6 MB dataset still sees a real bug caught on real data.
+
+On yellow the surrogate-key mechanism is there too, though this pipeline does not build a surrogate key: `row_number() OVER (ORDER BY PULocationID)` over the 10,721,140 rows gave 10,720,819, 10,720,956 and 10,720,930 rows a different key across three comparisons at `threads=10`, and 0 at `threads=1`. Ordering by the pickup timestamp instead, which is the more natural thing to write, gave 3,401,785, 3,438,723 and 3,884,017. Adding a unique tiebreak gave 0 every time.
+
+**3.0 GB is the yellow figure and it is not a typo.** Five runs of a step that writes 10.7 million rows, plus the bisect and the amplified inputs. Green is 59 MB. `rm -rf .twicerun` reclaims it.
