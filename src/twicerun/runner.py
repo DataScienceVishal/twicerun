@@ -35,6 +35,7 @@ from twicerun.amplify import (
     Amplification,
     Attempt,
     NotApplicable,
+    Substituted,
 )
 from twicerun.cause import BISECT_THREADS, Bisect
 from twicerun.manifest import (
@@ -70,6 +71,18 @@ class PipelineError(RuntimeError):
 class Retention(NamedTuple):
     dropped: list[Path]
     live: int
+
+
+class Repeated(NamedTuple):
+    """What `repeat_steps` produced, and the state its run 1 left for later runs.
+
+    The carried state comes back because amplification extends a sequence it
+    already started: escalating from 3 runs to 5 executes runs 4 and 5 against
+    the run 1 already on disk, and run 1 is where the state overlay was built.
+    """
+
+    records: list[RunRecord]
+    carried: dict[str, Artifact]
 
 
 def load_steps(path: Path) -> list[Step]:
@@ -139,7 +152,7 @@ def is_running(run_dir: Path) -> bool:
     return True
 
 
-def prune_run_dirs(parent: Path, keep: int, current: Path | None = None) -> list[Path]:
+def prune_run_dirs(parent: Path, keep: int, current: Path | None = None) -> Retention:
     """Drop all but the most recent `keep` run directories, `current` always among them.
 
     A five-run pass over the reference pipeline writes about 260 MB: 205 MB of
@@ -398,7 +411,7 @@ def bisect_runs(
         upstream=partial(artifacts_before, reference),
         seed=artifacts_before(reference, len(steps)),
         threads=BISECT_THREADS,
-    )
+    ).records
 
 
 def repeat_steps(
@@ -409,8 +422,10 @@ def repeat_steps(
     upstream: Callable[[int], dict[str, Artifact]],
     seed: dict[str, Artifact],
     threads: int | None = None,
-) -> list[RunRecord]:
-    """Execute a subset of the pipeline `runs` times, run 1 the reference for the rest.
+    start: int = 1,
+    carried: dict[str, Artifact] | None = None,
+) -> Repeated:
+    """Execute runs `start` to `runs` of a subset of the pipeline, run 1 the reference.
 
     The main loop again, narrowed. Both the bisect and amplification want it,
     they want it with different reads resolved and different thread counts, and
@@ -429,10 +444,21 @@ def repeat_steps(
     so every later run fell back to `seed` and the same mislabelling came back
     through the other door. Names this loop re-produced take its own version;
     every other name takes the seed's.
+
+    `start` above 1 continues a sequence rather than beginning one, which is
+    what amplification does when an amplifier fires at 3 runs and has to reach
+    the main loop's 5. Looping from 1 regardless re-executed runs 1 to 3 a
+    second time and overwrote their Parquet, so the manifest kept the first
+    call's records beside the second call's files and `judge` scored a rate
+    against artifacts nothing described. It also cost 19 executions on the
+    reference pipeline where the arithmetic above predicts 14.
+
+    `carried` has to arrive with it, because the state overlay is built after
+    run 1 and a continuation does not run one.
     """
-    carried: dict[str, Artifact] = {}
+    carried = dict(carried or {})
     records = []
-    for run in range(1, runs + 1):
+    for run in range(start, runs + 1):
         record, written = execute_run(
             steps,
             run,
@@ -445,7 +471,7 @@ def repeat_steps(
         records.append(record)
         if run == 1:
             carried = {**seed, **written}
-    return records
+    return Repeated(records, carried)
 
 
 def amplify_runs(
@@ -469,6 +495,11 @@ def amplify_runs(
     is extended to the main loop's N so the two rates share a denominator. The
     extension continues against the same amplified run 1 rather than starting
     over, so escalating costs `N - 3` executions rather than `N`.
+
+    Below four runs the probe is clamped to `runs`, or the report prints an
+    amplified `2 of 2` beside a main-loop `0 of 1` and invites a comparison the
+    denominators do not support. The bisect refuses that case by construction
+    and this had no way down.
     """
     amplified = []
     con = duckdb.connect()
@@ -486,7 +517,7 @@ def amplify_runs(
                     _one_amplifier(
                         steps, reference, index, runs, keys,
                         amplifier=amplifier,
-                        attempt=substitute(con, into / "input", inputs, threads),
+                        build=partial(substitute, con, into / "input", inputs, threads),
                         into=into,
                     )
                 )
@@ -503,7 +534,7 @@ def _one_amplifier(
     keys: Mapping[str, Sequence[str]],
     *,
     amplifier: str,
-    attempt: Attempt,
+    build: Callable[[], Attempt],
     into: Path,
 ) -> AmplifiedRuns:
     """Execute one (step, amplifier) pair, or record why it did not run.
@@ -515,28 +546,47 @@ def _one_amplifier(
     Nothing is swallowed: the error is stored, printed against the amplifier
     that produced it, and it stops the step reaching a clean status. Falling
     back to green is the failure this whole feature exists to prevent.
-    """
-    if isinstance(attempt, NotApplicable):
-        return AmplifiedRuns(index, amplifier, note=attempt.reason)
 
-    repeat = partial(
-        repeat_steps,
-        steps,
-        [index],
-        into,
-        upstream=lambda _: attempt.artifacts,
-        seed=artifacts_before(reference, len(steps)),
-        threads=attempt.threads,
-    )
+    Building the substituted input is inside the catch, not evaluated as an
+    argument outside it. A COPY that runs out of disk while materialising four
+    million rows would otherwise take five finished runs, the bisect and the
+    manifest with it and exit 3. The bisect already had that guard, added after
+    exactly this bite; this loop did not inherit it.
+
+    Whatever the probe measured survives the failure path. An amplifier that
+    fired twice and then raised while escalating has still watched the step give
+    two different answers, and discarding those records turned that into a
+    status that does not gate a release.
+    """
+    attempt = None
+    records: list[RunRecord] = []
+    error = None
+    probe = min(PROBE_RUNS, runs)
     try:
-        records = repeat(runs=PROBE_RUNS)
-        if runs > PROBE_RUNS and _scored(records, keys)[0]:
-            records += repeat(runs=runs)[PROBE_RUNS:]
-    except Exception as exc:  # noqa: BLE001
-        return AmplifiedRuns(
-            index, amplifier, note=attempt.note, error=f"{type(exc).__name__}: {exc}".strip()
+        attempt = build()
+        if isinstance(attempt, NotApplicable):
+            return AmplifiedRuns(index, amplifier, note=attempt.reason)
+        repeat = partial(
+            repeat_steps,
+            steps,
+            [index],
+            into,
+            upstream=lambda _: attempt.artifacts,
+            seed=artifacts_before(reference, len(steps)),
+            threads=attempt.threads,
         )
-    return AmplifiedRuns(index, amplifier, note=attempt.note, runs=records)
+        started = repeat(runs=probe)
+        records = started.records
+        if runs > probe and _scored(records, keys)[0]:
+            records = records + repeat(
+                runs=runs, start=probe + 1, carried=started.carried
+            ).records
+    except Exception as exc:  # noqa: BLE001
+        error = f"{type(exc).__name__}: {exc}".strip()
+    # A failure while building the input leaves no note of its own, and the
+    # error underneath it is the whole story anyway.
+    note = attempt.note if isinstance(attempt, Substituted) else "while building the input"
+    return AmplifiedRuns(index, amplifier, note=note, runs=records, error=error)
 
 
 def _scored(
@@ -621,6 +671,10 @@ def attach_bisect(
             )
 
 
+def _amplified_runs(manifest: Manifest) -> list[RunRecord]:
+    return [run for entry in manifest.amplified for run in entry.runs]
+
+
 def measure(
     manifest: Manifest, keys: Mapping[str, Sequence[str]]
 ) -> list[StepMeasurement]:
@@ -660,9 +714,13 @@ def rejudge(
     manifest = Manifest.load(manifest_path)
     if len(manifest.runs) < 2:
         raise PipelineError(f"{manifest_path} holds one run, so there is nothing to compare")
+    # Every run this function will re-score, which is the main loop, the bisect
+    # and the amplified sequences. The amplified ones were missing from this
+    # list, so a pruned run directory reached attach_amplification and raised
+    # out of a command whose contract is that it re-scores or explains itself.
     missing = [
         a.path
-        for run in (*manifest.runs, *manifest.bisect)
+        for run in (*manifest.runs, *manifest.bisect, *_amplified_runs(manifest))
         for step in run.steps
         for a in step.artifacts
         if not Path(a.path).exists()

@@ -108,7 +108,17 @@ class Amplification:
 
     @property
     def ran(self) -> bool:
-        return self.error is None and self.comparisons > 0
+        """Whether any comparison happened, whatever went wrong afterwards.
+
+        `error` is deliberately not part of this. An amplifier can fire on its
+        first two comparisons and then raise on the fourth, and an error that
+        arrives after evidence does not delete the evidence. Treating the two as
+        exclusive turned a step the tool had watched give two different answers
+        into AMPLIFICATION_FAILED, which is the one status that does not gate a
+        release, so a crash during escalation returned green on exactly the
+        failure this feature exists to catch.
+        """
+        return self.comparisons > 0
 
     @property
     def measured(self) -> bool:
@@ -160,10 +170,18 @@ def tie_collapse(
     event_id` is stable only while `event_id` breaks the tie, so an amplifier
     that collapsed every column would break correct code.
 
-    Each value is replaced by another real value from the same column, the
-    minimum of its bucket, so the type, the row count and the value domain all
-    survive. Casting a hash back to the column's type would have worked for
-    integers and not for DATE or DECIMAL.
+    Each non-NULL value is replaced by another real value from the same column,
+    the minimum of its bucket, so the type, the row count, the NULL count and
+    the value domain all survive. Casting a hash back to the column's type would
+    have worked for integers and not for DATE or DECIMAL.
+
+    NULLs needed the special case in `_collapse_sql` rather than falling out.
+    `hash(NULL)` is an ordinary non-NULL constant, so a NULL row lands in a
+    bucket with real values and takes their representative: 300 NULLs in 3,000
+    rows came out as zero NULLs, on a transformation whose report line claims
+    the domain survives. Row count and type did survive, which is why it read as
+    fine. A step that branches on NULL was being asked a different question from
+    the one printed.
     """
     if not inputs:
         return NotApplicable("this step reads no artifact, so there is no input to substitute")
@@ -287,7 +305,10 @@ def _collapse_sql(
         for c in collapsing
     )
     projected = ", ".join(
-        f"{bucket_of[c]}.rep AS {identifier(c)}" if c in collapsing else f"src.{identifier(c)}"
+        f"CASE WHEN src.{identifier(c)} IS NULL THEN NULL ELSE {bucket_of[c]}.rep END "
+        f"AS {identifier(c)}"
+        if c in collapsing
+        else f"src.{identifier(c)}"
         for c in columns
     )
     joins = " ".join(
