@@ -1,0 +1,29 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+.env
+.env.local
+
+# The spend ledger normally lives at ~/.azure-llm-spend.json, outside any repo.
+# This covers the case where LLM_SPEND_LEDGER points it at the working tree.
+.azure-llm-spend.json
+
+node_modules/
+
+chromadb_data/
+*.duckdb
+*.sqlite3
+
+.DS_Store
+.vscode/
+.idea/

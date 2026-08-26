@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # No model-call environment here on purpose. This project makes no LLM calls
+    # at all, so there is no adapter, no stub provider and nothing to configure.
+    # `--disable-socket` below still applies and is the thing that proves it.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --all-extras
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Style fingerprint
+        run: uv run python scripts/check_fingerprint.py
+
+      - name: Tests with the network switched off
+        # --disable-socket is what turns "no API calls" from a claim into a
+        # property the CI enforces. Unix sockets stay open for local subprocesses.
+        run: uv run pytest --disable-socket --allow-unix-socket -q

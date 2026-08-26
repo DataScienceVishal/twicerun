@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Installed to .git/hooks/pre-commit by scripts/install-hooks.sh.
+#
+# Agents forget the style rules. This does not. It runs against the index, so
+# what gets checked is exactly what is about to be committed, not whatever
+# happens to be sitting in the working tree.
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+python=python3
+if [ -x .venv/bin/python ]; then
+  python=.venv/bin/python
+fi
+
+echo "pre-commit: fingerprint check"
+if ! "$python" scripts/check_fingerprint.py --staged; then
+  cat >&2 <<'MSG'
+
+Commit blocked. Fix the hits above.
+
+If one is genuinely wrong, add the ignore marker to that line, or add a new
+entry to the allowed-contexts block in BANNED.md when the false positive will
+keep recurring. Do not disable the hook.
+MSG
+  exit 1
+fi
+
+# Ruff is cheap and catches the dead imports that pile up during a slice.
+if command -v ruff >/dev/null 2>&1; then
+  echo "pre-commit: ruff"
+  staged_py=$(git diff --cached --name-only --diff-filter=ACM -- '*.py')
+  if [ -n "$staged_py" ]; then
+    echo "$staged_py" | xargs ruff check
+  fi
+fi
+
+echo "pre-commit: ok"
