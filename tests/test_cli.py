@@ -99,6 +99,54 @@ def test_two_invocations_in_the_same_second_do_not_collide(tmp_path, capsys):
     assert len(list((tmp_path / "artifacts").iterdir())) == 3
 
 
+CASCADES = '''
+CALLS = {"n": 0}
+
+
+def wobble(ctx):
+    CALLS["n"] += 1
+    ctx.write("rows", f"SELECT {CALLS['n']} AS attempt")
+
+
+def copy_it(ctx):
+    ctx.read("rows")
+    ctx.write("echo", "SELECT attempt FROM rows")
+
+
+STEPS = [wobble, copy_it]
+'''
+
+
+def test_the_ablation_is_a_flag_a_reader_can_run_rather_than_a_claim(tmp_path, capsys):
+    """--no-containment, and the two reports it produces side by side.
+
+    Two steps, one bug. The default reports it once and the ablation reports it
+    twice, which is the number the Spot borrowing has to earn.
+    """
+    where = pipeline(tmp_path, CASCADES)
+    main(["run", str(where), "--runs", "3", "--run-dir", str(tmp_path / "on")])
+    contained = capsys.readouterr().out
+    main(["run", str(where), "--runs", "3", "--no-containment",
+          "--run-dir", str(tmp_path / "off")])
+    ablated = capsys.readouterr().out
+
+    assert "1 of 2 steps diverged" in contained
+    assert "2 of 2 steps diverged" in ablated
+    assert "contained  on, so runs 2 to 3 read run 1's artifacts" in contained
+    assert "contained  off (--no-containment)" in ablated
+
+
+def test_judge_reports_the_containment_the_run_actually_used(tmp_path, capsys):
+    """A saved run is scored again, and how it executed is not a flag on judge."""
+    main(["run", str(pipeline(tmp_path, CASCADES)), "--runs", "2", "--no-containment",
+          "--run-dir", str(tmp_path / "rd")])
+    run_dir = next((tmp_path / "rd").glob("run-*"))
+    capsys.readouterr()
+
+    main(["judge", str(run_dir)])
+    assert "contained  off (--no-containment)" in capsys.readouterr().out
+
+
 def test_a_missing_pipeline_file_exits_two(tmp_path, capsys):
     code = main(["run", str(tmp_path / "absent.py"), "--run-dir", str(tmp_path / "artifacts")])
     assert code == 2

@@ -163,9 +163,30 @@ def prune_run_dirs(parent: Path, keep: int, current: Path | None = None) -> list
     return dropped
 
 
+def artifacts_before(record: RunRecord, step_index: int) -> dict[str, Artifact]:
+    """Run 1's artifact index as it stood when step `step_index` began.
+
+    Trimmed to the earlier steps rather than taken whole. The full index would
+    let a step read run 1's *later* output under a name the step writes itself,
+    which is not a read any run can make on its own, and the reference pipeline
+    has two steps that write a name they also read.
+    """
+    return {a.name: a for step in record.steps[:step_index] for a in step.artifacts}
+
+
 def execute_run(
-    steps: list[Step], run: int, run_dir: Path, carried: dict[str, Artifact]
+    steps: list[Step],
+    run: int,
+    run_dir: Path,
+    carried: dict[str, Artifact],
+    reference: RunRecord | None = None,
 ) -> tuple[RunRecord, dict[str, Artifact]]:
+    """One execution of the pipeline.
+
+    `reference` is run 1's record and turns containment on: every read resolves
+    against what run 1 had written by that point. Run 1 itself passes None, and
+    so does every run under --no-containment.
+    """
     con = duckdb.connect()
     written: dict[str, Artifact] = {}
     record = RunRecord(run=run)
@@ -180,6 +201,7 @@ def execute_run(
                 run_dir=run_dir,
                 written=written,
                 carried=carried,
+                upstream=None if reference is None else artifacts_before(reference, index),
             )
             before = dict(written)
             step_began = time.perf_counter()
@@ -191,6 +213,7 @@ def execute_run(
                     seconds=time.perf_counter() - step_began,
                     rows_read=ctx.rows_read,
                     input_columns=sorted(ctx.input_columns),
+                    uncontained_reads=sorted(ctx.uncontained_reads),
                     artifacts=[a for name, a in written.items() if before.get(name) is not a],
                 )
             )
@@ -307,8 +330,10 @@ def measure(
         for s in reference.steps
     ]
     for later in manifest.runs[1:]:
-        for step, found in zip(measured, compare_runs(reference, later, keys), strict=True):
+        found_here = compare_runs(reference, later, keys)
+        for step, ran, found in zip(measured, later.steps, found_here, strict=True):
             step.observe(found)
+            step.uncontained_reads.update(ran.uncontained_reads)
     return measured
 
 
@@ -339,6 +364,7 @@ def rejudge(
         steps=measure(manifest, keys or {}),
         seconds=sum(run.seconds for run in manifest.runs),
         policy=policy,
+        contained=manifest.contained,
         keep=0,
     )
 
@@ -350,6 +376,7 @@ def run_pipeline(
     keep: int = 1,
     keys: Mapping[str, Sequence[str]] | None = None,
     policy: Policy | None = None,
+    contained: bool = True,
 ) -> tuple[Report, Manifest]:
     if runs < 2:
         raise PipelineError(f"--runs must be at least 2 to have anything to compare, got {runs}")
@@ -363,14 +390,28 @@ def run_pipeline(
         environment = Environment.observe(probe)
         probe.close()
 
-        manifest = Manifest(pipeline=str(pipeline), root=run_dir, environment=environment)
+        manifest = Manifest(
+            pipeline=str(pipeline), root=run_dir, environment=environment, contained=contained
+        )
         began = time.perf_counter()
 
         carried: dict[str, Artifact] = {}
+        reference: RunRecord | None = None
         for run in range(1, runs + 1):
-            record, written = execute_run(steps, run, run_dir / f"run-{run:02d}", carried)
+            record, written = execute_run(
+                steps,
+                run,
+                run_dir / f"run-{run:02d}",
+                carried,
+                reference=reference if contained else None,
+            )
             manifest.runs.append(record)
-            carried = written
+            if run == 1:
+                reference, reference_written = record, written
+            # Contained, every run from 2 on carries run 1's state, so each is
+            # the second run of the same pipeline rather than the next link in a
+            # chain that has already drifted three times.
+            carried = reference_written if contained else written
 
         measured = measure(manifest, keys or {})
         manifest.save()
@@ -382,6 +423,7 @@ def run_pipeline(
             steps=measured,
             seconds=time.perf_counter() - began,
             policy=policy or Policy(),
+            contained=contained,
             pruned=len(dropped),
             keep=keep,
         )

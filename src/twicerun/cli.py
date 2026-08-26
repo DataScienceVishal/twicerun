@@ -77,6 +77,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="where to keep artifacts and the manifest (default .twicerun)",
     )
     run.add_argument(
+        "--no-containment",
+        action="store_true",
+        help="let runs 2 to N read their own artifacts instead of run 1's. This is the "
+        "ablation: with it, one divergence early in a pipeline is counted again by every "
+        "step that reads its output, and the per-step report becomes one finding followed "
+        "by echoes of it",
+    )
+    run.add_argument(
         "--keep",
         type=int,
         default=1,
@@ -183,6 +191,7 @@ def main(argv: list[str] | None = None) -> int:
             keep=args.keep,
             keys=parse_keys(args.key),
             policy=_policy_from(args),
+            contained=not args.no_containment,
         )
     except (PipelineError, MissingArtifact, KeySyntaxError) as exc:
         print(f"twicerun: {exc}", file=sys.stderr)

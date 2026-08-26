@@ -39,6 +39,7 @@ class Report:
     steps: list[StepMeasurement]
     seconds: float
     policy: Policy = field(default_factory=Policy)
+    contained: bool = True
     pruned: int = 0
     keep: int = 1
 
@@ -63,6 +64,7 @@ class Report:
             f"pipeline   {self.pipeline}",
             f"runs       {self.runs}, run 1 is the reference, so "
             f"{_plural(self.runs - 1, 'comparison')} per step",
+            f"contained  {self._containment()}",
             f"policy     {self.policy.describe()}",
             *(f"           {note}" for note in unverified),
             f"duckdb     {env.duckdb_version}, threads={env.threads}",
@@ -73,6 +75,17 @@ class Report:
             + (f", dropped {self.pruned}" if self.pruned else ""),
             "",
         ]
+
+    def _containment(self) -> str:
+        if self.contained:
+            return (
+                f"on, so runs 2 to {self.runs} read run 1's artifacts and a divergence at "
+                f"one step cannot reach the next"
+            )
+        return (
+            "off (--no-containment), so every run reads what it wrote itself and one "
+            "divergence can be counted again by every step below it"
+        )
 
     def _steps(self, verdicts: list[StepVerdict]) -> list[str]:
         width = max((len(f"{s.index} {s.name}") for s in self.steps), default=10)
@@ -95,6 +108,7 @@ class Report:
                 lines.extend(f"      {line}" for line in _attribution(worst))
             lines.extend(f"      {line}" for line in _magnitudes(step))
             lines.extend(f"      {hint}" for hint in step.hints)
+            lines.extend(f"      {line}" for line in _fallbacks(step))
             if verdict.blocked:
                 lines.append(f"      {verdict.blocked}")
         return lines
@@ -164,6 +178,23 @@ def _magnitudes(step: StepMeasurement) -> list[str]:
     if furthest.example[0] is None:
         return [line]
     return [line, f"{furthest.example[0]} against {furthest.example[1]}"]
+
+
+def _fallbacks(step: StepMeasurement) -> list[str]:
+    """Where the header's containment line does not hold, named rather than left implied.
+
+    A read only falls back when run 1 never wrote the artifact, which is itself
+    a divergence and is reported against the step that wrote it. The line matters
+    anyway: without it the header says every read went to run 1 and one of them
+    did not.
+    """
+    if not step.uncontained_reads:
+        return []
+    names = sorted(step.uncontained_reads)
+    return [
+        f"containment did not cover {', '.join(names)}: run 1 never wrote "
+        f"{'it' if len(names) == 1 else 'them'}, so this run read its own copy"
+    ]
 
 
 def _matched_on(findings: ArtifactFindings) -> list[str]:

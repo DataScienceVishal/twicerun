@@ -8,7 +8,9 @@ from twicerun.manifest import Artifact
 from twicerun.storage import MissingArtifact, StepContext, quote
 
 
-def context(con, tmp_path, *, run=1, index=0, name="step", written=None, carried=None):
+def context(
+    con, tmp_path, *, run=1, index=0, name="step", written=None, carried=None, upstream=None
+):
     return StepContext(
         con,
         run=run,
@@ -17,6 +19,7 @@ def context(con, tmp_path, *, run=1, index=0, name="step", written=None, carried
         run_dir=tmp_path / f"run-{run:02d}",
         written=written if written is not None else {},
         carried=carried if carried is not None else {},
+        upstream=upstream,
     )
 
 
@@ -40,6 +43,36 @@ def test_read_brings_an_earlier_artifact_into_scope_by_name(con, tmp_path):
     second.read("sales")
     assert con.execute("SELECT id FROM sales").fetchone() == (7,)
     assert second.rows_read == 1
+
+
+def test_a_contained_read_takes_run_ones_copy_over_this_runs_own(con, tmp_path):
+    """Both exist and containment decides. This is the whole mechanism.
+
+    The name resolves to two different files, so the later run computes from
+    what run 1 produced rather than from what it produced itself one step ago.
+    """
+    mine: dict[str, Artifact] = {}
+    context(con, tmp_path, run=2, written=mine).write("sales", "SELECT 2 AS id")
+    theirs: dict[str, Artifact] = {}
+    context(con, tmp_path, run=1, written=theirs).write("sales", "SELECT 1 AS id")
+
+    contained = context(con, tmp_path, run=2, index=1, written=mine, upstream=theirs)
+    contained.read("sales")
+    assert con.execute("SELECT id FROM sales").fetchone() == (1,)
+    assert contained.uncontained_reads == set()
+
+    context(con, tmp_path, run=2, index=1, written=mine).read("sales")
+    assert con.execute("SELECT id FROM sales").fetchone() == (2,)
+
+
+def test_a_contained_read_run_one_cannot_answer_falls_back_and_records_it(con, tmp_path):
+    mine: dict[str, Artifact] = {}
+    context(con, tmp_path, run=2, written=mine).write("rejects", "SELECT 9 AS id")
+
+    ctx = context(con, tmp_path, run=2, index=1, written=mine, upstream={})
+    ctx.read("rejects")
+    assert con.execute("SELECT id FROM rejects").fetchone() == (9,)
+    assert ctx.uncontained_reads == {"rejects"}
 
 
 def test_reading_something_nobody_wrote_names_what_is_available(con, tmp_path):

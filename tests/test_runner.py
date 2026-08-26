@@ -84,6 +84,66 @@ STEPS = [two_outputs]
 '''
 
 
+CASCADE = '''
+CALLS = {"n": 0}
+
+
+def wobbles(ctx):
+    CALLS["n"] += 1
+    ctx.write("seed", f"SELECT {CALLS['n']} AS attempt")
+
+
+def copies_it(ctx):
+    ctx.read("seed")
+    ctx.write("copy", "SELECT attempt FROM seed")
+
+
+def copies_that(ctx):
+    ctx.read("copy")
+    ctx.write("copy_of_copy", "SELECT attempt FROM copy")
+
+
+STEPS = [wobbles, copies_it, copies_that]
+'''
+
+APPENDS_TO_ITS_OWN_STATE = '''
+def append(ctx):
+    ctx.state("log", "SELECT 0 AS i WHERE false")
+    ctx.write("log", "SELECT i FROM log UNION ALL SELECT 1 AS i")
+
+
+STEPS = [append]
+'''
+
+# A step set that depends on the data is the realistic way run 1 ends up
+# without an artifact a later run has. The try/except is how a pipeline asks
+# whether the earlier step produced one, since it cannot know otherwise.
+REJECTS_ONLY_SOMETIMES = '''
+from twicerun.storage import MissingArtifact
+
+CALLS = {"n": 0}
+
+
+def load(ctx):
+    CALLS["n"] += 1
+    ctx.write("rows", "SELECT 1 AS i")
+    if CALLS["n"] > 1:
+        ctx.write("rejects", f"SELECT {CALLS['n']} AS i")
+
+
+def handle_rejects(ctx):
+    try:
+        ctx.read("rejects")
+    except MissingArtifact:
+        ctx.write("rejected_count", "SELECT 0 AS n")
+    else:
+        ctx.write("rejected_count", "SELECT count(*) AS n FROM rejects")
+
+
+STEPS = [load, handle_rejects]
+'''
+
+
 WRITES_NOTHING = '''
 def real_work(ctx):
     ctx.write("rows", "SELECT i FROM range(3) AS s(i)")
@@ -118,6 +178,57 @@ def test_run_one_is_the_reference_so_its_own_divergence_is_not_counted(tmp_path)
     body = CONTROLLED.replace("DIVERGES_ON = {2, 4}", "DIVERGES_ON = {1}")
     report, _ = run_pipeline(write_pipeline(tmp_path, body), runs=5, parent=tmp_path / "artifacts")
     assert report.steps[1].fired == 4
+
+
+def test_a_divergence_is_reported_once_rather_than_by_every_step_below_it(tmp_path):
+    """Containment, and the ablation that shows what it is worth.
+
+    One step wobbles and two steps do nothing but copy its output. Contained,
+    the two downstream steps read run 1's copy and report 0 of 4, so the report
+    has one finding in it. Uncontained, all three fire and two of the three
+    findings are echoes of the first.
+    """
+    where = write_pipeline(tmp_path, CASCADE)
+    contained, _ = run_pipeline(where, runs=5, parent=tmp_path / "on")
+    assert [s.fired for s in contained.steps] == [4, 0, 0]
+
+    ablated, _ = run_pipeline(where, runs=5, parent=tmp_path / "off", contained=False)
+    assert [s.fired for s in ablated.steps] == [4, 4, 4]
+
+
+def test_carried_state_comes_from_run_one_rather_than_from_the_run_before(tmp_path):
+    """The contamination containment removes on the reference pipeline's append bug.
+
+    A step appending one row per execution to state its last execution left is
+    broken once, not four times. Uncontained, run 4 reads run 3's log and the
+    comparison against run 1 shows three extra rows, which describes the chain
+    rather than the step. Contained, every later run starts from run 1's copy,
+    so all four comparisons report the one extra row a rerun actually produces.
+    """
+    where = write_pipeline(tmp_path, APPENDS_TO_ITS_OWN_STATE)
+
+    contained, _ = run_pipeline(where, runs=5, parent=tmp_path / "on")
+    extra = [f.unmatched_candidate for r in contained.steps[0].rounds for f in r]
+    assert extra == [1, 1, 1, 1]
+
+    ablated, _ = run_pipeline(where, runs=5, parent=tmp_path / "off", contained=False)
+    grew = [f.unmatched_candidate for r in ablated.steps[0].rounds for f in r]
+    assert grew == [1, 2, 3, 4]
+
+
+def test_a_read_run_one_cannot_answer_says_so_instead_of_claiming_containment(tmp_path):
+    """The one case where the header's containment line would otherwise overstate.
+
+    Run 1 wrote no rejects, so the later runs' reads of their own rejects file
+    cannot resolve against it. Falling back keeps the rest of the pipeline
+    measurable, which is the containment argument one level up, and the step
+    line says the fallback happened.
+    """
+    report, _ = run_pipeline(
+        write_pipeline(tmp_path, REJECTS_ONLY_SOMETIMES), runs=3, parent=tmp_path / "artifacts"
+    )
+    assert report.steps[1].uncontained_reads == {"rejects"}
+    assert "containment did not cover rejects: run 1 never wrote it" in report.render()
 
 
 def test_a_step_that_stops_writing_an_artifact_is_a_divergence(tmp_path):

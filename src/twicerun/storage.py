@@ -42,11 +42,20 @@ def quote(path: Path) -> str:
 class StepContext:
     """Handed to one step of one run. Not reused across steps.
 
-    `written` is the live index of artifacts this run has produced, keyed by
-    name, and `carried` is the same index from the run before. Two dictionaries
-    rather than a store object because artifact resolution is the thing slice 3
-    changes to implement containment, and keeping it as plain lookups here means
-    that change lands in one place.
+    Three indexes decide what a read resolves to. `written` is what this run has
+    produced so far. `carried` is what a `state` read draws on. `upstream` is run
+    1's artifacts from the steps before this one, and it is where containment
+    lives: with it set, runs 2 to N read run 1's outputs rather than their own,
+    so a divergence at step 3 reaches the report once instead of once per step
+    downstream of it. `None` means containment is off, which is run 1 always and
+    every run under --no-containment. An empty dict is not the same thing: it
+    means containment is on and run 1 had written nothing yet.
+
+    The idea is Spot's (Salari et al., GigaScience 9(12), arXiv:2006.04684),
+    which copies the first condition's output files into the second so that
+    differences cannot propagate down the pipeline. Here artifacts are already
+    addressed by (run, step index, name), so it costs a dictionary lookup rather
+    than a copy.
     """
 
     def __init__(
@@ -59,6 +68,7 @@ class StepContext:
         run_dir: Path,
         written: dict[str, Artifact],
         carried: dict[str, Artifact],
+        upstream: dict[str, Artifact] | None = None,
     ) -> None:
         self._con = con
         self._run = run
@@ -67,15 +77,27 @@ class StepContext:
         self._step_dir = run_dir / f"step-{step_index:02d}-{step_name}"
         self._written = written
         self._carried = carried
+        self._upstream = upstream
         self.rows_read = 0
         # Attribution needs to tell a column this step invented from one it
         # copied in, because on the row_number bug two columns explain the
         # divergence equally well and only one of them is the step's doing.
         self.input_columns: set[str] = set()
+        self.uncontained_reads: set[str] = set()
 
     def read(self, name: str) -> duckdb.DuckDBPyRelation:
-        """Bring an artifact written earlier in this run into scope as a view."""
-        artifact = self._written.get(name)
+        """Bring an artifact into scope as a view, run 1's copy under containment."""
+        artifact = None if self._upstream is None else self._upstream.get(name)
+        if artifact is None:
+            artifact = self._written.get(name)
+            if artifact is not None and self._upstream is not None:
+                # Under containment run 1 is meant to answer every read. That it
+                # could not means this run wrote an artifact run 1 did not, which
+                # is a divergence the step that wrote it already reports. Reading
+                # this run's own copy keeps the later steps measurable, which is
+                # the containment argument one level up, and the report names the
+                # fallback rather than leaving the header's claim overstated.
+                self.uncontained_reads.add(name)
         if artifact is None:
             known = ", ".join(sorted(self._written)) or "nothing yet"
             raise MissingArtifact(
@@ -99,6 +121,12 @@ class StepContext:
         rows survive each merge untouched, but that step would still diverge if
         the seed were rebuilt from scratch every run. Worth keeping the two
         apart, because only the first is an argument for this method existing.
+
+        Which run's copy `carried` holds is the runner's decision and containment
+        changes it. Uncontained, run 4 sees run 3's state, so a log that grows by
+        one copy per run arrives at the comparison having grown by three. Under
+        containment every run from 2 on sees run 1's, which makes each of them
+        the same experiment run again rather than the next link in a chain.
         """
         artifact = self._carried.get(name)
         if artifact is None:

@@ -35,6 +35,7 @@ class StepMeasurement:
     comparisons: int
     terms: int = 0
     rounds: list[list[ArtifactFindings]] = field(default_factory=list)
+    uncontained_reads: set[str] = field(default_factory=set)
 
     def observe(self, findings: list[ArtifactFindings]) -> None:
         self.rounds.append(findings)

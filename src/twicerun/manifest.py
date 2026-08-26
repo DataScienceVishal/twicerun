@@ -88,6 +88,12 @@ class StepRecord:
     seconds: float
     rows_read: int
     input_columns: list[str] = field(default_factory=list)
+    # Names this step had to read from its own run because run 1 never wrote
+    # them. Empty on every run of a pipeline whose steps write the same
+    # artifacts every time, which is why it is worth recording: when it is not
+    # empty, the report's containment line would otherwise be claiming more
+    # than the run did.
+    uncontained_reads: list[str] = field(default_factory=list)
     artifacts: list[Artifact] = field(default_factory=list)
 
 
@@ -103,6 +109,7 @@ class Manifest:
     pipeline: str
     root: Path
     environment: Environment
+    contained: bool = True
     started: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
     runs: list[RunRecord] = field(default_factory=list)
 
@@ -128,23 +135,28 @@ class Manifest:
             pipeline=body["pipeline"],
             root=Path(body["root"]),
             environment=Environment(**body["environment"]),
+            # A manifest without the key was written before containment existed,
+            # so False is not a fallback here, it is the truth about that run.
+            contained=body.get("contained", False),
             started=body["started"],
-            runs=[
-                RunRecord(
-                    run=run["run"],
-                    seconds=run["seconds"],
-                    steps=[
-                        StepRecord(
-                            index=step["index"],
-                            name=step["name"],
-                            seconds=step["seconds"],
-                            rows_read=step["rows_read"],
-                            input_columns=step["input_columns"],
-                            artifacts=[Artifact(**a) for a in step["artifacts"]],
-                        )
-                        for step in run["steps"]
-                    ],
-                )
-                for run in body["runs"]
-            ],
+            runs=[_run_record(run) for run in body["runs"]],
         )
+
+
+def _run_record(body: dict) -> RunRecord:
+    return RunRecord(
+        run=body["run"],
+        seconds=body["seconds"],
+        steps=[
+            StepRecord(
+                index=step["index"],
+                name=step["name"],
+                seconds=step["seconds"],
+                rows_read=step["rows_read"],
+                input_columns=step["input_columns"],
+                uncontained_reads=step.get("uncontained_reads", []),
+                artifacts=[Artifact(**a) for a in step["artifacts"]],
+            )
+            for step in body["steps"]
+        ],
+    )
