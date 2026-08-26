@@ -55,8 +55,15 @@ def test_the_header_carries_the_version_and_the_thread_count(tmp_path, capsys):
     assert "duckdb " in printed and "threads=" in printed
 
 
-def test_nothing_in_the_report_claims_a_step_is_deterministic(tmp_path, capsys):
-    main(["run", str(pipeline(tmp_path, CLEAN)),
+@pytest.mark.parametrize("body", [CLEAN, DIVERGES])
+def test_nothing_in_the_report_claims_a_step_is_deterministic(tmp_path, capsys, body):
+    """Both shapes of report, because they do not print the same prose.
+
+    A report that found something also prints the cause section, and a sentence
+    about what a zero at threads=1 rules out is exactly where one of these
+    words would have got in.
+    """
+    main(["run", str(pipeline(tmp_path, body)),
           "--runs", "3", "--run-dir", str(tmp_path / "artifacts")])
     printed = capsys.readouterr().out.lower()
     for forbidden in ("deterministic", "stable", "reproducible", "passed"):

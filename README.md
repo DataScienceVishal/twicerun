@@ -10,34 +10,47 @@ So the naive version of this tool, run it twice and diff, reports hundreds of fi
 $ uv run twicerun run pipelines/reference.py
 pipeline   pipelines/reference.py
 runs       5, run 1 is the reference, so 4 comparisons per step
+contained  on, so runs 2 to 5 read run 1's artifacts and a divergence at one step cannot reach the next
 policy     strict, so any difference at all is a divergence
 duckdb     1.5.5, threads=10
 platform   macOS-26.5.2-arm64-arm-64bit
-artifacts  .twicerun/run-20260826-104801
+artifacts  .twicerun/run-20260826-121335
 retention  keeping 1 run directory
 
   0 generate_inputs         0 of 4
-  1 daily_revenue           4 of 4  VALUE_DRIFT
-      daily_revenue: 745 of 1,000 paired rows moved on revenue
-      furthest move over 4 comparisons: revenue, 6 ulp and 7.03e-16 relative
-      496528.66982424865 against 496528.6698242483
-  2 customer_keys           4 of 4  ROW_MISSING ROW_EXTRA
+  1 daily_revenue           4 of 4  VALUE_DRIFT PARALLEL_ORDER
+      daily_revenue: 735 of 1,000 paired rows moved on revenue
+      furthest move over 4 comparisons: revenue, 5 ulp and 5.77e-16 relative
+      504718.35255696083 against 504718.3525569611
+  2 customer_keys           4 of 4  ROW_MISSING ROW_EXTRA PARALLEL_ORDER
       customer_keys: 491,520 of 500,000 reference rows and 491,520 later rows found no partner
       dropping surrogate_id from the key takes unmatched reference rows from 491,520 to 0
       event_id does the same, so surrogate_id is named first because it is the one no input to this step carries
-  3 apply_price_updates     4 of 4  ROW_MISSING ROW_EXTRA
-      prices: 13,632 of 125,000 reference rows and 13,632 later rows found no partner
-      dropping price_cents from the key takes unmatched reference rows from 13,632 to 0
-  4 append_audit_log        4 of 4  MULTIPLICITY
-      audit_log: 15,812 later rows found no partner, against 3,953 reference rows
-  5 mean_basket             4 of 4  VALUE_DRIFT
-      mean_basket: 693 of 1,000 paired rows moved on mean_amount
-      furthest move over 4 comparisons: mean_amount, 6 ulp and 6.81e-16 relative
-      250.3057635677055 against 250.30576356770533
-  6 sparse_customer_keys    4 of 4  ROW_MISSING ROW_EXTRA
-      sparse_customer_keys: 474,560 of 500,000 reference rows and 474,560 later rows found no partner
-      dropping surrogate_id from the key takes unmatched reference rows from 474,560 to 0
+  3 apply_price_updates     1 of 4  ROW_MISSING ROW_EXTRA PARALLEL_ORDER
+      prices: 15,328 of 125,000 reference rows and 15,328 later rows found no partner
+      dropping price_cents from the key takes unmatched reference rows from 15,328 to 0
+  4 append_audit_log        4 of 4  MULTIPLICITY PERSISTS_SINGLE_THREADED
+      audit_log: 3,953 later rows found no partner, against 3,953 reference rows
+  5 mean_basket             4 of 4  VALUE_DRIFT PARALLEL_ORDER
+      mean_basket: 753 of 1,000 paired rows moved on mean_amount
+      furthest move over 4 comparisons: mean_amount, 6 ulp and 6.76e-16 relative
+      252.45031634680123 against 252.45031634680106
+  6 sparse_customer_keys    2 of 4  ROW_MISSING ROW_EXTRA PARALLEL_ORDER
+      sparse_customer_keys: 245,760 of 500,000 reference rows and 245,760 later rows found no partner
+      dropping surrogate_id from the key takes unmatched reference rows from 245,760 to 0
       event_id does the same, so surrogate_id is named first because it is the one no input to this step carries
+
+cause, from re-executing each divergent step 5 times at threads=1:
+  Both rates are out of 4, which is what lets them be read against each other.
+  A zero is 4 clean comparisons and no more than that: it rules out a per-comparison rate
+  above 53 percent, 95 percent one-sided, assuming an independence these runs do not have
+  since they share a process, a page cache and a machine.
+  1 daily_revenue         PARALLEL_ORDER            4 of 4 at threads=10, 0 of 4 at threads=1
+  2 customer_keys         PARALLEL_ORDER            4 of 4 at threads=10, 0 of 4 at threads=1
+  3 apply_price_updates   PARALLEL_ORDER            1 of 4 at threads=10, 0 of 4 at threads=1
+  4 append_audit_log      PERSISTS_SINGLE_THREADED  4 of 4 at threads=10, 4 of 4 at threads=1
+  5 mean_basket           PARALLEL_ORDER            4 of 4 at threads=10, 0 of 4 at threads=1
+  6 sparse_customer_keys  PARALLEL_ORDER            2 of 4 at threads=10, 0 of 4 at threads=1
 
 reassociation bound, computed rather than picked:
   1,000x of headroom was fixed before any of this was written and has not moved since.
@@ -45,47 +58,95 @@ reassociation bound, computed rather than picked:
   factor of the output row count in slack. The second is the terms behind one output value, has no slack
   in it, and is expected to fail. Both print so the slack is visible rather than described.
   1 daily_revenue
-      observed furthest relative drift 7.0338e-16
-      n = 2,000,000 rows read by the step, bound 4.4409e-10, headroom 631,369x  CLEARS
-      n = 2,000 terms per output row, bound 4.4409e-13, headroom 631x  FAILS
+      observed furthest relative drift 5.7664e-16
+      n = 2,000,000 rows read by the step, bound 4.4409e-10, headroom 770,139x  CLEARS
+      n = 2,000 terms per output row, bound 4.4409e-13, headroom 770x  FAILS
   5 mean_basket
-      observed furthest relative drift 6.8129e-16
-      n = 2,000,000 rows read by the step, bound 4.4409e-10, headroom 651,838x  CLEARS
-      n = 2,000 terms per output row, bound 4.4409e-13, headroom 652x  FAILS
+      observed furthest relative drift 6.7550e-16
+      n = 2,000,000 rows read by the step, bound 4.4409e-10, headroom 657,423x  CLEARS
+      n = 2,000 terms per output row, bound 4.4409e-13, headroom 657x  FAILS
 
-6 of 7 steps diverged in 6.9s.
+6 of 7 steps diverged in 10.9s.
 ```
 
-Step 5 is a correct float average. All 693 of those findings are the arithmetic behaving normally, and `--policy reduction-order` is the opt-in that says so.
+Step 5 is a correct float average. All 753 of those findings are the arithmetic behaving normally, and `--policy reduction-order` is the opt-in that says so.
+
+Step 4 is the one to read twice. `PERSISTS_SINGLE_THREADED` next to `4 of 4 at threads=1` is the tool saying the thread count is not the problem, on the one bug in the file that a rerun causes rather than parallelism.
 
 **Your numbers will not match that transcript, and neither will mine on the next run.** This is a tool about non-determinism and its own output is non-deterministic, so quoting any single figure as fixed would be the wrong thing to do twice over.
 
-Every figure below comes from **20 passes of the five-run loop**, which is 80 comparisons per step, on DuckDB 1.5.5 at `threads=10`. Ranges are rounded outward from what those 20 passes produced and the sample size is stated because the ranges are not bounds. A previous version of this table was built from 10 passes, and 8 of its 10 quantities were exceeded within 20 more on the same machine: `daily_revenue` had been published at 3 to 6 ulp and reached 19. That is the mistake this project exists to catch, one layer up, and `pipelines/reference.py` records the same thing happening twice to a fire-rate floor.
+Every figure below comes from **20 passes of the five-run loop with containment on**, which is 80 comparisons per step, on DuckDB 1.5.5 at `threads=10`. Ranges are rounded outward from what those 20 passes produced and the sample size is stated because the ranges are not bounds. A previous version of this table was built from 10 passes, and 8 of its 10 quantities were exceeded within 20 more on the same machine: `daily_revenue` had been published at 3 to 6 ulp and reached 19. That is the mistake this project exists to catch, one layer up, and `pipelines/reference.py` records the same thing happening twice to a fire-rate floor.
 
-| step | fires under `strict` | fires under `reduction-order` | what the oracle called it |
-|---|---|---|---|
-| 0 `generate_inputs` | 0 of 4 on all 20 | 0 of 4 on all 20 | the control, and it never fired |
-| 1 `daily_revenue` | 4 of 4 on all 20 | 0 of 4 on all 20 | `VALUE_DRIFT`, roughly 500 to 950 rows of 1,000, 3 to 19 ulp |
-| 2 `customer_keys` | 2 to 4 of 4 | unchanged | `ROW_MISSING` `ROW_EXTRA`, `surrogate_id` named first on all 75 findings |
-| 3 `apply_price_updates` | 1 to 4 of 4 | unchanged | `ROW_MISSING` `ROW_EXTRA`, `price_cents` named first on all 58 findings |
-| 4 `append_audit_log` | 4 of 4 on all 20 | unchanged | `MULTIPLICITY`, 15,812 extra rows on a 3,953-row reference |
-| 5 `mean_basket` | 4 of 4 on all 20 | 0 of 4 on all 20 | `VALUE_DRIFT`, roughly 550 to 800 rows of 1,000, 3 to 7 ulp |
-| 6 `sparse_customer_keys` | 1 to 4 of 4 | unchanged | `ROW_MISSING` `ROW_EXTRA`, `surrogate_id` named first on all 55 findings |
+| step | fires under `strict` | at `threads=1` | fires under `reduction-order` | what the oracle called it |
+|---|---|---|---|---|
+| 0 `generate_inputs` | 0 of 4 on all 20 | not bisected | 0 of 4 on all 20 | the control, and it never fired |
+| 1 `daily_revenue` | 4 of 4 on all 20 | 0 of 4 on all 20 | 0 of 4 on all 20 | `VALUE_DRIFT` `PARALLEL_ORDER`, roughly 500 to 950 rows of 1,000 |
+| 2 `customer_keys` | 2 to 4 of 4 | 0 of 4 on all 20 | unchanged | `ROW_MISSING` `ROW_EXTRA` `PARALLEL_ORDER`, `surrogate_id` named first every time |
+| 3 `apply_price_updates` | 0 to 4 of 4, two flat zeros | 0 of 4 on all 18 that fired | unchanged | `ROW_MISSING` `ROW_EXTRA` `PARALLEL_ORDER`, 1,344 to 42,304 rows of 125,000 |
+| 4 `append_audit_log` | 4 of 4 on all 20 | **4 of 4 on all 20** | unchanged | `MULTIPLICITY` `PERSISTS_SINGLE_THREADED`, 3,953 extra rows every comparison |
+| 5 `mean_basket` | 4 of 4 on all 20 | 0 of 4 on all 20 | 0 of 4 on all 20 | `VALUE_DRIFT` `PARALLEL_ORDER`, roughly 550 to 800 rows of 1,000 |
+| 6 `sparse_customer_keys` | 0 to 4 of 4, one flat zero | 0 of 4 on all 19 that fired | unchanged | `ROW_MISSING` `ROW_EXTRA` `PARALLEL_ORDER`, `surrogate_id` named first every time |
 
-The two float steps go to zero and nothing else moves. That is the whole claim for the oracle: the false positives disappear and the four real bugs are caught by the same code that dismissed them.
+The two float steps go to zero under `reduction-order` and nothing else moves. That is the whole claim for the oracle: the false positives disappear and the four real bugs are caught by the same code that dismissed them.
+
+The `threads=1` column is what slice 3 added, and one row of it is not like the others. Five steps stop diverging with one thread and one does not, which is the difference between a step whose answer depends on how the work was divided and a step whose answer depends on it having run before. No number of runs would have separated those two; a second thread count does it in one column.
+
+Every `threads=1` figure here is either 0 of 4 or 4 of 4, never anything between. That was not designed and it is a small sample, so it is reported rather than explained.
+
+The ULP figures are gone from this table rather than restated. These 20 passes gave 3 to 5 ulp on `daily_revenue` and 3 to 6 on `mean_basket`, comfortably inside the 3 to 19 the last table published, and republishing the narrower range would repeat exactly the mistake the paragraph above describes.
 
 ## Status
 
-Slice 2 of 7. What runs today: the storage interface, the run layout, the artifact manifest, the five-run loop, the typed oracle, leave-one-out attribution, and the policy layer.
+Slice 3 of 7. What runs today: the storage interface, the run layout, the artifact manifest, the five-run loop, the typed oracle, leave-one-out attribution, the policy layer, containment, and the single-threaded bisect.
 
-What does not exist yet, in the order it arrives: containment and the single-threaded bisect (slice 3), input amplification and the confidence bound (slice 4), the NYC TLC backfill and the eval numbers (slice 5), crash injection (slice 6), and the report generator that keeps this file's tables honest (slice 7).
+What does not exist yet, in the order it arrives: input amplification and the four statuses (slice 4), the NYC TLC backfill and the eval numbers (slice 5), crash injection (slice 6), and the report generator that keeps this file's tables honest (slice 7).
 
-One consequence of that ordering is visible in every report that downgrades anything, and it is deliberate. `reduction-order` is a conjunction of three conditions and the middle one, that the step stops diverging at `threads=1`, needs the bisect from slice 3. So the report header says so rather than counting it as satisfied:
+Slice 2 shipped with a disclosure in the header of every report that downgraded anything, because `reduction-order` is a conjunction of three conditions and only two of them existed:
 
 ```
 policy     reduction-order, so drift inside the reassociation bound is TOLERATED
            condition 2 of 3, that the step does not diverge at threads=1, is not implemented until slice 3. Every TOLERATED below rests on the other two
 ```
+
+That line is gone, because the condition it stood in for is now measured and enforced. What a `TOLERATED` claims changed with it. It used to mean the drift was float-only and small enough that reassociation could account for it. It now means the drift also disappeared when the parallelism did, which is the difference between "small enough to be reassociation" and "demonstrably is reassociation". A step drifting inside the bound that keeps drifting at `threads=1` is now reported, with that rate as the reason.
+
+## Containment, and what it is worth
+
+Runs 2 to N resolve every read against run 1's artifacts. A step that reads a diverging step's output therefore reads the same bytes every time, so it reports what it did rather than what the step above it did.
+
+The idea is [Spot's](https://academic.oup.com/gigascience/article/9/12/giaa106/5998300) (Salari, Kiar, Lewis, Evans and Glatard, GigaScience 9(12), [arXiv:2006.04684](https://arxiv.org/abs/2006.04684)), which compares two conditions of a neuroimaging pipeline "in a step-by-step execution that prevents the propagation of differences in the pipeline", and does it by copying the first condition's output files into the second. The borrowing is the idea and not the implementation: Spot's tool used ReproZip syscall interception, has not been touched since 2020, and works on a domain unrelated to this one. Here artifacts are already addressed by `(run, step index, name)`, so containment is a dictionary lookup rather than a file copy, and it costs nothing measurable.
+
+`--no-containment` runs the ablation, so the number below is something you can reproduce rather than a claim to take on trust.
+
+On the reference pipeline the step it changes is `append_audit_log`, the append with no unique key, because it is the only step whose input is its own last output. Extra rows reported per comparison, against a 3,953-row reference:
+
+| | comparison 1 | 2 | 3 | 4 |
+|---|---|---|---|---|
+| `--no-containment`, 10 passes | 3,953 | 7,906 | 11,859 | 15,812 |
+| contained, 20 passes | 3,953 | 3,953 | 3,953 | 3,953 |
+
+Both rows held on every pass. The uncontained row is four reruns' worth of duplication charged to one step: run 4 appends to run 3's log, which already had run 2's in it. The contained row is what one rerun of that step actually does. The bug is the same bug either way and the fire rate is 4 of 4 either way, so what containment bought here is the magnitude being a fact about the step rather than about how many times the tool ran.
+
+**What it did not buy, on this pipeline, is a smaller count of divergent steps**, and that is worth saying plainly because it is the number the eval was going to use. No step in `pipelines/reference.py` reads another step's diverging output: every step reads the control step's artifacts, which never differ. So the cascade containment prevents does not happen here, and across 10 ablated passes against 20 contained ones the set of steps that ever fired was identical. Slice 5's baseline 3 was pre-registered to count falsely divergent steps and would count zero of them, which means either that baseline changes or the reference pipeline gains a step that consumes a diverging artifact. That is a decision for the eval, not something to fix quietly by adding a step now.
+
+The cascade itself is real and there is a test that measures it. On a three-step fixture where two steps do nothing but copy a wobbling step's output, the report goes from one finding to three with `--no-containment`.
+
+## The cause axis
+
+Class says what went wrong. Cause says where to look. Every step that fired is re-executed at `threads=1`, five times, and the report prints both rates:
+
+```
+  1 daily_revenue         PARALLEL_ORDER            4 of 4 at threads=10, 0 of 4 at threads=1
+  4 append_audit_log      PERSISTS_SINGLE_THREADED  4 of 4 at threads=10, 4 of 4 at threads=1
+```
+
+Same denominator on both sides, which is the only reason the two halves of that sentence can be read against each other. The bisect runs at the same N as the main loop for exactly that reason.
+
+`PERSISTS_SINGLE_THREADED` is where the tool stops. It says the thread count is not the explanation and does not guess between a clock read, a data-dependent branch, appended state and something outside the pipeline.
+
+**A zero at `threads=1` is not proof of anything, and the report says so on the line above the rates.** Four clean comparisons put a 95 percent one-sided upper bound of 53 percent on the per-comparison rate, which is the same arithmetic that argues for five runs rather than two, applied to the bisect's own evidence. It also assumes the comparisons are independent, and they are not: they share a process, a page cache and a machine. So `PARALLEL_ORDER` is a reading of two measured rates, not a finding that single-threaded execution cannot diverge, and a test asserts that neither shape of report contains the words deterministic, stable, reproducible or passed.
+
+The bisect starts each single-threaded sequence from no carried state, exactly as run 1 of the main loop did. Seeding it from run 1's state instead was the first implementation and it was wrong in a way only a real pipeline showed: all five single-threaded executions of `append_audit_log` then read the same log, agreed with each other, and the step came out `PARALLEL_ORDER`. Duplicating a log on rerun has nothing to do with threads.
 
 ## How the comparison works
 
@@ -166,11 +227,19 @@ So correct code producing 630 findings under the default is the intended behavio
 
 That also shapes the report. A build gate needs a verdict; someone tracing a count that did not add up needs the two numbers that disagreed, so the report prints the pair rather than a summary of it.
 
-`--policy reduction-order` is the opt-in. It downgrades a `VALUE_DRIFT` finding to `TOLERATED` when three things hold at once: the step's only class across every comparison is `VALUE_DRIFT`, the step stops diverging at `threads=1`, and the magnitude is inside the bound. Any `ROW_MISSING`, `ROW_EXTRA`, `MULTIPLICITY` or `SCHEMA` finding anywhere in the step blocks it outright. A downgraded finding is still counted and still printed with its magnitudes.
+`--policy reduction-order` is the opt-in. It downgrades a `VALUE_DRIFT` finding to `TOLERATED` when three things hold at once: the step's only class across every comparison is `VALUE_DRIFT`, the step's fire rate at `threads=1` is 0 of m, and the magnitude is inside the bound. Any `ROW_MISSING`, `ROW_EXTRA`, `MULTIPLICITY` or `SCHEMA` finding anywhere in the step blocks it outright. A downgraded finding is still counted and still printed with its magnitudes.
 
-The conjunction is the point. A difference that vanishes single-threaded but is ten orders of magnitude larger than reassociation can account for is catastrophic cancellation or a genuinely different set of terms, and it is still reported.
+The conjunction is the point, and each condition refuses something the other two would let through. A difference that vanishes single-threaded but is ten orders of magnitude larger than reassociation can account for is catastrophic cancellation or a genuinely different set of terms, and it is still reported. A difference small enough for the bound that survives `threads=1` is not reduction order whatever its size, and it is still reported, with that rate as the reason:
 
-`--tolerance-rel` and `--tolerance-ulps` are an escape hatch for someone who knows their domain, documented as one and never a default. They work under any policy because they are a claim about acceptable values rather than about a mechanism, and they still cannot excuse a missing or duplicated row.
+```
+      drift not downgraded: the step still diverges at threads=1, 2 of 4, so the order of a parallel reduction is not what moved it
+```
+
+A step that was never bisected gets the same refusal. No evidence is not evidence, and the direction to err in is reporting a difference that reassociation might well have explained.
+
+`--tolerance-rel` and `--tolerance-ulps` are deliberately not gated on the bisect. A threshold is a user saying a difference of that size does not matter in their domain, which is their claim to make and rests on no mechanism. The header says when a threshold did the downgrading, because that verdict and a mechanism-backed one would otherwise read the same on the step line.
+
+They are an escape hatch, documented as one and never a default, and they still cannot excuse a missing or duplicated row.
 
 ## Measuring and deciding are separate stages
 
@@ -182,20 +251,22 @@ Running `twicerun run` twice under two policies does not show you that, because 
 
 ```
 $ uv run twicerun run pipelines/reference.py --runs 3
-$ uv run twicerun judge .twicerun/run-20260826-104305 --policy strict
-  1 daily_revenue    2 of 2  VALUE_DRIFT
-      daily_revenue: 746 of 1,000 paired rows moved on revenue
-      furthest move over 2 comparisons: revenue, 5 ulp and 5.87e-16 relative
-      495421.3042199606 against 495421.3042199603
+$ uv run twicerun judge .twicerun/run-20260826-124119 --policy strict
+  1 daily_revenue    2 of 2  VALUE_DRIFT PARALLEL_ORDER
+      daily_revenue: 711 of 1,000 paired rows moved on revenue
+      furthest move over 2 comparisons: revenue, 5 ulp and 5.88e-16 relative
+      494720.69950346916 against 494720.6995034689
 
-$ uv run twicerun judge .twicerun/run-20260826-104305 --policy reduction-order
-  1 daily_revenue    0 of 2  VALUE_DRIFT TOLERATED on 2 of 2
-      daily_revenue: 746 of 1,000 paired rows moved on revenue
-      furthest move over 2 comparisons: revenue, 5 ulp and 5.87e-16 relative
-      495421.3042199606 against 495421.3042199603
+$ uv run twicerun judge .twicerun/run-20260826-124119 --policy reduction-order
+  1 daily_revenue    0 of 2  VALUE_DRIFT PARALLEL_ORDER TOLERATED on 2 of 2
+      daily_revenue: 711 of 1,000 paired rows moved on revenue
+      furthest move over 2 comparisons: revenue, 5 ulp and 5.88e-16 relative
+      494720.69950346916 against 494720.6995034689
 ```
 
-Same 746, same 5 ulp, same 5.87e-16, same pair of values. The fire rate moves and nothing under it does. A test compares those detail lines rather than describing them.
+Same 711, same 5 ulp, same 5.88e-16, same pair of values. The fire rate moves and nothing under it does. A test compares those detail lines rather than describing them.
+
+The bisect is measurement too, so it holds still as well. Judging that one saved run under `strict`, under `reduction-order` and under `--tolerance-ulps 4` gave 21 identical detail lines and an identical cause table across all three, with only the fire rate and the `TOLERATED` count moving. `judge` re-derives the `threads=1` rate from the saved single-threaded artifacts rather than reading a number out of the manifest, so it goes through the same comparison code the run did.
 
 ## Running it
 
@@ -207,6 +278,7 @@ uv sync --all-extras
 
 uv run twicerun run pipelines/reference.py
 uv run twicerun judge .twicerun/run-* --policy reduction-order
+uv run twicerun run pipelines/reference.py --no-containment
 ```
 
 Exit codes are 0 for nothing diverged, 1 for something diverged, 2 for bad input and 3 for a crash. 2 covers a column the oracle refuses to compare and a `--key` naming a column that is not there, because both are facts about the pipeline's output rather than crashes. 1 means divergence and only divergence, so a release gate keyed on it does not also trip on a broken pipeline. A comparison downgraded to `TOLERATED` does not set it.
@@ -217,13 +289,17 @@ Exit codes are 0 for nothing diverged, 1 for something diverged, 2 for bad input
 
 It refuses a float column, and the reason is worth stating because the flag looks harmless. Matching on a float joins with bit equality, so one ulp of reassociation comes back as a missing row plus an extra row, which no policy can downgrade. The step then reports no drift, and a step with no drift has no reassociation bound to print, so `--key daily_revenue=day,revenue` used to delete the whole bound section including the headroom figure that fails. A flag that quietly removes the tool's own falsifiable check is worse than no flag.
 
-One pass writes about 200 MB of Parquet under `.twicerun/`, which is gitignored. By default only the current run directory is kept, so the footprint stays at roughly 200 MB however many times you run it. `--keep 0` turns pruning off, and `rm -rf .twicerun` reclaims the lot.
+`--no-containment` is the ablation described above. It is the only flag here that changes what gets measured rather than how it is judged, which is why `judge` does not have it: a saved run was executed one way or the other and cannot be re-scored into the other.
+
+One pass writes about 260 MB of Parquet under `.twicerun/`, which is gitignored: 205 MB for the five runs and 53 MB for the single-threaded bisect. By default only the current run directory is kept, so the footprint stays at roughly that however many times you run it. `--keep 0` turns pruning off, and `rm -rf .twicerun` reclaims the lot.
 
 The tests run with no credentials and no network:
 
 ```bash
 uv run pytest
 ```
+
+If you pipe that into anything, check `PIPESTATUS` or redirect instead. `uv run pytest | tail -5` reports the exit code of `tail`, which is 0 whatever pytest did, and twice during this build a slice was committed against a suite whose failure had been swallowed exactly that way. `uv run pytest >/dev/null 2>&1; echo $?` is what the pre-commit hook and CI effectively do.
 
 To re-derive every DuckDB number quoted here on your own machine, which takes about two seconds:
 
@@ -232,6 +308,28 @@ uv run python scripts/measure_duckdb.py
 ```
 
 Its counts will not match these, for the same reason the transcript above will not. What holds is the shape: parallel figures large, `threads=1` figures zero, `count()` stable, the single-word tiebreak fix clean, and the `MERGE` bug present at threads=8 and absent at threads=1. The script checks ten such invariants and exits non-zero if any of them breaks, so it fails loudly rather than printing numbers that mean something different from what they say.
+
+## What this costs to run
+
+Measured, because the spec estimated it by counting step executions and the estimate was three times out.
+
+A pass over the reference pipeline is five executions of seven steps, plus five single-threaded executions of each step that fired. That is 60 to 65 step executions against 7 for running the pipeline once, so **8.6x to 9.3x by step count**. The spec called it 5x to 15x on that arithmetic and the arithmetic is right.
+
+The wall clock is not. Over 28 passes on this machine, one pass took a **median 28 times as long as a single execution of the same pipeline, range 21x to 53x**. Where that goes, at the median:
+
+| | share of a pass | in units of one plain execution |
+|---|---|---|
+| the five runs | 18% | 5.0x |
+| the single-threaded bisect | 14% | 4.1x |
+| comparing the artifacts | 68% | 19.2x |
+
+**Two thirds of the cost is the oracle, not the re-execution.** Joining two 500,000-row artifacts on a composite key, four times per step, costs more than running the pipeline that produced them. Anyone reasoning about this tool's cost from the number of runs it does will be wrong in the same direction the spec was.
+
+The range is wide because that two thirds is IO-bound. The same 28 passes split into two sessions gave medians of 27x and 37x with nothing changed but what else the laptop was doing.
+
+Slice 3 added the bisect to a loop that already cost about this much, and the bisect is the 14% row: 4.1x one execution, or a quarter added to the wall time in a paired run of the two versions back to back. Containment added nothing measurable, since it changes which file a read opens and not how much work is done. The 5x to 15x the spec quoted was for the loop before either existed, and it was already wrong then for the reason above.
+
+So this is a thing you run deliberately, before a release or on a schedule. `--runs` is the lever that moves it most, and it moves the miss rate with it.
 
 ## The condition under which this project is unnecessary
 
@@ -261,6 +359,10 @@ What that buys back is why it is a design choice rather than a workaround. One a
 
 **`rows_read` is not the term count the bound wants.** Measured above, both directions, with the size of the error printed in every report.
 
+**A `threads=1` rate of 0 of 4 is four comparisons, not a property.** It is reported with its one-sided bound for that reason, and `PARALLEL_ORDER` should be read as the name of a pattern in two measured rates.
+
+**The bisect resolves its reads against run 1 even under `--no-containment`.** A single step cannot be re-executed on its own without something to read, so the ablation ablates the main loop and not the bisect. A step that only inherited a divergence can therefore come out `PARALLEL_ORDER` in an uncontained report, and the report says so where it happens.
+
 ## How the pieces fit
 
 `src/twicerun/storage.py` is the interface. `ctx.read` and `ctx.write` address artifacts by `(run, step index, name)`. The method worth understanding is `ctx.state(name, initial)`, which resolves the *previous run's* copy of an artifact rather than this run's. Without it, a checker starts every run from an empty directory and can never see the two bugs that only exist because a pipeline runs against state its own last execution left behind.
@@ -268,6 +370,8 @@ What that buys back is why it is a design choice rather than a workaround. One a
 `src/twicerun/oracle.py` is the comparison, and it is the project. Everything in "How the comparison works" above lives here.
 
 `src/twicerun/policy.py` is the decision, kept apart from the comparison on purpose.
+
+`src/twicerun/cause.py` is the second axis: the label vocabulary, the one-sided bound, and the reasoning about what a zero out of four can support. The execution that produces it lives in the runner, because re-executing a pipeline is the runner's job.
 
 `src/twicerun/runner.py` is the loop. Run 1 is the reference and runs 2 to N are each compared against it, giving `k of m`. All-pairs clustering was the alternative, and it is rejected because tolerance-based equality is not transitive, so "how many distinct answers" stops being well defined the moment any tolerance exists.
 
