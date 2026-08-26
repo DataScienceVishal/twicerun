@@ -105,10 +105,18 @@ def apply_price_updates(ctx: StepContext) -> None:
     thread count. And the columns have to be BIGINT. The identical merge on
     INTEGER columns gave 1 to 3 distinct answers where BIGINT gave 4 to 8.
 
+    The catalogue holds 125,000 skus and the update source only covers the first
+    100,000, so 25,000 rows carry through from the previous run untouched. That
+    is deliberate: with full coverage the merge overwrites every row and
+    ctx.state above becomes decoration, since rebuilding the seed each run would
+    give the same artifact. It also happens to be where the bug is loudest, at 8
+    distinct answers in 10 against 6 at full coverage. By 200,000 target rows it
+    stops firing altogether, at any coverage, which is a narrower window than
+    the "needs scale" story above suggests.
+
     In the pipeline it fires 0 to 4 times out of 4 over 20 invocations, and one
     of those 20 was a flat 0. So the five-run loop can report nothing at all on
-    a step that is definitely broken. Magnitude when it does fire ranges from
-    9,184 to 41,952 rows of 100,000.
+    a step that is definitely broken.
 
     The floor has now been wrong twice. The first five invocations all gave 4 of
     4 and it went in as "every time"; the next eight put the floor at 1; twenty
@@ -118,7 +126,7 @@ def apply_price_updates(ctx: StepContext) -> None:
     ctx.read("price_updates")
     ctx.state(
         "prices",
-        "SELECT i::BIGINT AS sku, (500 + i)::BIGINT AS price_cents FROM range(100000) AS s(i)",
+        "SELECT i::BIGINT AS sku, (500 + i)::BIGINT AS price_cents FROM range(125000) AS s(i)",
     )
     ctx.sql("CREATE TABLE catalogue AS SELECT * FROM prices")
     ctx.sql("CREATE TABLE staged_updates AS SELECT * FROM price_updates")

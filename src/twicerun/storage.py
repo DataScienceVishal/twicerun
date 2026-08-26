@@ -84,10 +84,17 @@ class StepContext:
         """Bring the *previous run's* copy of an artifact into scope.
 
         This is what separates a pipeline rerun from calling a function twice.
-        A step that appends to a table, or merges into one, is reading state its
-        own last execution left behind, and a checker that starts every run from
-        an empty directory can never see the bug that causes. On the first run
-        there is no previous copy, so `initial` builds one.
+        A step that appends to a table is reading state its own last execution
+        left behind, and a checker that starts every run from an empty directory
+        can never see the duplication that causes. On the first run there is no
+        previous copy, so `initial` builds one.
+
+        The reference pipeline's `append_audit_log` is where this is genuinely
+        load-bearing: without it that step cannot diverge at all. Its
+        `apply_price_updates` reads carried state too, and 25,000 of its 125,000
+        rows survive each merge untouched, but that step would still diverge if
+        the seed were rebuilt from scratch every run. Worth keeping the two
+        apart, because only the first is an argument for this method existing.
         """
         artifact = self._carried.get(name)
         if artifact is None:
