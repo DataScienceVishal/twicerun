@@ -103,7 +103,7 @@ def test_fire_rate_counts_the_comparisons_that_diverged(tmp_path):
     steady, flaky = report.steps
     assert (steady.fired, steady.comparisons) == (0, 4)
     assert (flaky.fired, flaky.comparisons) == (2, 4)
-    assert flaky.worst.only_in_reference == 1
+    assert (flaky.worst.row_missing, flaky.worst.row_extra) == (1, 1)
 
 
 def test_run_one_is_the_reference_so_its_own_divergence_is_not_counted(tmp_path):
@@ -119,7 +119,7 @@ def test_a_step_that_stops_writing_an_artifact_is_a_divergence(tmp_path):
     )
     step = report.steps[0]
     assert step.fired == 2
-    assert "absent from this one" in step.worst.note
+    assert step.hints == ["the reference run wrote only_on_the_first_run and this run did not"]
 
 
 def test_a_step_that_starts_writing_an_extra_artifact_is_a_divergence(tmp_path):
@@ -134,7 +134,7 @@ def test_a_step_that_starts_writing_an_extra_artifact_is_a_divergence(tmp_path):
     )
     step = report.steps[0]
     assert step.fired == 2
-    assert "absent from the reference run" in step.worst.note
+    assert step.hints == ["this run wrote only_after_the_first_run and the reference run did not"]
 
 
 def test_a_schema_change_outranks_a_bigger_row_drift_in_the_report(tmp_path):
@@ -150,7 +150,7 @@ def test_a_schema_change_outranks_a_bigger_row_drift_in_the_report(tmp_path):
     )
     worst = report.steps[0].worst
     assert worst.name == "schema"
-    assert "INTEGER to BIGINT" in worst.note
+    assert "INTEGER to BIGINT" in worst.schema_note
 
 
 def test_the_manifest_records_every_run_and_the_environment(tmp_path):

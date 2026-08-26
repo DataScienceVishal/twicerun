@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from twicerun.cli import main
+import pytest
+
+from twicerun.cli import KeySyntaxError, main, parse_keys
 
 CLEAN = '''
 def only_step(ctx):
@@ -100,3 +102,39 @@ def test_a_missing_pipeline_file_exits_two(tmp_path, capsys):
     code = main(["run", str(tmp_path / "absent.py"), "--run-dir", str(tmp_path / "artifacts")])
     assert code == 2
     assert "twicerun:" in capsys.readouterr().err
+
+
+def test_key_is_parsed_per_artifact(tmp_path):
+    assert parse_keys(["a=x,y", "b = z "]) == {"a": ("x", "y"), "b": ("z",)}
+
+
+def test_key_without_an_artifact_says_what_the_spelling_is(tmp_path):
+    with pytest.raises(KeySyntaxError, match="artifact=column"):
+        parse_keys(["day"])
+
+
+def test_key_narrows_what_the_report_calls_a_divergence(tmp_path, capsys):
+    """Two runs disagreeing on one column: unmatched rows, or a drift on that column.
+
+    Same measurement either way. --key decides which question was asked.
+    """
+    body = (
+        "CALLS = {'n': 0}\n\n\n"
+        "def wobble(ctx):\n"
+        "    CALLS['n'] += 1\n"
+        "    ctx.write('rows', f\"SELECT 1 AS id, {CALLS['n']} AS attempt\")\n\n\n"
+        "STEPS = [wobble]\n"
+    )
+    where = pipeline(tmp_path, body)
+    main(["run", str(where), "--runs", "2", "--run-dir", str(tmp_path / "a")])
+    assert "ROW_MISSING ROW_EXTRA" in capsys.readouterr().out
+
+    main(["run", str(where), "--runs", "2", "--key", "rows=id", "--run-dir", str(tmp_path / "b")])
+    assert "VALUE_DRIFT" in capsys.readouterr().out
+
+
+def test_a_key_naming_a_column_that_is_not_there_exits_two(tmp_path, capsys):
+    code = main(["run", str(pipeline(tmp_path, CLEAN)), "--runs", "2",
+                 "--key", "rows=nope", "--run-dir", str(tmp_path / "artifacts")])
+    assert code == 2
+    assert "It has i" in capsys.readouterr().err

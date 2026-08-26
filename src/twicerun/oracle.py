@@ -126,12 +126,21 @@ class ArtifactFindings:
         if self.schema_note is not None:
             return f"{self.name}: {self.schema_note}"
         parts = []
-        if self.unmatched_reference:
+        if self.unmatched_reference and self.unmatched_candidate:
             parts.append(
-                f"{self.unmatched_reference:,} of {self.reference_rows:,} reference rows unmatched"
+                f"{self.unmatched_reference:,} of {self.reference_rows:,} reference rows "
+                f"and {self.unmatched_candidate:,} later rows found no partner"
             )
-        if self.unmatched_candidate:
-            parts.append(f"{self.unmatched_candidate:,} rows in the later run with no partner")
+        elif self.unmatched_reference:
+            parts.append(
+                f"{self.unmatched_reference:,} of {self.reference_rows:,} reference rows "
+                f"found no partner"
+            )
+        elif self.unmatched_candidate:
+            parts.append(
+                f"{self.unmatched_candidate:,} later rows found no partner, "
+                f"against {self.reference_rows:,} reference rows"
+            )
         worst = self.worst_drift
         if worst is not None:
             parts.append(

@@ -5,8 +5,13 @@ import sys
 import traceback
 from pathlib import Path
 
+from twicerun.columns import UnknownKeyColumn, UnsupportedColumn
 from twicerun.runner import PipelineError, run_pipeline
 from twicerun.storage import MissingArtifact
+
+
+class KeySyntaxError(ValueError):
+    """--key was not spelled artifact=column."""
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -44,7 +49,29 @@ def build_parser() -> argparse.ArgumentParser:
         "about 200 MB and nothing yet reads a previous one, so the default keeps only the "
         "current run. Use 0 to keep everything",
     )
+    run.add_argument(
+        "--key",
+        action="append",
+        default=[],
+        metavar="ARTIFACT=COL[,COL]",
+        help="match rows of one artifact on these columns instead of on every exact column. "
+        "Repeatable, once per artifact. The columns it leaves out stop being part of what "
+        "makes a row a row and start being compared as values",
+    )
     return parser
+
+
+def parse_keys(declared: list[str]) -> dict[str, tuple[str, ...]]:
+    keys = {}
+    for entry in declared:
+        artifact, sep, columns = entry.partition("=")
+        if not sep or not artifact.strip() or not columns.strip():
+            raise KeySyntaxError(
+                f"--key {entry!r} is not artifact=column[,column]. "
+                f"For example --key daily_revenue=day"
+            )
+        keys[artifact.strip()] = tuple(c.strip() for c in columns.split(",") if c.strip())
+    return keys
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -55,9 +82,18 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         report, _ = run_pipeline(
-            args.pipeline, runs=args.runs, parent=args.run_dir, keep=args.keep
+            args.pipeline,
+            runs=args.runs,
+            parent=args.run_dir,
+            keep=args.keep,
+            keys=parse_keys(args.key),
         )
-    except (PipelineError, MissingArtifact) as exc:
+    except (PipelineError, MissingArtifact, KeySyntaxError) as exc:
+        print(f"twicerun: {exc}", file=sys.stderr)
+        return 2
+    except (UnsupportedColumn, UnknownKeyColumn) as exc:
+        # A column the oracle refuses is a fact about the pipeline's output,
+        # not a crash, so it shares exit 2 with the other bad-input cases.
         print(f"twicerun: {exc}", file=sys.stderr)
         return 2
     except Exception:  # noqa: BLE001
@@ -75,8 +111,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print(report.render())
     # 1 is reserved for divergence so this can gate a release. On the reference
-    # pipeline that includes the benign float drift, which is the point of slice
-    # 1 rather than a bug in it.
+    # pipeline that includes the benign float drift, which is the answer strict
+    # is supposed to give rather than a bug in it.
     return 1 if any(step.fired for step in report.steps) else 0
 
 

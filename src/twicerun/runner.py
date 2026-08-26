@@ -20,15 +20,15 @@ import importlib.util
 import re
 import shutil
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
 
-from twicerun.compare import ArtifactDiff, compare
 from twicerun.manifest import Artifact, Environment, Manifest, RunRecord, StepRecord
-from twicerun.report import Report, StepVerdict
+from twicerun.oracle import ArtifactFindings, compare
+from twicerun.report import Report, StepMeasurement
 from twicerun.storage import StepContext
 
 Step = Callable[[StepContext], None]
@@ -139,55 +139,64 @@ def execute_run(
     return record, written
 
 
-def step_diffs(
-    con: duckdb.DuckDBPyConnection, reference: StepRecord, candidate: StepRecord
-) -> list[ArtifactDiff]:
-    """Diffs for one step, over the union of the artifact names both runs wrote.
+def step_findings(
+    con: duckdb.DuckDBPyConnection,
+    reference: StepRecord,
+    candidate: StepRecord,
+    keys: Mapping[str, Sequence[str]],
+) -> list[ArtifactFindings]:
+    """Findings for one step, over the union of the artifact names both runs wrote.
 
     The union matters. Walking only the reference run's names misses a step that
     starts producing an extra output on a later run, which is a divergence and
     would otherwise exit 0.
+
+    An artifact one run wrote and the other did not is every row of it failing
+    to pair, so it lands in ROW_MISSING or ROW_EXTRA with a hint saying which
+    run skipped it. Inventing a sixth class for it would say no more.
     """
     left = {a.name: a for a in reference.artifacts}
     right = {a.name: a for a in candidate.artifacts}
     names = list(left) + [name for name in right if name not in left]
 
-    diffs = []
+    found = []
     for name in names:
         before, after = left.get(name), right.get(name)
         if after is None:
-            diffs.append(
-                ArtifactDiff(
+            found.append(
+                ArtifactFindings(
                     name=name,
+                    key=(),
                     reference_rows=before.rows,
                     candidate_rows=0,
-                    only_in_reference=before.rows,
-                    only_in_candidate=0,
-                    note="written by the reference run, absent from this one",
+                    row_missing=before.rows,
+                    hints=(f"the reference run wrote {name} and this run did not",),
                 )
             )
         elif before is None:
-            diffs.append(
-                ArtifactDiff(
+            found.append(
+                ArtifactFindings(
                     name=name,
+                    key=(),
                     reference_rows=0,
                     candidate_rows=after.rows,
-                    only_in_reference=0,
-                    only_in_candidate=after.rows,
-                    note="written by this run, absent from the reference run",
+                    row_extra=after.rows,
+                    hints=(f"this run wrote {name} and the reference run did not",),
                 )
             )
         else:
-            diffs.append(compare(con, before, after))
-    return diffs
+            found.append(compare(con, before, after, keys.get(name)))
+    return found
 
 
-def compare_runs(reference: RunRecord, candidate: RunRecord) -> list[list[ArtifactDiff]]:
-    """Per step, the diffs between one later run and the reference run."""
+def compare_runs(
+    reference: RunRecord, candidate: RunRecord, keys: Mapping[str, Sequence[str]]
+) -> list[list[ArtifactFindings]]:
+    """Per step, what the oracle found between one later run and the reference run."""
     con = duckdb.connect()
     try:
         return [
-            step_diffs(con, ref_step, cand_step)
+            step_findings(con, ref_step, cand_step, keys)
             for ref_step, cand_step in zip(reference.steps, candidate.steps, strict=True)
         ]
     finally:
@@ -195,7 +204,11 @@ def compare_runs(reference: RunRecord, candidate: RunRecord) -> list[list[Artifa
 
 
 def run_pipeline(
-    pipeline: Path, runs: int, parent: Path, keep: int = 1
+    pipeline: Path,
+    runs: int,
+    parent: Path,
+    keep: int = 1,
+    keys: Mapping[str, Sequence[str]] | None = None,
 ) -> tuple[Report, Manifest]:
     if runs < 2:
         raise PipelineError(f"--runs must be at least 2 to have anything to compare, got {runs}")
@@ -216,13 +229,15 @@ def run_pipeline(
         manifest.runs.append(record)
         carried = written
 
-    verdicts = [
-        StepVerdict(index=s.index, name=s.name, comparisons=runs - 1)
+    keys = keys or {}
+    measured = [
+        StepMeasurement(index=s.index, name=s.name, comparisons=runs - 1, terms=s.rows_read)
         for s in manifest.runs[0].steps
     ]
     for later in manifest.runs[1:]:
-        for verdict, diffs in zip(verdicts, compare_runs(manifest.runs[0], later), strict=True):
-            verdict.observe(diffs)
+        rounds = compare_runs(manifest.runs[0], later, keys)
+        for step, found in zip(measured, rounds, strict=True):
+            step.observe(found)
 
     manifest.save()
     report = Report(
@@ -230,7 +245,7 @@ def run_pipeline(
         run_dir=str(run_dir),
         runs=runs,
         environment=environment,
-        steps=verdicts,
+        steps=measured,
         seconds=time.perf_counter() - began,
         pruned=len(dropped),
         keep=keep,
