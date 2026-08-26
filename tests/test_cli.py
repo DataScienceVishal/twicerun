@@ -234,10 +234,22 @@ def test_the_same_drift_exits_one_under_strict_and_zero_under_reduction_order(tm
     assert magnitude in printed and magnitude in downgraded
 
 
-def test_a_report_that_downgrades_says_which_condition_is_missing(tmp_path, capsys):
+def test_a_downgrade_rests_on_a_measured_rate_rather_than_on_a_disclosure(tmp_path, capsys):
+    """What slice 3 changed about a TOLERATED, in the one report that shows it.
+
+    Every header that downgraded anything used to carry a note saying condition
+    2 of 3 was not implemented. It is now, so the note is gone and the evidence
+    it stood in for is printed instead: the same step's fire rate at threads=1,
+    out of the same denominator as the rate above it.
+    """
     main(["run", str(pipeline(tmp_path, TOLERABLE_DRIFT)), "--runs", "3",
           "--policy", "reduction-order", "--run-dir", str(tmp_path / "artifacts")])
-    assert "threads=1" in capsys.readouterr().out
+    printed = capsys.readouterr().out
+
+    assert "TOLERATED on 2 of 2" in printed
+    assert "0 of 2 at threads=1" in printed
+    assert "is not implemented" not in printed
+    assert "rests on the other two" not in printed
 
 
 def test_a_manual_tolerance_appears_in_the_header_so_a_reader_knows(tmp_path, capsys):

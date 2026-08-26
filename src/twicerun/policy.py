@@ -16,8 +16,18 @@ quietly absorbs a difference is a tool that hides the thing you would have used
 to find the bug.
 
 `reduction-order` is the opt-in that says a difference is float reassociation
-rather than a wrong answer, and it has to clear three conditions at once. Only
-two of them exist today; see `MISSING_CONDITION`.
+rather than a wrong answer, and it has to clear three conditions at once: the
+step's only class is VALUE_DRIFT, the step does not diverge at threads=1, and
+the magnitude is inside the derived bound. None of the three is measured here.
+The first two come off the step's own measurements and the third off the term
+count, so this file reads and decides and never writes.
+
+The middle condition is what makes the verdict a claim about a mechanism rather
+than about a size. Until the bisect existed, a TOLERATED rested on the drift
+being small and float-only, which is "small enough to be reassociation". With
+the threads=1 rate in hand it rests on the drift disappearing when the
+parallelism does, which is a different and much stronger sentence. It is not
+proof: 0 of 4 is 4 comparisons, and `cause.py` says what they are worth.
 """
 
 from __future__ import annotations
@@ -31,27 +41,19 @@ from twicerun.oracle import ArtifactFindings, Divergence
 STRICT = "strict"
 REDUCTION_ORDER = "reduction-order"
 
-# Which of the two routes downgraded a finding. They carry different claims, so
-# the report cannot describe one in the other's terms: the derived route asserts
-# a mechanism and is the one missing a condition, while a manual threshold is a
-# user saying a difference of that size does not matter to them.
+# Which of the two routes downgraded a finding. They carry different claims and
+# clear different conditions, so the report cannot describe one in the other's
+# terms: the derived route asserts a mechanism and has to show the drift going
+# away at threads=1, while a manual threshold is a user saying a difference of
+# that size does not matter to them and needs no mechanism at all.
 BY_BOUND = "the derived reassociation bound"
 BY_THRESHOLD = "a --tolerance threshold"
+# Tried in this order and reported in it, so the stronger claim comes first and
+# a sort by spelling cannot decide which route a report leads with.
+ROUTES = (BY_BOUND, BY_THRESHOLD)
 
 # The unit roundoff for float64. Half an ulp at 1.0.
 UNIT_ROUNDOFF = 2.0**-53
-
-# Condition 2 of the reduction-order conjunction needs the step's fire rate at
-# threads=1, and the single-threaded bisect arrives in slice 3. It is named in
-# every report that downgrades anything, because a downgrade resting on two
-# conditions of three is not the same claim as one resting on three, and
-# quietly counting the missing one as satisfied is how a tolerance stops
-# meaning anything.
-MISSING_CONDITION = (
-    "condition 2 of 3, that the step does not diverge at threads=1, is not "
-    "implemented until slice 3. Every TOLERATED below rests on the other two"
-)
-
 
 def gamma(terms: int) -> float:
     """The classical bound factor for summing `terms` float64 values in some order.
@@ -162,7 +164,10 @@ class StepVerdict:
     tolerated: int
     bound: DriftBound | None = None
     blocked: str | None = None
-    unverified: tuple[str, ...] = field(default_factory=tuple)
+    # Which routes actually downgraded something here, so the report can say
+    # what a TOLERATED rests on instead of leaving two different claims looking
+    # identical on the step line.
+    routes: tuple[str, ...] = field(default_factory=tuple)
 
 
 def judge(step: StepMeasurement, policy: Policy) -> StepVerdict:
@@ -170,35 +175,31 @@ def judge(step: StepMeasurement, policy: Policy) -> StepVerdict:
     if not policy.manual and policy.name != REDUCTION_ORDER:
         return StepVerdict(step=step, fired=step.fired, tolerated=0, bound=bound)
 
-    # Condition 1 of the conjunction, and it is step-wide rather than per
-    # comparison. A step that lost a row in any comparison is not a step that
-    # merely reassociated in the others.
+    # Conditions 1 and 2, both step-wide rather than per comparison. A step that
+    # lost a row in any comparison is not a step that merely reassociated in the
+    # others, and a step that still diverges on one thread has not shown that
+    # the order of a parallel reduction is what moved it.
     pure = step.classes == frozenset({Divergence.VALUE_DRIFT})
+    quiet_at_one_thread = step.bisect is not None and step.bisect.fired == 0
     fired = tolerated = 0
     routes: set[str] = set()
     for round_ in step.diverged:
         if not round_:
             continue
-        took = [_tolerable(f, policy, bound, pure) for f in round_]
+        took = [_tolerable(f, policy, bound, pure and quiet_at_one_thread) for f in round_]
         if all(took):
             tolerated += 1
             routes.update(took)
         else:
             fired += 1
 
-    # Gated on the route that actually downgraded something, not on the policy
-    # name. --policy reduction-order --tolerance-rel 0.001 sends a difference
-    # thousands of times outside the bound down the manual route, and gating on
-    # the name printed "every TOLERATED rests on conditions 1 and 3" over a
-    # downgrade that had cleared neither.
-    unverified = (MISSING_CONDITION,) if BY_BOUND in routes else ()
     return StepVerdict(
         step=step,
         fired=fired,
         tolerated=tolerated,
         bound=bound,
-        blocked=_blocked(step, policy, bound, pure) if fired else None,
-        unverified=unverified,
+        blocked=_blocked(step, policy, bound, pure, quiet_at_one_thread) if fired else None,
+        routes=tuple(route for route in ROUTES if route in routes),
     )
 
 
@@ -219,15 +220,17 @@ def _bound_for(step: StepMeasurement) -> DriftBound | None:
 
 
 def _tolerable(
-    findings: ArtifactFindings, policy: Policy, bound: DriftBound | None, pure: bool
+    findings: ArtifactFindings, policy: Policy, bound: DriftBound | None, mechanism: bool
 ) -> str | None:
     """Which route downgrades one artifact's findings, or None if neither does.
 
+    `mechanism` is conditions 1 and 2 together, decided once for the step. It
+    gates the derived route and not the manual one, because a threshold is a
+    user's claim about their own data rather than a claim about reduction order,
+    and it is complete without any evidence from the bisect.
+
     Returning the route rather than a bool is what lets the report say what a
-    downgrade rests on. The two are not interchangeable: the derived bound is a
-    claim about a mechanism and is short a condition until slice 3, while a
-    manual threshold is a user's claim about their own data and is complete as
-    it stands.
+    downgrade rests on. The two are not interchangeable.
 
     Anything other than VALUE_DRIFT blocks both routes outright, and so does
     drift on an exact column: no reordering of a fixed-point addition or a
@@ -251,7 +254,7 @@ def _tolerable(
     # depend on flag order.
     if (
         policy.name == REDUCTION_ORDER
-        and pure
+        and mechanism
         and bound is not None
         and worst_relative <= bound.bound
     ):  # worst_relative is never None here, and never NaN: sql.py sends both to infinity
@@ -288,7 +291,11 @@ def _inside_manual(policy: Policy, relative: float, ulps: int | None) -> bool:
 
 
 def _blocked(
-    step: StepMeasurement, policy: Policy, bound: DriftBound | None, pure: bool
+    step: StepMeasurement,
+    policy: Policy,
+    bound: DriftBound | None,
+    pure: bool,
+    quiet_at_one_thread: bool,
 ) -> str | None:
     """Why a step's drift was not downgraded, wherever any comparison still fired.
 
@@ -297,6 +304,10 @@ def _blocked(
     fired to nobody. The figures it quotes are step-wide, which the wording
     says, because a per-comparison reason would need a per-comparison line and
     the report already prints one summary per step.
+
+    The conditions are tested in the order a reader would ask about them: what
+    else the step did, then whether one thread makes it stop, then how far the
+    drift went.
     """
     if policy.name != REDUCTION_ORDER or Divergence.VALUE_DRIFT not in step.classes:
         return None
@@ -306,9 +317,32 @@ def _blocked(
             f"drift not downgraded: the step also shows {name_classes(others)}, "
             f"which reassociation cannot produce"
         )
+    if not quiet_at_one_thread:
+        return _no_mechanism(step)
     if bound is not None and bound.observed > bound.bound:
         return (
             f"drift not downgraded everywhere: the furthest move in this step, "
             f"{bound.observed:.4e}, is outside the reassociation bound {bound.bound:.4e}"
         )
     return None
+
+
+def _no_mechanism(step: StepMeasurement) -> str:
+    """Condition 2 refusing, which is the condition that only started existing in slice 3.
+
+    Two ways to fail it and they are different findings. A step that still
+    moves at threads=1 has drift the reassociation story does not explain, so
+    the tool reports it and says why. A step with no bisect at all has no
+    evidence either way, and no evidence is not the same as evidence of
+    reassociation.
+    """
+    if step.bisect is None:
+        return (
+            "drift not downgraded: the step was not re-executed at threads=1, so nothing "
+            "here shows the drift is reduction order"
+        )
+    return (
+        f"drift not downgraded: the step still diverges at threads=1, "
+        f"{step.bisect.fired} of {step.bisect.comparisons}, so the order of a parallel "
+        f"reduction is not what moved it"
+    )

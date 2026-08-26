@@ -11,9 +11,12 @@ from dataclasses import replace
 
 import pytest
 
+from twicerun.cause import Bisect
 from twicerun.measurement import StepMeasurement
 from twicerun.oracle import ArtifactFindings, ColumnDrift
 from twicerun.policy import (
+    BY_BOUND,
+    BY_THRESHOLD,
     REDUCTION_ORDER,
     STRICT,
     UNIT_ROUNDOFF,
@@ -60,8 +63,26 @@ def losing_rows() -> ArtifactFindings:
     )
 
 
-def step(*rounds: list[ArtifactFindings], terms: int = 2_000_000) -> StepMeasurement:
-    measured = StepMeasurement(index=1, name="daily_revenue", comparisons=len(rounds), terms=terms)
+def step(
+    *rounds: list[ArtifactFindings], terms: int = 2_000_000, single_threaded: int | None = 0
+) -> StepMeasurement:
+    """A step's measurements, carrying by default the bisect condition 2 needs.
+
+    `single_threaded` is the bisect's own fire rate. 0 is a step whose drift
+    went away at one thread, which is what reduction-order asks for. None is a
+    step that was never bisected, which is no evidence rather than good news.
+    """
+    measured = StepMeasurement(
+        index=1,
+        name="daily_revenue",
+        comparisons=len(rounds),
+        terms=terms,
+        bisect=(
+            None
+            if single_threaded is None
+            else Bisect(comparisons=len(rounds), fired=single_threaded)
+        ),
+    )
     for round_ in rounds:
         measured.observe(round_)
     return measured
@@ -141,19 +162,45 @@ def test_the_measurement_does_not_move_when_the_policy_does():
     assert strict.bound.observed == tolerant.bound.observed
 
 
-def test_a_downgrade_names_the_condition_that_does_not_exist_yet():
-    """The threads=1 half of the conjunction arrives in slice 3.
+def test_drift_that_survives_one_thread_is_not_reassociation_however_small():
+    """Condition 2, and the reason it is worth the cost of the bisect.
 
-    Until then a TOLERATED rests on two conditions of three, and a report that
-    did not say so would be claiming more than the code checked.
+    Before it existed, a TOLERATED said the drift was small enough to be
+    reduction order. With it, the drift has to actually disappear when the
+    parallelism does. This step keeps moving at threads=1, so whatever moved it
+    is not the order a parallel reduction added its terms in.
     """
-    verdict = judge(step([drifting(4.5e-16)]), Policy(REDUCTION_ORDER))
+    verdict = judge(step([drifting(4.5e-16)], single_threaded=1), Policy(REDUCTION_ORDER))
+    assert (verdict.fired, verdict.tolerated) == (1, 0)
+    assert "still diverges at threads=1, 1 of 1" in verdict.blocked
+
+
+def test_a_step_that_was_never_bisected_has_nothing_to_downgrade_on():
+    """No evidence is not the same as evidence, and the old code treated it as if it were.
+
+    A manifest written before the bisect existed lands here, and so would any
+    future path that skipped it. The refusal is the safe direction: it reports
+    a difference reassociation might well explain.
+    """
+    verdict = judge(step([drifting(4.5e-16)], single_threaded=None), Policy(REDUCTION_ORDER))
+    assert (verdict.fired, verdict.tolerated) == (1, 0)
+    assert "was not re-executed at threads=1" in verdict.blocked
+
+
+def test_a_manual_threshold_does_not_need_the_bisect_to_agree_with_it():
+    """The two routes clear different conditions and that is deliberate.
+
+    --tolerance-rel is a user saying a difference of that size does not matter
+    in their domain. That claim is theirs to make and does not rest on any
+    mechanism, so a step that still moves at threads=1 can still take it.
+    """
+    verdict = judge(step([drifting(1e-9)], single_threaded=1), Policy(STRICT, 1e-6))
     assert verdict.tolerated == 1
-    assert any("threads=1" in note for note in verdict.unverified)
+    assert verdict.routes == (BY_THRESHOLD,)
 
 
-def test_nothing_is_unverified_when_nothing_was_downgraded():
-    assert judge(step([losing_rows()]), Policy(REDUCTION_ORDER)).unverified == ()
+def test_no_route_is_recorded_when_nothing_was_downgraded():
+    assert judge(step([losing_rows()]), Policy(REDUCTION_ORDER)).routes == ()
 
 
 def test_a_manual_downgrade_under_reduction_order_does_not_claim_the_bound():
@@ -168,21 +215,21 @@ def test_a_manual_downgrade_under_reduction_order_does_not_claim_the_bound():
     outside = step([drifting(1e-6)])
     verdict = judge(outside, Policy(REDUCTION_ORDER, tolerance_relative=1e-3))
     assert verdict.tolerated == 1
-    assert verdict.unverified == ()
+    assert verdict.routes == (BY_THRESHOLD,)
 
 
-def test_a_step_using_both_routes_still_names_the_missing_condition():
+def test_a_step_using_both_routes_records_both():
     """One comparison the bound explains, one only the manual threshold does."""
     mixed = step([drifting(4.5e-16)], [drifting(1e-6)])
     verdict = judge(mixed, Policy(REDUCTION_ORDER, tolerance_relative=1e-3))
     assert verdict.tolerated == 2
-    assert any("threads=1" in note for note in verdict.unverified)
+    assert verdict.routes == (BY_BOUND, BY_THRESHOLD)
 
 
 def test_the_bound_is_the_reason_on_record_when_it_can_explain_the_difference():
     """Order matters. A threshold wide enough to cover everything used to hide it."""
     wide = Policy(REDUCTION_ORDER, tolerance_relative=1.0, tolerance_ulps=10**9)
-    assert judge(step([drifting(4.5e-16)]), wide).unverified != ()
+    assert judge(step([drifting(4.5e-16)]), wide).routes == (BY_BOUND,)
 
 
 def test_a_manual_tolerance_works_under_strict_because_it_is_a_domain_claim():
