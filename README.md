@@ -133,7 +133,13 @@ On the reference pipeline the step it changes most is `append_audit_log`, the ap
 
 Both rows held on every pass. The uncontained row is four reruns' worth of duplication charged to one step: run 4 appends to run 3's log, which already had run 2's in it. The contained row is what one rerun of that step actually does.
 
-Running the ablation shows you the loudest of those four figures, not all four: the report prints one comparison per step and 15,812 is the one it picks. The other three are in the manifest, and `python -c "import json,sys; print([s for r in json.load(open(sys.argv[1]))['runs'] for s in r['steps'] if s['name']=='append_audit_log'])" .twicerun/run-*/manifest.json` prints the row counts they come from. The bug is the same bug either way and the fire rate is 4 of 4 either way, so what containment bought here is the magnitude being a fact about the step rather than about how many times the tool ran.
+Running the ablation shows you the loudest of those four figures, not all four: the report prints one comparison per step and 15,812 is the one it picks. The other three are in the manifest, and this prints the row counts they come from:
+
+```bash
+uv run python -c "import json,sys; print([s['artifacts'][0]['rows'] for r in json.load(open(sys.argv[1]))['runs'] for s in r['steps'] if s['name']=='append_audit_log'])" .twicerun/run-*/manifest.json
+```
+
+Uncontained that gives `[3953, 7906, 11859, 15812, 19765]`, one run per entry, and contained it gives `[3953, 7906, 7906, 7906, 7906]`. The bug is the same bug either way and the fire rate is 4 of 4 either way, so what containment bought here is the magnitude being a fact about the step rather than about how many times the tool ran.
 
 The second number is the count of steps reported divergent, and getting it took a change to the reference pipeline that is worth being explicit about. Every step in that file read the control step's artifacts, which never differ, so nothing in it ever read a diverging artifact and the cascade could not happen. The ablation scored zero on the quantity slice 5's baseline 3 was pre-registered to use, which reads as evidence against a feature that was simply never exercised.
 
