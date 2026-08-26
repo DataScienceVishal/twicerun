@@ -226,3 +226,35 @@ def test_a_step_that_wrote_nothing_is_not_reported_as_four_clean_comparisons(tmp
     printed = report.render()
     assert "wrote no artifacts, so nothing was compared" in printed
     assert "not checked at all: forgot_to_write" in printed
+
+
+def test_only_the_last_few_run_directories_are_kept(tmp_path):
+    where = write_pipeline(tmp_path, ALWAYS_CLEAN)
+    parent = tmp_path / "artifacts"
+    for _ in range(5):
+        run_pipeline(where, runs=2, parent=parent, keep=2)
+    assert len(list(parent.glob("run-*"))) == 2
+
+
+def test_keep_zero_keeps_everything(tmp_path):
+    where = write_pipeline(tmp_path, ALWAYS_CLEAN)
+    parent = tmp_path / "artifacts"
+    for _ in range(3):
+        run_pipeline(where, runs=2, parent=parent, keep=0)
+    assert len(list(parent.glob("run-*"))) == 3
+
+
+def test_pruning_leaves_anything_it_did_not_name_alone(tmp_path):
+    """--run-dir could be pointed at a directory holding other things."""
+    parent = tmp_path / "artifacts"
+    parent.mkdir()
+    bystander = parent / "run-notes.txt"
+    bystander.write_text("keep me", encoding="utf-8")
+    (parent / "run-of-the-mill").mkdir()
+
+    where = write_pipeline(tmp_path, ALWAYS_CLEAN)
+    for _ in range(3):
+        run_pipeline(where, runs=2, parent=parent, keep=1)
+
+    assert bystander.read_text(encoding="utf-8") == "keep me"
+    assert (parent / "run-of-the-mill").is_dir()

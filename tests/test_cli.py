@@ -75,10 +75,15 @@ def test_a_crashing_step_exits_three_not_one(tmp_path, capsys):
 
 
 def test_two_invocations_in_the_same_second_do_not_collide(tmp_path, capsys):
-    """Second-resolution stamps used to raise FileExistsError out of the CLI."""
+    """Second-resolution stamps used to raise FileExistsError out of the CLI.
+
+    --keep 0 because pruning would otherwise delete the evidence: the point here
+    is that three directories got three distinct names, not that three survive.
+    """
     where = pipeline(tmp_path, CLEAN)
     codes = [
-        main(["run", str(where), "--runs", "2", "--run-dir", str(tmp_path / "artifacts")])
+        main(["run", str(where), "--runs", "2", "--keep", "0",
+              "--run-dir", str(tmp_path / "artifacts")])
         for _ in range(3)
     ]
     assert codes == [0, 0, 0]

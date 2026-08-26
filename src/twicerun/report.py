@@ -55,6 +55,8 @@ class Report:
     environment: Environment
     steps: list[StepVerdict]
     seconds: float
+    pruned: int = 0
+    keep: int = 1
 
     def render(self) -> str:
         env = self.environment
@@ -65,6 +67,8 @@ class Report:
             f"duckdb     {env.duckdb_version}, threads={env.threads}",
             f"platform   {env.platform}",
             f"artifacts  {self.run_dir}",
+            f"retention  keeping {self.keep} run director(ies)"
+            + (f", dropped {self.pruned}" if self.pruned else ""),
             "",
         ]
 

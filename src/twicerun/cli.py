@@ -36,6 +36,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path(".twicerun"),
         help="where to keep artifacts and the manifest (default .twicerun)",
     )
+    run.add_argument(
+        "--keep",
+        type=int,
+        default=1,
+        help="how many run directories to keep. One pass over the reference pipeline writes "
+        "about 200 MB and nothing yet reads a previous one, so the default keeps only the "
+        "current run. Use 0 to keep everything",
+    )
     return parser
 
 
@@ -46,7 +54,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        report, _ = run_pipeline(args.pipeline, runs=args.runs, parent=args.run_dir)
+        report, _ = run_pipeline(
+            args.pipeline, runs=args.runs, parent=args.run_dir, keep=args.keep
+        )
     except (PipelineError, MissingArtifact) as exc:
         print(f"twicerun: {exc}", file=sys.stderr)
         return 2

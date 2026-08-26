@@ -17,6 +17,8 @@ fresh connections reading the same Parquet file, 493 to 696 groups of 1,000.
 from __future__ import annotations
 
 import importlib.util
+import re
+import shutil
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -30,6 +32,10 @@ from twicerun.report import Report, StepVerdict
 from twicerun.storage import StepContext
 
 Step = Callable[[StepContext], None]
+
+# Only directories matching this get pruned, so pointing --run-dir at a
+# directory holding anything else cannot delete it.
+RUN_DIR_NAME = re.compile(r"^run-\d{8}-\d{6}(-\d+)?$")
 
 
 class PipelineError(RuntimeError):
@@ -70,6 +76,31 @@ def new_run_dir(parent: Path) -> Path:
         except FileExistsError:
             continue
     raise PipelineError(f"1000 run directories already exist for {stamp} under {parent}")
+
+
+def prune_run_dirs(parent: Path, keep: int) -> list[Path]:
+    """Drop all but the most recent `keep` run directories.
+
+    A five-run pass over the reference pipeline writes about 200 MB, most of it
+    the generated inputs held once per run because the comparison needs a copy
+    per run. Without pruning, following the README a dozen times leaves a couple
+    of gigabytes behind and nothing ever reclaims it.
+
+    The default keeps one directory, which is the current run. Nothing in the
+    tool reads a previous run yet, so keeping more would be storing 200 MB
+    against a feature that does not exist. Slice 7 regenerates the results table
+    from a committed run artifact and may want more, and --keep is there for it.
+    """
+    if keep < 1:
+        return []
+    existing = sorted(
+        (p for p in parent.glob("run-*") if p.is_dir() and RUN_DIR_NAME.match(p.name)),
+        key=lambda p: p.name,
+    )
+    dropped = existing[: max(0, len(existing) - keep)]
+    for path in dropped:
+        shutil.rmtree(path)
+    return dropped
 
 
 def execute_run(
@@ -163,12 +194,15 @@ def compare_runs(reference: RunRecord, candidate: RunRecord) -> list[list[Artifa
         con.close()
 
 
-def run_pipeline(pipeline: Path, runs: int, parent: Path) -> tuple[Report, Manifest]:
+def run_pipeline(
+    pipeline: Path, runs: int, parent: Path, keep: int = 1
+) -> tuple[Report, Manifest]:
     if runs < 2:
         raise PipelineError(f"--runs must be at least 2 to have anything to compare, got {runs}")
 
     steps = load_steps(pipeline)
     run_dir = new_run_dir(parent)
+    dropped = prune_run_dirs(parent, keep)
     probe = duckdb.connect()
     environment = Environment.observe(probe)
     probe.close()
@@ -198,5 +232,7 @@ def run_pipeline(pipeline: Path, runs: int, parent: Path) -> tuple[Report, Manif
         environment=environment,
         steps=verdicts,
         seconds=time.perf_counter() - began,
+        pruned=len(dropped),
+        keep=keep,
     )
     return report, manifest
