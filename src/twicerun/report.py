@@ -20,7 +20,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from twicerun.cause import BISECT_THREADS, CONFIDENCE, PARALLEL_ORDER, upper_bound
+from twicerun.cause import (
+    BISECT_THREADS,
+    CONFIDENCE,
+    PARALLEL_ORDER,
+    PERSISTS_SINGLE_THREADED,
+    upper_bound,
+)
 from twicerun.manifest import Environment
 from twicerun.measurement import StepMeasurement, name_classes
 from twicerun.oracle import ArtifactFindings, KeyEffect
@@ -118,10 +124,15 @@ class Report:
             step = verdict.step
             label = f"{step.index} {step.name}".ljust(width)
             rate = f"{verdict.fired} of {step.comparisons}"
-            tail = " ".join(filter(None, (name_classes(step.classes), step.cause)))
+            # Two spaces between the groups, because `MULTIPLICITY
+            # PERSISTS_SINGLE_THREADED` under one space reads as two classes,
+            # and the cause is a different axis entirely.
+            tail = name_classes(step.classes)
+            if step.cause:
+                tail = f"{tail}  cause {step.cause}"
             if verdict.tolerated:
                 tail = (
-                    f"{tail} TOLERATED on {verdict.tolerated} of {step.comparisons} "
+                    f"{tail}  TOLERATED on {verdict.tolerated} of {step.comparisons} "
                     f"by {' and '.join(verdict.routes)}"
                 )
             lines.append(f"  {label}  {rate:>8}  {tail}".rstrip())
@@ -141,69 +152,95 @@ class Report:
         return lines
 
     def _causes(self) -> list[str]:
-        """The two matched fire rates per divergent step, and what the zero is worth.
+        """The two matched fire rates per divergent step, then what each label is worth.
 
-        The caveat is printed once above the table rather than under each row.
-        Every rate shares a denominator, so the sentence would be identical on
-        every line, and six copies of a warning is how a warning stops being
-        read.
+        The rows come first and the prose after them. It used to sit between
+        the heading and the rows, which put five lines of caveat in front of
+        the thing a reader opened the section for.
+
+        Each label explains itself only when it appears. PARALLEL_ORDER is
+        guessable from the two rates beside it; PERSISTS_SINGLE_THREADED is
+        not, and the sentence that makes it mean anything was in the README and
+        never in the terminal, which is where a stranger meets it.
         """
         bisected = [s for s in self.steps if s.fired and s.bisect is not None]
         if self.bisect_error:
-            # Printed as it was raised, wrapping and all, because an edited
-            # error message is a worse thing to hand someone than an untidy one.
-            raised = [f"  {line}" for line in self.bisect_error.splitlines()]
-            return [
-                "",
-                "cause: the bisect did not run, so no step has one.",
-                *raised,
-                f"  The {self.runs} runs above completed and their comparison is unaffected. A "
-                f"step often cannot be",
-                "  re-executed on its own because a step the bisect skips created the table it "
-                "reads through",
-                "  ctx.sql, which no artifact holds.",
-            ]
+            return self._bisect_failed()
         if not bisected:
             return []
-        comparisons = bisected[0].bisect.comparisons
-        rules_out = upper_bound(comparisons) * 100
-        lines = [
-            "",
-            f"cause, from re-executing each divergent step {self.runs} times at "
-            f"threads={BISECT_THREADS}:",
-            f"  Both rates are out of {comparisons}, which is what lets them be read against "
-            f"each other.",
-            f"  A zero is {comparisons} clean comparisons and no more than that: it rules out "
-            f"a per-comparison rate",
-            f"  above {rules_out:.0f} percent, {CONFIDENCE * 100:.0f} percent one-sided, "
-            f"assuming an independence these runs do not have",
-            "  since they share a process, a page cache and a machine.",
-        ]
-        if not self.contained:
-            lines.append(
-                "  Containment is off for the loop above but not here: a step cannot be "
-                "re-executed on its own"
-            )
-            lines.append(
-                "  without run 1's artifacts to read, so a step that only inherited a "
-                "divergence can read as "
-                f"{PARALLEL_ORDER} below."
-            )
         width = max(len(f"{s.index} {s.name}") for s in bisected)
+        rows = []
         for step in bisected:
             label = f"  {f'{step.index} {step.name}'.ljust(width)}  "
             if step.cause is None:
-                lines.append(
+                rows.append(
                     f"{label}{'no rate':<24}  re-executed and wrote no artifacts, so there "
                     f"was nothing to compare"
                 )
                 continue
-            lines.append(
+            rows.append(
                 f"{label}{step.cause:<24}  "
                 f"{step.fired} of {step.comparisons} at threads={self.environment.threads}, "
                 f"{step.bisect.fired} of {step.bisect.comparisons} at "
                 f"threads={step.bisect.threads}"
             )
+        return [
+            "",
+            f"cause, from re-executing each divergent step {self.runs} times at "
+            f"threads={BISECT_THREADS}:",
+            *rows,
+            "",
+            *self._what_the_labels_mean(bisected),
+        ]
+
+    def _bisect_failed(self) -> list[str]:
+        # The error prints as it was raised, wrapping and all, because an
+        # edited error message is a worse thing to hand someone than an untidy
+        # one.
+        raised = [f"  {line}" for line in (self.bisect_error or "").splitlines()]
+        return [
+            "",
+            "cause: the bisect did not run, so no step has one.",
+            *raised,
+            f"  The {_plural(self.runs, 'run')} above completed and their comparison is "
+            f"unaffected. A step often cannot be",
+            "  re-executed on its own because a step the bisect skips created the table it "
+            "reads through",
+            "  ctx.sql, which no artifact holds.",
+        ]
+
+    def _what_the_labels_mean(self, bisected: list[StepMeasurement]) -> list[str]:
+        shown = {step.cause for step in bisected}
+        comparisons = bisected[0].bisect.comparisons
+        lines = [
+            f"  Both rates are out of {comparisons}, which is what lets them be read against "
+            f"each other."
+        ]
+        if PARALLEL_ORDER in shown:
+            lines += [
+                f"  {PARALLEL_ORDER} means the step stopped diverging with one thread. That is "
+                f"{_plural(comparisons, 'clean comparison')} and no",
+                f"  more than that: the {CONFIDENCE * 100:.0f} percent one-sided upper bound it "
+                f"leaves on the per-comparison rate is",
+                f"  {upper_bound(comparisons) * 100:.0f} percent. The bound also assumes an "
+                f"independence these runs do not have, since they",
+                "  share a process, a page cache and a machine.",
+            ]
+        if PERSISTS_SINGLE_THREADED in shown:
+            lines += [
+                f"  {PERSISTS_SINGLE_THREADED} means the thread count is not the explanation. "
+                f"The tool stops there rather",
+                "  than guessing between a clock read, a data-dependent branch, appended state "
+                "and something",
+                "  outside the pipeline.",
+            ]
+        if not self.contained:
+            lines += [
+                "  Containment is off for the loop above but not here: a step cannot be "
+                "re-executed on its own",
+                "  without run 1's artifacts to read, so a step that only inherited a divergence "
+                f"can read as {PARALLEL_ORDER}.",
+            ]
         return lines
 
     def _bounds(self, verdicts: list[StepVerdict]) -> list[str]:

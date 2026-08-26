@@ -305,8 +305,37 @@ def test_the_report_prints_both_rates_and_what_the_zero_is_worth(tmp_path):
     printed = report.render()
     assert "2 of 4 at threads=" in printed
     assert "0 of 4 at threads=1" in printed
-    assert "rules out a per-comparison rate" in printed
-    assert "above 53 percent" in printed
+    assert "That is 4 clean comparisons and no" in printed
+    assert "per-comparison rate is\n  53 percent" in printed
+
+
+def test_a_label_only_explains_itself_where_it_appears(tmp_path):
+    """PERSISTS_SINGLE_THREADED is the one a reader cannot infer from the rates.
+
+    The sentence that makes it mean anything lived in the README and never
+    reached the terminal, which is where a stranger meets it.
+    """
+    parallel, _ = run_pipeline(
+        write_pipeline(tmp_path, SETTLES_DOWN), runs=5, parent=tmp_path / "one"
+    )
+    printed = parallel.render()
+    assert "means the step stopped diverging with one thread" in printed
+    assert "the thread count is not the explanation" not in printed
+
+    persists, _ = run_pipeline(
+        write_pipeline(tmp_path, NEVER_SETTLES), runs=5, parent=tmp_path / "two"
+    )
+    assert "the thread count is not the explanation" in persists.render()
+
+
+def test_one_comparison_is_not_1_clean_comparisons(tmp_path):
+    """--runs 2 is a documented setting and the block was never rendered at it."""
+    report, _ = run_pipeline(
+        write_pipeline(tmp_path, NEVER_SETTLES), runs=2, parent=tmp_path / "artifacts"
+    )
+    printed = report.render()
+    assert "1 clean comparisons" not in printed
+    assert "Both rates are out of 1" in printed
 
 
 # comparisons, and the percent the spec's run-count table published for it.
