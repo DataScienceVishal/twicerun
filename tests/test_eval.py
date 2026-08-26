@@ -76,7 +76,7 @@ def test_a_step_that_compared_something_is_counted():
     assert scored.trials == 1
     assert scored.silent_trials == 0
     assert scored.fired_in == 1
-    assert scored.distribution() == "4 of 4 x0, 3 of 4 x1, 2 of 4 x0, 1 of 4 x0, 0 of 4 x0"
+    assert scored.distribution() == "3 of 4 on all 1"
 
 
 def test_every_rate_prints_with_its_denominator_and_the_empty_buckets_too():
@@ -92,6 +92,11 @@ def test_every_rate_prints_with_its_denominator_and_the_empty_buckets_too():
     for fired in (4, 4, 2):
         scored.observe(measured("mixed", fired=fired))
     assert scored.distribution() == "4 of 4 x2, 3 of 4 x0, 2 of 4 x1, 1 of 4 x0, 0 of 4 x0"
+
+    uniform = StepScore("uniform")
+    for _ in range(3):
+        uniform.observe(measured("uniform", fired=0))
+    assert uniform.distribution() == "0 of 4 on all 3"
 
 
 def test_the_append_magnitude_is_not_reported_as_zero():

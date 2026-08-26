@@ -217,13 +217,22 @@ class StepScore:
     def distribution(self) -> str:
         """Every possible rate with its count, highest first, zeros included.
 
-        Ordered by the rate rather than by the count so the shape of the
-        distribution is readable down the column and two steps can be compared
-        line to line. `_render` is used everywhere else here and orders by count,
-        which is right for a set of labels and wrong for a small integer support.
+        Ordered by the rate rather than by the count so the shape is readable
+        down a column and two steps compare line to line. `_render` is used
+        everywhere else here and orders by count, which is right for a set of
+        labels and wrong for a small integer support.
+
+        A step that gave the same rate every trial collapses to `0 of 4 on all
+        10`, which omits nothing: naming the trial count accounts for every
+        trial, so there is no bucket left for a reader to wonder about. Spelling
+        five buckets out to say a twin never fired put four x0 cells on every
+        line of the specificity table and buried the one number in it.
         """
         if not self.rates:
             return "nothing compared"
+        if len(self.rates) == 1:
+            only, times = next(iter(self.rates.items()))
+            return f"{only} on all {times}"
         return ", ".join(
             f"{k} of {self.comparisons} x{self.rates[f'{k} of {self.comparisons}']}"
             for k in range(self.comparisons, -1, -1)
