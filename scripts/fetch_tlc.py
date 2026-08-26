@@ -3,8 +3,12 @@
 
 This is the only file in the repository that opens a socket. The test suite runs
 under `pytest-socket --disable-socket`, so nothing in `tests/` can reach the
-network even by accident, and nothing here is imported from a test. Run it once
-by hand and the pipeline has its input.
+network even by accident. `tests/test_fetch_tlc.py` does import seven names from
+here and calls `download()` in none of them, which is the distinction that
+matters: pytest-socket installs its guards in `pytest_runtest_setup`, so
+collection is the one window where the flag is not in force, and nothing at
+module level here may open anything. Run it once by hand and the pipeline has
+its input.
 
     uv run python scripts/fetch_tlc.py              # green, 3.6 MB
     uv run python scripts/fetch_tlc.py --taxi yellow  # yellow, 181 MB

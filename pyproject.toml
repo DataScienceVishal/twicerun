@@ -39,7 +39,9 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-# BLE is here so the three deliberate blanket catches have to keep saying so.
+# BLE is here so the four deliberate blanket catches have to keep saying so.
 # The noqa comments on them predated it and were inert, which meant a fourth
-# could have arrived without anyone noticing.
+# could arrive without anyone noticing. One did, and the two comments that
+# describe the set still said three afterwards, because ruff can require a noqa
+# on each of them and cannot count them. tests/test_blanket_catches.py counts.
 select = ["E", "F", "I", "UP", "B", "BLE", "SIM"]

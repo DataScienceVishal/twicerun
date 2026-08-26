@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import platform
 import re
 import shutil
 import statistics
@@ -42,12 +43,12 @@ import textwrap
 import time
 from collections import Counter
 from collections.abc import Iterable
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 import duckdb
 
-from twicerun.amplify import AMPLIFIERS, DIVERGENT, STABLE_ON_THIS_INPUT
+from twicerun.amplify import AMPLIFIERS, DIVERGENT, STABLE_ON_THIS_INPUT, Amplification
 from twicerun.cli import exit_code
 from twicerun.compare import compare as bit_exact
 from twicerun.manifest import Manifest
@@ -80,8 +81,15 @@ INTERMITTENT = "sparse_customer_keys"
 BENIGN = "mean_basket"
 # Downstream of a divergence and contained, so it is what baseline 3 moves.
 DOWNSTREAM = "roll_up_keys"
+# The append with no unique key, which is where containment changes a magnitude
+# rather than a rate.
+APPEND = "append_audit_log"
 
-BUDGET_SECONDS = 600.0
+# The spec fixed ten minutes for the ten trials it also fixed, so the budget is
+# a minute a trial and the condition scales with --trials. A flat 600 seconds
+# against `--trials 2`, which is what the README recommends for a quick read, is
+# five times the work's own budget and cannot fail.
+BUDGET_SECONDS_PER_TRIAL = 60.0
 
 # Where the trial directories go. Named in .gitignore, which is checked by a
 # test, because an interrupted run leaves up to 1,292 MB of TLC-derived Parquet
@@ -163,7 +171,7 @@ class Trial:
     naive: dict[str, NaiveScore]
     # Each amplifier's rate on the intermittent step, taken every trial rather
     # than only on the trials where the loop came back quiet.
-    forced: dict[str, tuple[int, int]]
+    forced: dict[str, Amplification]
     exit_with_amplifiers: int
     exit_without: int
     seconds: float
@@ -202,9 +210,10 @@ class StepScore:
     ulps: list[int] = field(default_factory=list)
     relative: list[float] = field(default_factory=list)
     silent_trials: int = 0
-    # The denominator every rate here is out of, taken from the first step
-    # observed rather than assumed, because `--runs` moves it.
-    comparisons: int = 0
+    # Every denominator seen, not one of them. `--runs` moves it, and so does a
+    # step that wrote nothing on one round of one trial, which is why this is a
+    # Counter and not the int it used to be.
+    denominators: Counter = field(default_factory=Counter)
 
     def observe(self, step: StepMeasurement) -> None:
         if step.artifacts_compared == 0:
@@ -215,8 +224,8 @@ class StepScore:
             # evidence about the step and is counted where it can be seen.
             self.silent_trials += 1
             return
-        self.comparisons = step.comparisons
-        self.rates[f"{step.fired} of {step.comparisons}"] += 1
+        self.denominators[step.measured_comparisons] += 1
+        self.rates[f"{step.fired} of {step.measured_comparisons}"] += 1
         self.statuses[step.status or "no status"] += 1
         if step.classes:
             self.classes[name_classes(step.classes)] += 1
@@ -244,6 +253,11 @@ class StepScore:
         return sum(self.rates.values())
 
     @property
+    def comparisons(self) -> int:
+        """The denominator most of these rates are out of, and normally all of them."""
+        return max(self.denominators, default=0)
+
+    @property
     def fired_in(self) -> int:
         return sum(n for rate, n in self.rates.items() if not rate.startswith("0 "))
 
@@ -260,16 +274,23 @@ class StepScore:
         trial, so there is no bucket left for a reader to wonder about. Spelling
         five buckets out to say a twin never fired put four x0 cells on every
         line of the specificity table and buried the one number in it.
+
+        Rates out of a smaller denominator print as they stand, after the
+        buckets. The denominator used to be a single int overwritten by every
+        observation, and the buckets were keyed on it, so ten trials could print
+        as a distribution accounting for one of them beside `fired in 10 of 10`.
         """
         if not self.rates:
             return "nothing compared"
         if len(self.rates) == 1:
             only, times = next(iter(self.rates.items()))
             return f"{only} on all {times}"
-        return ", ".join(
-            f"{k} of {self.comparisons} x{self.rates[f'{k} of {self.comparisons}']}"
-            for k in range(self.comparisons, -1, -1)
-        )
+        of = self.comparisons
+        spelled = [f"{k} of {of} x{self.rates[f'{k} of {of}']}" for k in range(of, -1, -1)]
+        odd = [
+            f"{rate} x{n}" for rate, n in self.rates.items() if not rate.endswith(f" of {of}")
+        ]
+        return ", ".join(spelled + odd)
 
     def detail(self) -> str:
         """Class, cause, the threads=1 rate, and how far the step moved.
@@ -431,7 +452,7 @@ def without_amplifiers(steps: list[StepMeasurement]) -> list[StepMeasurement]:
 
 def forced_amplification(
     manifest: Manifest, runs: int, index: int
-) -> dict[str, tuple[int, int]]:
+) -> dict[str, Amplification]:
     """Each amplifier's rate on one step, whether or not the main loop already caught it.
 
     `twicerun run` will not do this and should not: amplification only touches
@@ -444,8 +465,15 @@ def forced_amplification(
     `amplify_runs` the runner calls. It is what `amplification_gap.py` next door
     measures over 40 passes, folded into a trial that has already paid for the
     pipeline run underneath it.
+
+    The rate comes back in the same `Amplification` the runner builds from the
+    same two numbers, so `measured` means here what it means in a report. This
+    used to take `scored_runs(...)[0]` and rebuild the denominator from the run
+    count, which threw away the second element and with it the only thing that
+    tells a re-execution which wrote nothing apart from one that agreed with
+    itself.
     """
-    rates: dict[str, tuple[int, int]] = {}
+    rates: dict[str, Amplification] = {}
     for entry in amplify_runs(
         load_steps(REFERENCE),
         manifest.runs[0],
@@ -455,7 +483,15 @@ def forced_amplification(
         manifest.environment.threads,
         {},
     ):
-        rates[entry.amplifier] = (scored_runs(entry.runs, {})[0], max(len(entry.runs) - 1, 0))
+        fired, compared = scored_runs(entry.runs, {})
+        rates[entry.amplifier] = Amplification(
+            amplifier=entry.amplifier,
+            note=entry.note,
+            comparisons=max(len(entry.runs) - 1, 0),
+            fired=fired,
+            artifacts_compared=compared,
+            error=entry.error,
+        )
     return rates
 
 
@@ -507,20 +543,33 @@ def one_trial(into: Path, runs: int) -> Trial:
     return trial
 
 
-def environment_lines(runs: int, trials: int) -> list[str]:
+def environment() -> dict[str, str]:
+    """The three things every number here is specific to, in one place.
+
+    The spec asks for the DuckDB version, the thread count and the platform
+    beside any figure quoted from this. They were printed and not written to
+    `--json`, so the file slice 7 reads to regenerate the README's tables had no
+    way to label them.
+    """
     probe = duckdb.connect()
     threads = probe.execute("SELECT current_setting('threads')").fetchone()[0]
     probe.close()
-    import platform as _platform
+    return {
+        "duckdb": duckdb.__version__,
+        "threads": str(threads),
+        "platform": platform.platform(),
+    }
 
+
+def environment_lines(where: dict[str, str], runs: int, trials: int) -> list[str]:
     return [
         f"  reference  {REFERENCE.relative_to(HERE)}",
         f"  twins      {TWINS.relative_to(HERE)}",
         f"  trials     {trials}, each a full detection pass, a twin pass and an "
         f"uncontained pass",
         f"  runs       {runs} per pass, so {runs - 1} comparisons per step per pass",
-        f"  duckdb     {duckdb.__version__}, threads={threads}",
-        f"  platform   {_platform.platform()}",
+        f"  duckdb     {where['duckdb']}, threads={where['threads']}",
+        f"  platform   {where['platform']}",
     ]
 
 
@@ -565,37 +614,59 @@ def report_sensitivity(scored: dict[str, StepScore], trials: int) -> None:
                 f"  {'':<{width}}  {step.silent_trials} trial(s) compared no artifact at all "
                 f"and are not counted above"
             )
-    say("  A fire rate is the whole distribution rather than a range: out of four it has five")
-    say("  possible values, so the cell holds all of it. The magnitudes are maxima over a")
-    say("  thousand groups, so they carry a median and an n and no bracket at all.")
+    denominators = sorted({step.comparisons for step in scored.values() if step.trials})
+    if not denominators:
+        say("  No step compared an artifact in any trial, so there is no rate above to read.")
+        return
+    of = denominators[-1]
+    say("  A fire rate is the whole distribution rather than a range, so every value it could")
+    say(f"  have taken gets a cell: out of {of} it has {of + 1} possible values. The magnitudes")
+    say("  are maxima over a thousand groups, so they carry a median and an n and no bracket.")
+    if len(denominators) > 1:
+        say(f"  Not every step compared {of} times: the denominators above are {denominators}.")
 
 
 def report_specificity(scored: dict[str, StepScore], trials: int) -> None:
     say("\nspecificity: the matched twins, one line of difference each, none of which may fire")
     width = max(len(twin) for _, twin in PAIRS)
-    fires = 0
+    fires = compared = quiet = 0
     for _, twin in PAIRS:
         step = scored.get(twin)
         if step is None:
             continue
         hang(
             f"{twin:<{width}}",
-            f"{step.fired_in} of {trials} trials fired   {step.distribution()}   "
+            f"{step.fired_in} of {step.trials} trials fired   {step.distribution()}   "
             f"{', '.join(f'{s} x{n}' for s, n in step.statuses.most_common())}",
         )
         fires += step.fired_in
-    say(f"  {fires} twin step-passes fired across {trials} trials.")
+        compared += step.trials
+        quiet += step.silent_trials
+    say(
+        f"  {fires} twin step-passes fired across the {compared} that compared anything, of "
+        f"{len(PAIRS) * trials} attempted."
+    )
+    if quiet:
+        # The guard report_sensitivity carries. Without it, sixty twin
+        # step-passes that compared nothing print as `0 twin step-passes fired`
+        # and read as the strongest specificity result in the file.
+        say(f"  {quiet} of them compared no artifact at all and are not counted as clean.")
 
 
-def report_twin_comparisons(trials: list[Trial]) -> tuple[int, int]:
+def report_twin_comparisons(trials: list[Trial]) -> dict[str, int]:
     """How many comparisons the twins actually survived, counted rather than assumed.
 
     The spec predicted 4 main-loop plus 6 amplifier comparisons per twin per
     trial. Tie collapse declines more often than it applies, so the real
     amplified count is lower and printing the prediction would overstate the
     evidence by about a third.
+
+    The main-loop figure was taken nominally, at runs minus one per step per
+    trial, in the same function that filtered the amplified one on `measured`
+    and under this docstring. That number is the specificity evidence the README
+    quotes twice, so it is counted the same way as its neighbour now.
     """
-    loop = sum(step.comparisons for trial in trials for step in trial.twins)
+    loop = sum(step.measured_comparisons for trial in trials for step in trial.twins)
     amplified = sum(
         a.comparisons
         for trial in trials
@@ -612,7 +683,7 @@ def report_twin_comparisons(trials: list[Trial]) -> tuple[int, int]:
     )
     say(f"  {loop} main-loop comparisons and {amplified} amplified ones on correct code.")
     say(f"  {declined} amplifier attempts declined and are not counted as clean.")
-    return loop, amplified
+    return {"main_loop": loop, "amplified": amplified, "declined": declined}
 
 
 def report_baseline_one(trials: list[Trial], scored: dict[str, StepScore]) -> dict[str, float]:
@@ -745,11 +816,24 @@ def report_baseline_three(trials: list[Trial], scored: dict[str, StepScore]) -> 
 
     overstated = _append_magnitudes(trial.uncontained for trial in trials)
     true = _append_magnitudes(trial.reference for trial in trials)
-    say(f"\n  append_audit_log extra rows, uncontained  {_render(overstated)}")
-    say(f"  {'':<41}contained  {_render(true)}")
+    with_it, without = only(scored, APPEND), only(ablated, APPEND)
+    # Four lines on one label column, because the pair below only means anything
+    # against the pair above it: the magnitude moves and the rate does not.
+    width = len(f"{APPEND} extra rows,")
+    say("")
+    for label, uncontained, contained in (
+        (f"{APPEND} extra rows,", _render(overstated), _render(true)),
+        ("fire rate,", without.distribution(), with_it.distribution()),
+    ):
+        say(f"  {label:>{width}} {'uncontained':>11}  {uncontained}")
+        say(f"  {'':>{width}} {'contained':>11}  {contained}")
     say("  Four reruns' worth of duplication charged to one step, against what one rerun of it")
-    say("  does. The fire rate is 4 of 4 either way, so what containment bought there is the")
-    say("  magnitude being a fact about the step rather than about how many times the tool ran.")
+    if without.distribution() == with_it.distribution():
+        say("  does. The rate did not move, so what containment bought here is the magnitude")
+        say("  being a fact about the step rather than about how many times the tool ran.")
+    else:
+        say("  does, and the rate moved as well this time. This line asserted 4 of 4 either way")
+        say("  for two slices without deriving it from anything, which is why it prints both.")
     return {
         "falsely_divergent_trials": falsely,
         # The denominator condition 4 is out of. Uncontained, this step reads a
@@ -771,7 +855,7 @@ def _append_magnitudes(passes: Iterable[list[StepMeasurement]]) -> Counter:
     """
     seen = Counter()
     for steps in passes:
-        step = next((s for s in steps if s.name == "append_audit_log"), None)
+        step = next((s for s in steps if s.name == APPEND), None)
         worst = None if step is None else step.worst
         if worst is not None:
             seen[f"{worst.unmatched_candidate:,}"] += 1
@@ -812,31 +896,50 @@ def report_baseline_four(trials: list[Trial], scored: dict[str, StepScore]) -> d
     say(f"\n  Per comparison on {INTERMITTENT}, with the amplifiers pointed at it every trial:")
     loop_fired = sum(_rate(t.reference, INTERMITTENT) for t in trials)
     loop_of = sum(
-        s.comparisons for t in trials for s in t.reference if s.name == INTERMITTENT
+        s.measured_comparisons for t in trials for s in t.reference if s.name == INTERMITTENT
     )
-    rows = [("the five-run loop", loop_fired, loop_of, len(silent))]
+    # A trial with nothing to report is three different things and they were one
+    # column: the amplifier declined to build an input, or it built one and the
+    # step wrote nothing to compare, or it compared and found the step clean.
+    # Only the last of those is evidence about the step.
+    rows = [
+        (
+            "the five-run loop",
+            loop_fired,
+            loop_of,
+            len(silent),
+            len(trials) - len(looked),
+            0,
+        )
+    ]
     for amplifier, _ in AMPLIFIERS:
         seen = [t.forced[amplifier] for t in trials if amplifier in t.forced]
+        usable = [a for a in seen if a.measured]
         rows.append(
             (
                 amplifier,
-                sum(fired for fired, _ in seen),
-                sum(of for _, of in seen),
-                sum(1 for fired, _ in seen if not fired),
+                sum(a.fired for a in usable),
+                sum(a.comparisons for a in usable),
+                sum(1 for a in usable if not a.fired),
+                sum(1 for a in seen if a.ran and not a.measured),
+                sum(1 for a in seen if not a.ran),
             )
         )
     width = max(len(name) for name, *_ in rows)
-    for name, fired, of, blank in rows:
+    for name, fired, of, clean, nothing, declined in rows:
         rate = f"{fired} of {of}" if of else "nothing compared"
         say(
             f"    {name:<{width}}  {rate:>12}  {fired / max(of, 1):>5.2f}   "
-            f"{blank} of {len(trials)} trials with nothing at all"
+            f"{clean} clean, {nothing} compared nothing, {declined} declined"
         )
+    raised = sum(1 for t in trials for a in t.forced.values() if a.error)
+    if raised:
+        say(f"    {raised} of the attempts above raised while running and count as declined.")
     say("  A row with fewer comparisons than the others found nothing in its first two:")
     say("  an amplifier is only escalated to the full run count on a hit, which is the cost")
     say("  argument for it working.")
     amplified_gap = max(
-        (fired / max(of, 1) for name, fired, of, _ in rows[1:] if of), default=0.0
+        (fired / of for _, fired, of, *_ in rows[1:] if of), default=0.0
     )
     return {
         "false_negative_trials": len(went_green),
@@ -849,7 +952,7 @@ def report_baseline_four(trials: list[Trial], scored: dict[str, StepScore]) -> d
         # Condition 2 compares two rates, so it needs both denominators. Either
         # of them at zero is an absence of measurement and not a zero gap.
         "loop_comparisons": loop_of,
-        "amplifier_comparisons": sum(of for _, _, of, _ in rows[1:]),
+        "amplifier_comparisons": sum(of for _, _, of, *_ in rows[1:]),
     }
 
 
@@ -927,8 +1030,16 @@ def report_attribution(trials: list[Trial]) -> dict[str, int]:
                 hits += 1
             else:
                 misses += 1
-        say(f"  {name:<22} {hits} right, {misses} wrong, out of {hits + misses} attributions")
-    say(f"  {right} of {seen} named the column the step invented rather than one it copied in.")
+        if hits + misses:
+            say(
+                f"  {name:<22} {hits} right, {misses} wrong, out of {hits + misses} attributions"
+            )
+        else:
+            say(f"  {name:<22} no attribution came out of any trial, so nothing to score here")
+    if seen:
+        say(f"  {right} of {seen} named the column the step invented rather than one it copied in.")
+    else:
+        say("  Nothing was attributed in any trial, so there is no rate here rather than a zero.")
     return {"attribution_right": right, "attribution_seen": seen}
 
 
@@ -960,6 +1071,7 @@ def report_conditions(
     here is the wall clock, which is measured whatever the pipeline did.
     """
     n = len(trials)
+    budget = BUDGET_SECONDS_PER_TRIAL * n
     intermittent = only(broken, INTERMITTENT)
     downstream = only(broken, DOWNSTREAM)
     silent = amplification["loop_silent_trials"]
@@ -1060,9 +1172,10 @@ def report_conditions(
             f"compared it",
         ),
         (
-            f"the whole eval took longer than {BUDGET_SECONDS / 60:.0f} minutes",
-            _verdict(seconds > BUDGET_SECONDS),
-            f"{seconds:.0f}s over {n} trials",
+            f"the whole eval took longer than {budget / 60:.0f} minutes, which is the spec's "
+            f"ten at the ten trials it fixed",
+            _verdict(seconds > budget),
+            f"{seconds:.0f}s over {n} trials, {seconds / max(n, 1):.0f}s each",
         ),
     ]
     say("\npre-registered conditions, every one written into the spec before any of this existed")
@@ -1131,8 +1244,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     began = time.perf_counter()
+    where = environment()
     say("twicerun eval")
-    for line in environment_lines(args.runs, args.trials):
+    for line in environment_lines(where, args.runs, args.trials):
         say(line)
 
     trials: list[Trial] = []
@@ -1152,7 +1266,7 @@ def main(argv: list[str] | None = None) -> int:
         score(trial.twins, twin_scores)
     report_sensitivity(broken_scores, len(trials))
     report_specificity(twin_scores, len(trials))
-    report_twin_comparisons(trials)
+    twin_comparisons = report_twin_comparisons(trials)
     naive = report_baseline_one(trials, broken_scores)
     static = report_baseline_two()
     ablation = report_baseline_three(trials, broken_scores)
@@ -1173,20 +1287,38 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     "trials": args.trials,
                     "runs": args.runs,
-                    "duckdb": duckdb.__version__,
                     "seconds": seconds,
+                    "environment": where,
                     "sensitivity": {
                         name: dict(step.rates) for name, step in broken_scores.items()
+                    },
+                    # Every table here needs its denominator, and the silent
+                    # counts are the difference between a rate out of ten trials
+                    # and a rate out of the ones that compared anything.
+                    "silent_trials": {
+                        name: step.silent_trials
+                        for name, step in (*broken_scores.items(), *twin_scores.items())
                     },
                     "statuses": {
                         name: dict(step.statuses) for name, step in broken_scores.items()
                     },
-                    "specificity": {name: step.fired_in for name, step in twin_scores.items()},
+                    "specificity": {
+                        name: {
+                            "fired_in": step.fired_in,
+                            "trials": step.trials,
+                            "silent_trials": step.silent_trials,
+                        }
+                        for name, step in twin_scores.items()
+                    },
+                    "twin_comparisons": twin_comparisons,
                     "baseline_1": naive,
                     "baseline_2": static,
                     "baseline_3": ablation,
                     "baseline_4": amplification,
-                    "amplification_gap": [trial.forced for trial in trials],
+                    "amplification_gap": [
+                        {name: asdict(a) for name, a in trial.forced.items()}
+                        for trial in trials
+                    ],
                     "bounds": bounds,
                     "attribution": attribution,
                     "conditions": [

@@ -13,6 +13,7 @@ assert nothing but the fixture.
 from __future__ import annotations
 
 import ast
+import re
 import sys
 from pathlib import Path
 
@@ -58,10 +59,18 @@ STEPS = [shifts]
 """
 
 
-def measured(name: str, *, fired: int = 0, compared: int = 1) -> StepMeasurement:
-    """A step with `compared` artifacts looked at, of which `fired` rounds diverged."""
+def measured(
+    name: str, *, fired: int = 0, compared: int = 1, blank: int = 0
+) -> StepMeasurement:
+    """A step with `compared` artifacts looked at, of which `fired` rounds diverged.
+
+    `blank` rounds at the end compared nothing, which is what a step that wrote
+    no artifact that time round leaves behind. They are the reason the measured
+    denominator can differ from the nominal four.
+    """
     step = StepMeasurement(index=0, name=name, comparisons=4, terms=1000)
     for round_ in range(4):
+        looked_at = 0 if round_ >= 4 - blank else compared
         step.observe(
             [
                 ArtifactFindings(
@@ -71,7 +80,7 @@ def measured(name: str, *, fired: int = 0, compared: int = 1) -> StepMeasurement
                     candidate_rows=100,
                     row_missing=7 if round_ < fired else 0,
                 )
-                for _ in range(compared)
+                for _ in range(looked_at)
             ]
         )
     return step
@@ -120,6 +129,25 @@ def test_every_rate_prints_with_its_denominator_and_the_empty_buckets_too():
     for _ in range(3):
         uniform.observe(measured("uniform", fired=0))
     assert uniform.distribution() == "0 of 4 on all 3"
+
+
+def test_a_trial_whose_rate_is_out_of_a_smaller_denominator_still_gets_a_cell():
+    """Ten trials cannot print as a distribution that accounts for one of them.
+
+    The denominator was a single int overwritten by every observation from the
+    last step seen, and the buckets were keyed on it, so the nine trials at 4 of
+    4 disappeared out of the line the moment one trial came back 2 of 3, while
+    `fired in 10 of 10` went on counting them. The sum of the counts printed has
+    to be the number of trials.
+    """
+    scored = StepScore("mixed_denominators")
+    for _ in range(9):
+        scored.observe(measured("mixed_denominators", fired=4))
+    scored.observe(measured("mixed_denominators", fired=2, blank=1))
+
+    printed = scored.distribution()
+    assert sum(int(n) for n in re.findall(r"x(\d+)", printed)) == scored.trials == 10
+    assert "4 of 4 x9" in printed and "2 of 3 x1" in printed
 
 
 def test_the_append_magnitude_is_not_reported_as_zero():

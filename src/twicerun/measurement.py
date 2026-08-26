@@ -55,6 +55,19 @@ class StepMeasurement:
         return sum(len(round_) for round_ in self.rounds)
 
     @property
+    def measured_comparisons(self) -> int:
+        """How many of the comparisons had an artifact in them.
+
+        `comparisons` is the nominal count, runs minus one, and it is what the
+        report prints beside a fire rate because it is the number the user asked
+        for. This is how many of those looked at anything. A step that wrote
+        nothing on one round contributes a clean-looking zero to the numerator
+        out of a denominator that compared nothing, so every denominator in the
+        eval is this one instead.
+        """
+        return sum(1 for round_ in self.rounds if round_)
+
+    @property
     def diverged(self) -> list[list[ArtifactFindings]]:
         return [[f for f in round_ if f.diverged] for round_ in self.rounds]
 

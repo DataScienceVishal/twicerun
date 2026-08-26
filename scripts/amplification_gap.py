@@ -29,7 +29,7 @@ import statistics
 import sys
 from pathlib import Path
 
-from twicerun.amplify import AMPLIFIERS
+from twicerun.amplify import AMPLIFIERS, Amplification
 from twicerun.runner import amplify_runs, load_steps, run_pipeline, scored_runs
 
 LOOP = "the five-run loop"
@@ -40,11 +40,29 @@ REFERENCE = Path(__file__).resolve().parent.parent / "pipelines" / "reference.py
 INTERMITTENT = 6
 
 
-def one_pass(into: Path) -> dict[str, tuple[int, int]]:
-    """The main loop's rate on the intermittent step, and each amplifier's on the same step."""
+def one_pass(into: Path) -> dict[str, Amplification]:
+    """The main loop's rate on the intermittent step, and each amplifier's on the same step.
+
+    Every row of the table comes back in the shipped `Amplification`, including
+    the loop's, which is the row where nothing was substituted. That is not
+    tidiness: `measured` is the guard both halves need and neither had. The loop
+    row took its denominator from `comparisons`, which is runs minus one whether
+    or not the step wrote anything, and the amplifier rows took
+    `scored_runs(...)[0]` and threw away the second element, which is the only
+    thing that tells a re-execution that wrote nothing apart from one that
+    agreed with itself.
+    """
     report, manifest = run_pipeline(REFERENCE, runs=5, parent=into, amplify=False, keep=1)
     loop = next(s for s in report.steps if s.index == INTERMITTENT)
-    rates = {LOOP: (loop.fired, loop.comparisons)}
+    rates = {
+        LOOP: Amplification(
+            amplifier=LOOP,
+            note="no substitution, the pipeline's own input",
+            comparisons=loop.measured_comparisons,
+            fired=loop.fired,
+            artifacts_compared=loop.artifacts_compared,
+        )
+    }
     for entry in amplify_runs(
         load_steps(REFERENCE),
         manifest.runs[0],
@@ -54,13 +72,21 @@ def one_pass(into: Path) -> dict[str, tuple[int, int]]:
         manifest.environment.threads,
         {},
     ):
-        rates[entry.amplifier] = (scored_runs(entry.runs, {})[0], max(len(entry.runs) - 1, 0))
-    shutil.rmtree(into, ignore_errors=True)
+        fired, compared = scored_runs(entry.runs, {})
+        rates[entry.amplifier] = Amplification(
+            amplifier=entry.amplifier,
+            note=entry.note,
+            comparisons=max(len(entry.runs) - 1, 0),
+            fired=fired,
+            artifacts_compared=compared,
+            error=entry.error,
+        )
+    shutil.rmtree(into)
     return rates
 
 
 def main(passes: int) -> int:
-    collected: list[dict[str, tuple[int, int]]] = []
+    collected: list[dict[str, Amplification]] = []
     for n in range(passes):
         collected.append(one_pass(WORKSPACE))
         print(f"pass {n + 1} of {passes}", file=sys.stderr, flush=True)
@@ -68,24 +94,27 @@ def main(passes: int) -> int:
     names = [LOOP, *(name for name, _ in AMPLIFIERS)]
     step = load_steps(REFERENCE)[INTERMITTENT].__name__
     print(f"\n{step}, {passes} passes, DuckDB threads from the environment\n")
-    print(f"{'':<20} {'fired':>12}  {'rate':>5}  passes with nothing")
+    print(f"{'':<20} {'fired':>12}  {'rate':>5}  {'passes clean':>12}  compared nothing")
     for name in names:
         seen = [p[name] for p in collected if name in p]
-        fired, of = sum(f for f, _ in seen), sum(o for _, o in seen)
-        blank = sum(1 for f, _ in seen if not f)
-        rate = f"{fired} of {of}"
+        scored = [a for a in seen if a.measured]
+        fired, of = sum(a.fired for a in scored), sum(a.comparisons for a in scored)
+        clean = f"{sum(1 for a in scored if not a.fired)} of {len(scored)}"
+        rate = f"{fired} of {of}" if of else "nothing"
         print(
-            f"{name:<20} {rate:>12}  {fired / max(of, 1):>5.2f}  {blank} of {len(seen)}"
+            f"{name:<20} {rate:>12}  {fired / max(of, 1):>5.2f}  {clean:>12}  "
+            f"{len(seen) - len(scored)}"
         )
 
-    def amplified_firings(one: dict[str, tuple[int, int]]) -> int:
-        return sum(fired for name, (fired, _) in one.items() if name != LOOP)
+    def amplified_firings(one: dict[str, Amplification]) -> int:
+        return sum(a.fired for name, a in one.items() if name != LOOP and a.measured)
 
-    missed = [p for p in collected if not p[LOOP][0]]
+    looked = [p for p in collected if p[LOOP].measured]
+    missed = [p for p in looked if not p[LOOP].fired]
     caught = [p for p in missed if amplified_firings(p)]
     print(
-        f"\nThe loop reported nothing on {len(missed)} of {passes} passes. "
-        f"An amplifier fired on {len(caught)} of those {len(missed)}."
+        f"\nThe loop reported nothing on {len(missed)} of the {len(looked)} passes where it "
+        f"compared anything. An amplifier fired on {len(caught)} of those {len(missed)}."
     )
     if missed:
         median = statistics.median(amplified_firings(p) for p in missed)

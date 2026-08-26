@@ -125,9 +125,18 @@ def a_trial(*, artifacts: int = 1, downstream_uncontained: int = 3, fires: dict 
             INTERMITTENT: NaiveScore(0, 0, 2000, artifacts),
         },
         forced={
-            "tie collapse": (4 if artifacts else 0, 4 if artifacts else 0),
-            "thread count": (3 if artifacts else 0, 4 if artifacts else 0),
-            "row multiplication": (4 if artifacts else 0, 4 if artifacts else 0),
+            name: Amplification(
+                amplifier=name,
+                note="one key group collapsed",
+                comparisons=4 if artifacts else 0,
+                fired=fired if artifacts else 0,
+                artifacts_compared=4 if artifacts else 0,
+            )
+            for name, fired in (
+                ("tie collapse", 4),
+                ("thread count", 3),
+                ("row multiplication", 4),
+            )
         },
         exit_with_amplifiers=1,
         exit_without=1,

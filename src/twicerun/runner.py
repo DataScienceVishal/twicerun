@@ -808,7 +808,7 @@ def run_pipeline(
             try:
                 manifest.bisect = bisect_runs(steps, reference, divergent, run_dir, runs)
             except Exception as exc:  # noqa: BLE001
-                # Blanket, and for the same reason as the other two: the
+                # Blanket, and for the same reason as the other three: the
                 # bisect is downstream of an answer that is already complete,
                 # so a failure here has to become a reported outcome rather
                 # than the end of the run. A step that re-executes badly alone,
