@@ -24,14 +24,7 @@ from twicerun.cause import BISECT_THREADS, CONFIDENCE, PARALLEL_ORDER, upper_bou
 from twicerun.manifest import Environment
 from twicerun.measurement import StepMeasurement, name_classes
 from twicerun.oracle import ArtifactFindings, KeyEffect
-from twicerun.policy import (
-    BY_THRESHOLD,
-    HEADROOM_REQUIRED,
-    DriftBound,
-    Policy,
-    StepVerdict,
-    judge,
-)
+from twicerun.policy import HEADROOM_REQUIRED, DriftBound, Policy, StepVerdict, judge
 
 
 def _plural(n: int, singular: str, plural: str | None = None) -> str:
@@ -59,7 +52,7 @@ class Report:
     def render(self) -> str:
         judged = self.verdicts
         sections = [
-            self._header(judged),
+            self._header(),
             self._steps(judged),
             self._causes(),
             self._bounds(judged),
@@ -67,28 +60,14 @@ class Report:
         ]
         return "\n".join(line for section in sections for line in section)
 
-    def _header(self, verdicts: list[StepVerdict]) -> list[str]:
+    def _header(self) -> list[str]:
         env = self.environment
-        # Named after the route that did the downgrading rather than after the
-        # policy, because --policy reduction-order --tolerance-rel 0.001 sends a
-        # difference thousands of times outside the bound down the manual route
-        # and the two carry different claims.
-        by_threshold = any(BY_THRESHOLD in verdict.routes for verdict in verdicts)
         return [
             f"pipeline   {self.pipeline}",
             f"runs       {self.runs}, run 1 is the reference, so "
             f"{_plural(self.runs - 1, 'comparison')} per step",
             f"contained  {self._containment()}",
             f"policy     {self.policy.describe()}",
-            *(
-                [
-                    "           a --tolerance threshold downgraded at least one comparison, "
-                    "which is a claim about",
-                    "           acceptable values and not evidence about a mechanism",
-                ]
-                if by_threshold
-                else []
-            ),
             f"duckdb     {env.duckdb_version}, threads={env.threads}",
             f"platform   {env.platform}",
             f"artifacts  {self.run_dir}",
@@ -118,7 +97,10 @@ class Report:
             rate = f"{verdict.fired} of {step.comparisons}"
             tail = " ".join(filter(None, (name_classes(step.classes), step.cause)))
             if verdict.tolerated:
-                tail = f"{tail} TOLERATED on {verdict.tolerated} of {step.comparisons}"
+                tail = (
+                    f"{tail} TOLERATED on {verdict.tolerated} of {step.comparisons} "
+                    f"by {' and '.join(verdict.routes)}"
+                )
             lines.append(f"  {label}  {rate:>8}  {tail}".rstrip())
             if step.artifacts_compared == 0:
                 lines.append("      wrote no artifacts, so nothing was compared")

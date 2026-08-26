@@ -169,9 +169,10 @@ class StepVerdict:
     # comparison, and the reason reassociation does not explain the step is
     # still the thing a reader needs.
     bound_refusal: str | None = None
-    # Which routes actually downgraded something here, so the report can say
-    # what a TOLERATED rests on instead of leaving two different claims looking
-    # identical on the step line.
+    # Which routes actually downgraded something here. The report prints them
+    # on the step line, because "TOLERATED on 4 of 4" says nothing about
+    # whether a mechanism was shown or a user set a threshold, and those are
+    # different claims. Ordered by ROUTES so the stronger one leads.
     routes: tuple[str, ...] = field(default_factory=tuple)
 
 

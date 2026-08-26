@@ -239,7 +239,7 @@ The conjunction is the point, and each condition refuses something the other two
 
 A step that was never bisected gets the same refusal. No evidence is not evidence, and the direction to err in is reporting a difference that reassociation might well have explained.
 
-`--tolerance-rel` and `--tolerance-ulps` are deliberately not gated on the bisect. A threshold is a user saying a difference of that size does not matter in their domain, which is their claim to make and rests on no mechanism. The header says when a threshold did the downgrading, because that verdict and a mechanism-backed one would otherwise read the same on the step line.
+`--tolerance-rel` and `--tolerance-ulps` are deliberately not gated on the bisect. A threshold is a user saying a difference of that size does not matter in their domain, which is their claim to make and rests on no mechanism. The step line names which route downgraded it, because `TOLERATED on 4 of 4 by the derived reassociation bound` and `TOLERATED on 4 of 4 by a --tolerance threshold` are different claims and used to render identically.
 
 They are an escape hatch, documented as one and never a default, and they still cannot excuse a missing or duplicated row.
 

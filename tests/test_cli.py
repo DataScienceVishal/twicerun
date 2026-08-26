@@ -241,6 +241,22 @@ def test_the_same_drift_exits_one_under_strict_and_zero_under_reduction_order(tm
     assert magnitude in printed and magnitude in downgraded
 
 
+def test_the_step_line_names_which_route_downgraded_it(tmp_path, capsys):
+    """A mechanism-backed downgrade and a user's threshold are different claims.
+
+    They used to render identically as `TOLERATED on 2 of 2`, with the route
+    collapsed to one boolean in the header over the whole report.
+    """
+    where = pipeline(tmp_path, TOLERABLE_DRIFT)
+    main(["run", str(where), "--runs", "3", "--policy", "reduction-order",
+          "--run-dir", str(tmp_path / "a")])
+    assert "TOLERATED on 2 of 2 by the derived reassociation bound" in capsys.readouterr().out
+
+    main(["run", str(where), "--runs", "3", "--tolerance-rel", "1e-6",
+          "--run-dir", str(tmp_path / "b")])
+    assert "TOLERATED on 2 of 2 by a --tolerance threshold" in capsys.readouterr().out
+
+
 def test_a_downgrade_rests_on_a_measured_rate_rather_than_on_a_disclosure(tmp_path, capsys):
     """What slice 3 changed about a TOLERATED, in the one report that shows it.
 
