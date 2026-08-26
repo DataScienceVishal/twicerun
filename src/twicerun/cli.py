@@ -5,6 +5,7 @@ import sys
 import traceback
 from pathlib import Path
 
+from twicerun.amplify import STABLE_ON_THIS_INPUT
 from twicerun.columns import FloatInKey, UnknownKeyColumn, UnsupportedColumn
 from twicerun.policy import REDUCTION_ORDER, STRICT, Policy
 from twicerun.runner import PipelineError, UnknownArtifact, rejudge, run_pipeline
@@ -44,7 +45,31 @@ def _judge(args: argparse.Namespace) -> int:
         return 2
 
     print(report.render())
-    return 1 if any(verdict.fired for verdict in report.verdicts) else 0
+    return _exit_code(report)
+
+
+def _exit_code(report) -> int:
+    """1 when the tool watched a step give two different answers, and only then.
+
+    Under the default policy that includes the benign float drift, which is the
+    answer strict is supposed to give rather than a bug in it, and a comparison
+    downgraded to TOLERATED does not set it.
+
+    STABLE_ON_THIS_INPUT sets it too, and that is the one worth arguing about. It
+    means the step agreed with itself on the input the pipeline was handed and
+    stopped agreeing once that input was stressed, so the step's own data did not
+    reproduce the failure while the step is still not reproducible. A tool whose
+    argument is that a green five-run loop lies about exactly this case cannot
+    then go green on it itself.
+
+    AMPLIFICATION_FAILED does not set it. Nothing there was seen giving two
+    answers: an amplified input made the step raise, which is a fact about the
+    pipeline and is printed loudly, but it is not a divergence and 1 has to keep
+    meaning one thing.
+    """
+    if any(verdict.fired for verdict in report.verdicts):
+        return 1
+    return 1 if any(step.status == STABLE_ON_THIS_INPUT for step in report.steps) else 0
 
 
 def _newest(given: list[Path]) -> Path:
@@ -74,7 +99,9 @@ def build_parser() -> argparse.ArgumentParser:
         "per step, how often it failed to give the same answer.",
         epilog="Exit codes: 0 nothing diverged, 1 something diverged, "
         "2 bad input, 3 the run crashed. 1 means only divergence, so a release "
-        "gate keyed on it does not also trip on a broken pipeline.",
+        "gate keyed on it does not also trip on a broken pipeline. A step that "
+        "diverged only under an amplifier sets 1 as well: the tool watched it "
+        "give two answers, and the input it took to get there does not change that.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -243,11 +270,7 @@ def main(argv: list[str] | None = None) -> int:
         return 3
 
     print(report.render())
-    # 1 is reserved for divergence so this can gate a release. Under the default
-    # policy that includes the benign float drift, which is the answer strict is
-    # supposed to give rather than a bug in it. A comparison downgraded to
-    # TOLERATED is still printed with its magnitudes but does not set this.
-    return 1 if any(verdict.fired for verdict in report.verdicts) else 0
+    return _exit_code(report)
 
 
 if __name__ == "__main__":

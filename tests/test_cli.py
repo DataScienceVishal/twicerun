@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 import pytest
-from test_statuses import ONLY_ON_TIED_INPUT
+from test_statuses import BREAKS_ON_A_DUPLICATE_KEY, ONLY_ON_TIED_INPUT
 
 from twicerun.amplify import (
     AMPLIFICATION_FAILED,
@@ -82,6 +82,33 @@ def test_nothing_in_the_report_claims_a_step_is_deterministic(tmp_path, capsys, 
     without_the_token = printed.replace(STABLE_ON_THIS_INPUT, "").lower()
     for forbidden in ("deterministic", "stable", "reproducible", "passed"):
         assert forbidden not in without_the_token
+
+
+def test_a_step_only_an_amplifier_could_move_still_sets_the_exit_code(tmp_path, capsys):
+    """The one exit-code decision slice 4 had to make, and it goes the other way.
+
+    This step agrees with itself on the input the pipeline was handed. A tool
+    that then exits 0 has reproduced, at the exit code, the exact failure its
+    whole argument is about: a green five-run loop over a step that is not
+    reproducible.
+    """
+    code = main(["run", str(pipeline(tmp_path, ONLY_ON_TIED_INPUT)),
+                 "--runs", "3", "--run-dir", str(tmp_path / "artifacts")])
+    printed = capsys.readouterr().out
+
+    assert code == 1
+    assert "0 of 2  STABLE_ON_THIS_INPUT" in printed
+
+
+def test_an_amplifier_that_raised_is_not_a_divergence_and_does_not_gate(tmp_path, capsys):
+    """Nothing was seen giving two answers, so 1 would be the wrong thing to return.
+
+    The report is loud about it. The exit code keeps meaning one thing.
+    """
+    code = main(["run", str(pipeline(tmp_path, BREAKS_ON_A_DUPLICATE_KEY)),
+                 "--runs", "3", "--run-dir", str(tmp_path / "artifacts")])
+    assert code == 0
+    assert AMPLIFICATION_FAILED in capsys.readouterr().out
 
 
 def test_the_one_status_with_a_banned_word_in_it_carries_its_own_disclaimer(tmp_path, capsys):
