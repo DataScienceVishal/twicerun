@@ -257,11 +257,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"twicerun: {exc}", file=sys.stderr)
         return 2
     except Exception:  # noqa: BLE001
-        # A blanket catch is correct at exactly one place, and this is it. A
-        # user's step can raise anything, and the point of catching is to give
-        # a crash its own exit code rather than let it share 1 with divergence,
-        # which would make a CI gate record the two as the same event. Nothing
-        # is swallowed: the traceback goes to stderr unchanged.
+        # A blanket catch is correct where the thing caught is arbitrary user
+        # code and catching it turns a crash into a reported outcome. This is
+        # the outermost of the three: a user's step can raise anything, and the
+        # point of catching is to give a crash its own exit code rather than
+        # let it share 1 with divergence, which would make a CI gate record the
+        # two as the same event. Nothing is swallowed: the traceback goes to
+        # stderr unchanged.
         traceback.print_exc()
         print(
             "twicerun: the run crashed. Exit 3 is a crash, not a divergence.",

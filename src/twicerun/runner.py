@@ -743,9 +743,10 @@ def run_pipeline(
             try:
                 manifest.bisect = bisect_runs(steps, reference, divergent, run_dir, runs)
             except Exception as exc:  # noqa: BLE001
-                # The second and last blanket catch in this codebase, and it is
-                # here because the bisect is downstream of an answer that is
-                # already complete. A step that re-executes badly on its own,
+                # Blanket, and for the same reason as the other two: the
+                # bisect is downstream of an answer that is already complete,
+                # so a failure here has to become a reported outcome rather
+                # than the end of the run. A step that re-executes badly alone,
                 # most often because a skipped step created the table it reads
                 # through ctx.sql, used to take five finished runs and their
                 # manifest with it and report the whole thing as exit 3.
