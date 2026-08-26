@@ -518,8 +518,8 @@ It refuses a float column, and the reason is worth stating because the flag look
 ```
 amplification is off (--no-amplify), so no status is printed for the 2 steps that never fired:
   0 generate_inputs, 7 roll_up_keys
-  Each of those is 4 comparisons on the one input this pipeline was given and nothing else. 4 clean
-  comparisons rule out a per-comparison divergence probability above 53 percent, 95 percent
+  Each of those is 4 comparisons on the one input this pipeline was given and nothing else. 4
+  clean comparisons rule out a per-comparison divergence probability above 53 percent, 95 percent
   one-sided. NO_DIVERGENCE_OBSERVED needs a zero under every amplifier as well, so it is not
   claimed, and neither is anything weaker.
 ```
