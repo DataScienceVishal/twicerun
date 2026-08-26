@@ -107,10 +107,21 @@ def test_a_nested_column_is_refused_by_name(con, make_artifact):
 
 
 def test_key_override_narrows_what_counts_as_the_same_row(con, make_artifact):
-    """With sid in the key these are two different rows; with only id, one row."""
+    """With sid in the key these are two rows that missed each other.
+
+    With only id in the key they are one row whose sid moved, which is a more
+    useful thing to be told and the reason --key exists. The class changes with
+    it: an unmatched pair becomes a drift on an exact column, which no
+    tolerance can excuse.
+    """
     left = make_artifact("t", "SELECT 1 AS id, 10 AS sid", run=1)
     right = make_artifact("t", "SELECT 1 AS id, 11 AS sid", run=2)
-    assert compare(con, left, right, key_override=["id"]).classes == frozenset()
+    narrowed = compare(con, left, right, key_override=["id"])
+    assert narrowed.classes == {Divergence.VALUE_DRIFT}
+    assert narrowed.matched == 1
+    assert narrowed.drift[0].approximate is False
+    assert narrowed.drift[0].max_ulps is None
+
     assert compare(con, left, right).classes == {Divergence.ROW_MISSING, Divergence.ROW_EXTRA}
 
 
@@ -132,3 +143,87 @@ def test_an_all_float_artifact_pairs_by_sorted_order(con, make_artifact):
     found = compare(con, left, right)
     assert found.key == ()
     assert found.matched == 3
+
+
+def test_one_ulp_of_drift_is_measured_not_hidden(con, make_artifact):
+    """The false positive slice 1 produced, now carrying its size.
+
+    Nothing is tolerated here. The oracle measures; the policy layer decides.
+    """
+    left = make_artifact("t", "SELECT 1 AS g, (1.0)::DOUBLE AS v", run=1)
+    right = make_artifact("t", "SELECT 1 AS g, (1.0 + 2.220446049250313e-16)::DOUBLE AS v", run=2)
+    found = compare(con, left, right)
+    assert found.classes == {Divergence.VALUE_DRIFT}
+    assert found.drift[0].max_ulps == 1
+    assert found.drift[0].max_relative == pytest.approx(2.22e-16, rel=1e-2)
+
+
+def test_negative_zero_and_zero_are_the_same_number(con, make_artifact):
+    """IEEE-754 says -0.0 == 0.0, and the ordered-integer transform agrees.
+
+    The bit-exact baseline calls this a divergence. Written as a
+    multiplication because DuckDB folds the literal to positive zero.
+    """
+    left = make_artifact("t", "SELECT 1 AS g, (-1.0::DOUBLE * 0.0::DOUBLE) AS v", run=1)
+    right = make_artifact("t", "SELECT 1 AS g, (0.0)::DOUBLE AS v", run=2)
+    assert compare(con, left, right).diverged is False
+
+
+@pytest.mark.parametrize(
+    "value", ["'nan'::DOUBLE", "'inf'::DOUBLE", "'-inf'::DOUBLE", "NULL::DOUBLE"]
+)
+def test_a_value_equal_to_itself_does_not_drift(con, make_artifact, value):
+    left = make_artifact("t", f"SELECT 1 AS g, {value} AS v", run=1)
+    right = make_artifact("t", f"SELECT 1 AS g, {value} AS v", run=2)
+    assert compare(con, left, right).diverged is False
+
+
+def test_an_infinity_against_a_finite_number_is_infinitely_far_off(con, make_artifact):
+    """Relative difference means nothing here, so it is reported as infinite.
+
+    Letting the ratio come back NaN would poison the max and, worse, would
+    compare false against every tolerance and quietly pass.
+    """
+    left = make_artifact("t", "SELECT 1 AS g, 'inf'::DOUBLE AS v", run=1)
+    right = make_artifact("t", "SELECT 1 AS g, 1e308::DOUBLE AS v", run=2)
+    assert compare(con, left, right).drift[0].max_relative == float("inf")
+
+
+def test_a_null_appearing_where_a_number_was_is_drift(con, make_artifact):
+    left = make_artifact("t", "SELECT 1 AS g, 2.5::DOUBLE AS v", run=1)
+    right = make_artifact("t", "SELECT 1 AS g, NULL::DOUBLE AS v", run=2)
+    found = compare(con, left, right)
+    assert found.classes == {Divergence.VALUE_DRIFT}
+    assert found.drift[0].max_relative == float("inf")
+
+
+def test_float32_ulps_are_counted_in_float32_steps(con, make_artifact):
+    """Widening to DOUBLE first would report one FLOAT ulp as about 2^29."""
+    left = make_artifact("t", "SELECT 1 AS g, 1.0::FLOAT AS v", run=1)
+    right = make_artifact("t", "SELECT 1 AS g, (1.0 + 1.1920929e-7)::FLOAT AS v", run=2)
+    assert compare(con, left, right).drift[0].max_ulps == 1
+
+
+def test_the_report_line_carries_the_pair_that_moved_furthest(con, make_artifact):
+    """Someone tracing a count wants the two numbers, not a verdict."""
+    rows = "SELECT unnest([1, 2]) AS g, unnest([{a}, 5.0])::DOUBLE AS v"
+    left = make_artifact("t", rows.format(a="1.0"), run=1)
+    right = make_artifact("t", rows.format(a="1.5"), run=2)
+    moved = compare(con, left, right).drift[0]
+    assert moved.example == ("1.0", "1.5")
+    assert moved.rows == 1
+
+
+def test_drift_on_several_columns_is_reported_per_column(con, make_artifact):
+    left = make_artifact("t", "SELECT 1 AS g, 1.0::DOUBLE AS a, 2.0::DOUBLE AS b", run=1)
+    right = make_artifact("t", "SELECT 1 AS g, 1.5::DOUBLE AS a, 2.0::DOUBLE AS b", run=2)
+    found = compare(con, left, right)
+    assert [d.column for d in found.drift] == ["a"]
+    assert found.drift_rows == 1
+
+
+def test_a_timestamp_that_moved_gets_named_as_the_clock(con, make_artifact):
+    left = make_artifact("t", "SELECT 1 AS g, TIMESTAMP '2026-01-01 00:00:00' AS seen", run=1)
+    right = make_artifact("t", "SELECT 1 AS g, TIMESTAMP '2026-01-01 00:00:01' AS seen", run=2)
+    found = compare(con, left, right, key_override=["g"])
+    assert found.hints == ("WALL_CLOCK: seen carries a clock type and its values moved",)

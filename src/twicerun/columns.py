@@ -86,6 +86,7 @@ def is_clock(sql_type: str) -> bool:
 
 @dataclass(frozen=True)
 class ColumnPlan:
+    types: Mapping[str, str]
     partition: Mapping[str, Partition]
     key: tuple[str, ...]
 
@@ -112,6 +113,15 @@ class ColumnPlan:
     @property
     def floats_in_key(self) -> tuple[str, ...]:
         return tuple(c for c in self.key if self.partition[c] is Partition.APPROX)
+
+    def float_width(self, column: str) -> int:
+        """Bits in the IEEE-754 layout, which the ULP transform needs.
+
+        A FLOAT one step away from its neighbour is one FLOAT ulp apart and
+        about 2^29 DOUBLE ulps apart, so widening before measuring would turn
+        last-bit noise into a headline number.
+        """
+        return 32 if self.types[column].strip().upper() in {"FLOAT", "REAL"} else 64
 
 
 def plan(columns: Mapping[str, str], key_override: Sequence[str] | None = None) -> ColumnPlan:
@@ -144,7 +154,7 @@ def plan(columns: Mapping[str, str], key_override: Sequence[str] | None = None) 
         key = tuple(c for c, partition in where.items() if partition is Partition.EXACT)
     else:
         key = _checked_override(key_override, where)
-    return ColumnPlan(partition=where, key=key)
+    return ColumnPlan(types=dict(columns), partition=where, key=key)
 
 
 def _checked_override(

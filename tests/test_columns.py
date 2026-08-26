@@ -115,7 +115,7 @@ def test_the_plan_covers_every_type_duckdb_gives_the_reference_pipeline(con):
 
 
 def test_a_plan_with_no_key_still_reports_its_value_columns():
-    made = ColumnPlan(partition={"v": Partition.APPROX}, key=())
+    made = ColumnPlan(types={"v": "DOUBLE"}, partition={"v": Partition.APPROX}, key=())
     assert made.values == ("v",)
 
 
