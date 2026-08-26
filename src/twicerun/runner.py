@@ -345,7 +345,16 @@ def bisect_runs(
     labelled PARALLEL_ORDER. Duplicating a log on rerun has nothing to do with
     threads. The bisect has to be the main loop again at one thread, or its
     zero answers a different question from the one the other rate asked.
+
+    Which is why runs 2 to N carry an overlay rather than only what the bisect
+    produced. A divergent step can carry state under a name a step that did not
+    diverge wrote, and that writer is skipped here, so taking `written` alone
+    left the name missing and every single-threaded run fell back to the seed.
+    Five identical seeds agree, and the same mislabelling came back through the
+    other door. Names the bisect re-produced take its own version, since those
+    are the single-threaded ones; every other name takes run 1's.
     """
+    from_run_one = artifacts_before(reference, len(steps))
     carried: dict[str, Artifact] = {}
     records = []
     for run in range(1, runs + 1):
@@ -360,7 +369,7 @@ def bisect_runs(
         )
         records.append(record)
         if run == 1:
-            carried = written
+            carried = {**from_run_one, **written}
     return records
 
 

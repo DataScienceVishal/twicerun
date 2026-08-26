@@ -48,6 +48,24 @@ def append(ctx):
 STEPS = [append]
 '''
 
+# The shape the fixture above cannot reach: the name a divergent step carries
+# state under was written by a step that does not diverge, so the bisect skips
+# the writer. The seed is typed INTEGER against the artifact's BIGINT, which
+# makes a bisect that fell back to the seed visible as a schema difference
+# rather than as an absence.
+STATE_WRITTEN_BY_ANOTHER_STEP = '''
+def seed(ctx):
+    ctx.write("ledger", "SELECT 1::BIGINT AS id")
+
+
+def consume(ctx):
+    ctx.state("ledger", "SELECT 0::INTEGER AS id WHERE false")
+    ctx.write("out", "SELECT id FROM ledger")
+
+
+STEPS = [seed, consume]
+'''
+
 STAMPS_THE_THREAD_COUNT = '''
 CALLS = {"n": 0}
 
@@ -101,6 +119,29 @@ def test_the_bisect_starts_from_no_carried_state_the_way_run_one_did(tmp_path):
     step, _ = only_step(tmp_path, APPENDS_TO_ITS_OWN_STATE)
     assert step.cause == PERSISTS_SINGLE_THREADED
     assert (step.fired, step.bisect.fired) == (4, 4)
+
+
+def test_state_a_skipped_step_wrote_still_reaches_the_bisect(tmp_path):
+    """The state fix arriving through the door the first fix left open.
+
+    `consume` carries state under a name `seed` wrote, and `seed` never
+    diverges, so the bisect does not re-execute it. Seeding the bisect from
+    only what it re-produced left `ledger` missing on every single-threaded
+    run, all five fell back to the INTEGER seed, all five agreed, and a step
+    that diverges because it reads a previous run's output was labelled
+    PARALLEL_ORDER.
+
+    The single-step fixture above cannot catch this. Its state name and its
+    write name belong to the same step, so the bisect always re-produces it.
+    """
+    report, _ = run_pipeline(
+        write_pipeline(tmp_path, STATE_WRITTEN_BY_ANOTHER_STEP),
+        runs=5,
+        parent=tmp_path / "artifacts",
+    )
+    consume = report.steps[1]
+    assert (consume.fired, consume.bisect.fired) == (4, 4)
+    assert consume.cause == PERSISTS_SINGLE_THREADED
 
 
 def test_both_rates_come_out_of_the_same_denominator(tmp_path):
