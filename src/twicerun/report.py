@@ -26,8 +26,8 @@ from twicerun.oracle import ArtifactFindings, KeyEffect
 from twicerun.policy import HEADROOM_REQUIRED, DriftBound, Policy, StepVerdict, judge
 
 
-def _plural(n: int) -> str:
-    return f"{n} comparison" if n == 1 else f"{n} comparisons"
+def _plural(n: int, singular: str, plural: str | None = None) -> str:
+    return f"{n} {singular}" if n == 1 else f"{n} {plural or singular + 's'}"
 
 
 @dataclass
@@ -61,8 +61,8 @@ class Report:
         unverified = dict.fromkeys(note for v in verdicts for note in v.unverified)
         return [
             f"pipeline   {self.pipeline}",
-            f"runs       {self.runs}, run 1 is the reference, so {_plural(self.runs - 1)} "
-            f"per step",
+            f"runs       {self.runs}, run 1 is the reference, so "
+            f"{_plural(self.runs - 1, 'comparison')} per step",
             f"policy     {self.policy.describe()}",
             *(f"           {note}" for note in unverified),
             f"duckdb     {env.duckdb_version}, threads={env.threads}",
@@ -91,6 +91,7 @@ class Report:
             worst = step.worst
             if worst is not None:
                 lines.append(f"      {worst.describe()}")
+                lines.extend(f"      {line}" for line in _matched_on(worst))
                 lines.extend(f"      {line}" for line in _attribution(worst))
             lines.extend(f"      {line}" for line in _magnitudes(step))
             lines.extend(f"      {hint}" for hint in step.hints)
@@ -127,7 +128,8 @@ class Report:
             "",
             f"{fired} of {len(self.steps)} steps diverged in {self.seconds:.1f}s"
             + (
-                f", with {tolerated} further comparison(s) measured and downgraded to TOLERATED."
+                f", with {_plural(tolerated, "further comparison")} measured "
+                f"and downgraded to TOLERATED."
                 if tolerated
                 else "."
             ),
@@ -135,7 +137,8 @@ class Report:
         if silent:
             lines += [
                 "",
-                f"{len(silent)} step(s) wrote nothing and were therefore not checked at all: "
+                f"{_plural(len(silent), 'step')} wrote nothing and "
+                f"{'was' if len(silent) == 1 else 'were'} therefore not checked at all: "
                 f"{', '.join(silent)}.",
                 "A 0 of 4 from a step with no artifacts is not evidence about that step.",
             ]
@@ -153,7 +156,7 @@ def _magnitudes(step: StepMeasurement) -> list[str]:
     furthest = step.furthest_drift
     if furthest is None:
         return []
-    scope = _plural(step.comparisons)
+    scope = _plural(step.comparisons, "comparison")
     line = (
         f"furthest move over {scope}: {furthest.column}, "
         f"{furthest.max_ulps} ulp and {furthest.max_relative:.2e} relative"
@@ -161,6 +164,24 @@ def _magnitudes(step: StepMeasurement) -> list[str]:
     if furthest.example[0] is None:
         return [line]
     return [line, f"{furthest.example[0]} against {furthest.example[1]}"]
+
+
+def _matched_on(findings: ArtifactFindings) -> list[str]:
+    """Which columns decided that two rows were the same row.
+
+    The README claimed the tool reported this and it did not, which mattered
+    most in the case the README was describing: an artifact with no exact
+    columns has no key at all, sorts as one group and pairs rows by order
+    alone. That is the weakest comparison here and it was invisible.
+
+    Printed only when it is not the default, because on a normal run it is
+    every exact column and saying so on every line is noise.
+    """
+    if findings.schema_note is not None:
+        return []
+    if not findings.key:
+        return ["matched on no key: this artifact has no exact column, so rows pair by sort order"]
+    return []
 
 
 def _attribution(findings: ArtifactFindings) -> list[str]:
@@ -179,9 +200,9 @@ def _attribution(findings: ArtifactFindings) -> list[str]:
     lines.extend(_runners_up(named, unstable[1:]))
     if findings.attribution_capped:
         lines.append(
-            f"{findings.attribution_capped} further {_plural_columns(findings.attribution_capped)} "
-            f"not tested: attribution runs over the {len(findings.attribution)} key columns with "
-            f"the most distinct values"
+            f"{_plural(findings.attribution_capped, 'further key column')} "
+            f"{'was' if findings.attribution_capped == 1 else 'were'} not tested: attribution "
+            f"runs over the {len(findings.attribution)} with the most distinct values"
         )
     return lines
 
@@ -220,9 +241,6 @@ def _runners_up(named: KeyEffect, rest: list[KeyEffect]) -> list[str]:
         f"so more than one column moved"
     ]
 
-
-def _plural_columns(n: int) -> str:
-    return "key column was" if n == 1 else "key columns were"
 
 
 def _bound_lines(bound: DriftBound) -> list[str]:

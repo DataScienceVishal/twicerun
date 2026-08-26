@@ -113,6 +113,15 @@ def main(argv: list[str] | None = None) -> int:
     if not args.pipeline.is_file():
         print(f"twicerun: no pipeline file at {args.pipeline}", file=sys.stderr)
         return 2
+    if args.keep < 0:
+        # 0 already means keep everything, so a negative is a typo rather than a
+        # stronger form of it. It used to print "keeping -5 run directories".
+        print(
+            f"twicerun: --keep {args.keep} is not a number of directories. "
+            f"Use 0 to keep everything",
+            file=sys.stderr,
+        )
+        return 2
 
     try:
         report, _ = run_pipeline(

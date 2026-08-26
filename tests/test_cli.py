@@ -256,3 +256,30 @@ def test_a_key_that_names_no_column_is_refused(spelling):
     """
     with pytest.raises(KeySyntaxError):
         parse_keys([spelling])
+
+
+def test_a_negative_keep_is_a_typo_not_a_stronger_zero(tmp_path, capsys):
+    """It used to print "keeping -5 run directories" and quietly keep everything."""
+    code = main(["run", str(pipeline(tmp_path, CLEAN)), "--runs", "2",
+                 "--keep", "-5", "--run-dir", str(tmp_path / "artifacts")])
+    assert code == 2
+    assert "Use 0 to keep everything" in capsys.readouterr().err
+
+
+def test_an_artifact_with_no_exact_column_says_it_paired_by_sort_order(tmp_path, capsys):
+    """The weakest comparison in the tool, and it used to be invisible.
+
+    The README claimed the key was reported and nothing printed it. This is the
+    case that claim existed for: no exact column means no key, so the whole
+    artifact sorts as one group and rows pair by order alone.
+    """
+    body = (
+        "CALLS = {'n': 0}\n\n\n"
+        "def floats_only(ctx):\n"
+        "    CALLS['n'] += 1\n"
+        "    ctx.write('v', f\"SELECT ({CALLS['n']}.5)::DOUBLE AS v\")\n\n\n"
+        "STEPS = [floats_only]\n"
+    )
+    main(["run", str(pipeline(tmp_path, body)), "--runs", "2",
+          "--run-dir", str(tmp_path / "artifacts")])
+    assert "rows pair by sort order" in capsys.readouterr().out
