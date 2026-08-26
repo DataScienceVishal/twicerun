@@ -83,6 +83,8 @@ DOWNSTREAM = "roll_up_keys"
 
 BUDGET_SECONDS = 600.0
 
+NOT_MEASURED = "NOT MEASURED"
+
 
 # Two columns short of the 100 the linter allows, matching report.py, so a
 # terminal at 100 does not add a wrap of its own on top of this one.
@@ -108,6 +110,24 @@ def hang(label: str, body: str) -> None:
         say(f"  {' ' * len(label)}  {line}")
 
 
+@dataclass(frozen=True)
+class NaiveScore:
+    """Baseline 1 on one step: what failed to pair, out of what, over how many artifacts.
+
+    The third field is the guard the other three loops already carry. A step
+    that wrote nothing pairs nothing and reports zero rows unmatched, which is
+    the same zero a step whose two runs agreed reports, and the first
+    pre-registered condition reads that zero as grounds for calling the oracle
+    unnecessary. It counts the reference run's artifacts: a name that exists
+    only in the second run is invisible to this pass, which is one of the ways
+    it is deliberately naive.
+    """
+
+    unmatched: int
+    rows: int
+    artifacts: int
+
+
 @dataclass
 class Trial:
     """One trial's measurements, kept after its artifacts are deleted.
@@ -121,7 +141,7 @@ class Trial:
     reference: list[StepMeasurement]
     twins: list[StepMeasurement]
     uncontained: list[StepMeasurement]
-    naive: dict[str, tuple[int, int]]
+    naive: dict[str, NaiveScore]
     # Each amplifier's rate on the intermittent step, taken every trial rather
     # than only on the trials where the loop came back quiet.
     forced: dict[str, tuple[int, int]]
@@ -265,6 +285,18 @@ class StepScore:
         return ", ".join(parts)
 
 
+def only(scored: dict[str, StepScore], name: str) -> StepScore:
+    """The score for one step, or an empty one where no pass ever ran it.
+
+    A name that is missing and a name whose every trial compared nothing are
+    different things, but both have to reach the pre-registered conditions as
+    zero measured trials rather than as a KeyError partway through printing the
+    results.
+    """
+    found = scored.get(name)
+    return StepScore(name) if found is None else found
+
+
 def score(steps: list[StepMeasurement], into: dict[str, StepScore]) -> None:
     for step in steps:
         into.setdefault(step.name, StepScore(step.name)).observe(step)
@@ -279,11 +311,11 @@ def naive_pass(manifest: Manifest) -> dict[str, tuple[int, int]]:
     ones, so the only difference between this and the oracle's answer is the
     comparison: same bytes, same containment, same everything else.
 
-    Per step it returns the rows one side had that the other did not, and the
-    reference row count they came out of.
+    Per step it returns the rows one side had that the other did not, the
+    reference row count they came out of, and how many artifacts it looked at.
     """
     con = duckdb.connect()
-    found: dict[str, tuple[int, int]] = {}
+    found: dict[str, NaiveScore] = {}
     try:
         reference, second = manifest.runs[0], manifest.runs[1]
         for ref_step, cand_step in zip(reference.steps, second.steps, strict=True):
@@ -298,7 +330,7 @@ def naive_pass(manifest: Manifest) -> dict[str, tuple[int, int]]:
                 diff = bit_exact(con, artifact, later)
                 unmatched += diff.only_in_reference + diff.only_in_candidate
                 rows += artifact.rows
-            found[ref_step.name] = (unmatched, rows)
+            found[ref_step.name] = NaiveScore(unmatched, rows, len(ref_step.artifacts))
     finally:
         con.close()
     return found
@@ -563,25 +595,37 @@ def report_twin_comparisons(trials: list[Trial]) -> tuple[int, int]:
 def report_baseline_one(trials: list[Trial], scored: dict[str, StepScore]) -> dict[str, float]:
     say("\nbaseline 1: two runs, bit-exact multiset equality, no tolerance and no classes")
     say("  Runs 1 and 2 of each trial, rescored. Same bytes as the oracle saw.")
-    benign = [trial.naive.get(BENIGN, (0, 0)) for trial in trials]
-    fired = sum(1 for unmatched, _ in benign if unmatched)
-    counts = [unmatched for unmatched, _ in benign]
-    rows = benign[0][1] if benign else 0
+    benign = [n for n in (trial.naive.get(BENIGN) for trial in trials) if n and n.artifacts]
+    fired = sum(1 for n in benign if n.unmatched)
+    counts = [n.unmatched for n in benign]
+    if not benign:
+        hang(f"{BENIGN:<22}", f"wrote no artifact to compare in any of the {len(trials)} trials")
+        return {"benign_median": 0.0, "benign_fired": 0, "benign_trials": 0}
     hang(
         f"{BENIGN:<22}",
-        f"fired on {fired} of {len(trials)} trials, median "
-        f"{statistics.median(counts):,.0f} rows unmatched out of {rows:,} on each side",
+        f"fired on {fired} of {len(benign)} trials, median "
+        f"{statistics.median(counts):,.0f} rows unmatched out of "
+        f"{statistics.median(n.rows for n in benign):,.0f} on each side",
     )
+    if len(benign) < len(trials):
+        hang(" " * 22, f"{len(trials) - len(benign)} trial(s) compared nothing here")
     say("  Nothing is wrong with that step. It is a correct float average and every one of")
     say("  those findings is the arithmetic behaving normally.")
 
-    missed = [trial.naive.get(INTERMITTENT, (0, 0))[0] for trial in trials]
+    intermittent = [
+        n for n in (trial.naive.get(INTERMITTENT) for trial in trials) if n and n.artifacts
+    ]
     hang(
         f"{INTERMITTENT:<22}",
-        f"fired on {sum(1 for n in missed if n)} of {len(trials)} trials at one comparison, "
-        f"against the five-run loop's {scored[INTERMITTENT].fired_in} of {len(trials)}",
+        f"fired on {sum(1 for n in intermittent if n.unmatched)} of {len(intermittent)} trials "
+        f"at one comparison, against the five-run loop's "
+        f"{scored[INTERMITTENT].fired_in} of {scored[INTERMITTENT].trials}",
     )
-    return {"benign_median": statistics.median(counts) if counts else 0.0, "benign_fired": fired}
+    return {
+        "benign_median": statistics.median(counts),
+        "benign_fired": fired,
+        "benign_trials": len(benign),
+    }
 
 
 def report_baseline_two() -> dict[str, int]:
@@ -652,13 +696,14 @@ def report_baseline_three(trials: list[Trial], scored: dict[str, StepScore]) -> 
         )
         if name == DOWNSTREAM and without.fired_in:
             falsely = without.fired_in
+    downstream = only(ablated, DOWNSTREAM)
     say(
-        f"  {DOWNSTREAM} is the one with no bug of its own. Uncontained it fires on "
-        f"{falsely} of {len(trials)}"
+        f"  {DOWNSTREAM} is the one with no bug of its own. Uncontained it fires on {falsely} "
+        f"of the {downstream.trials} trials"
     )
     say(
-        f"  trials and is given cause {_render(ablated[DOWNSTREAM].causes) or 'none'}, which is a "
-        f"confident wrong diagnosis:"
+        f"  that compared it, and is given cause {_render(downstream.causes) or 'none'}, "
+        f"which is a confident wrong diagnosis:"
     )
     say("  it computes an integer minimum, and an integer minimum cannot reassociate into a")
     say("  different answer. A fire there means it was fed something different, never that it")
@@ -676,6 +721,10 @@ def report_baseline_three(trials: list[Trial], scored: dict[str, StepScore]) -> 
     say("  magnitude being a fact about the step rather than about how many times the tool ran.")
     return {
         "falsely_divergent_trials": falsely,
+        # The denominator condition 4 is out of. Uncontained, this step reads a
+        # diverging artifact and fires; if it compared nothing, a zero here is
+        # not evidence that containment removed no false step.
+        "downstream_trials": downstream.trials,
         "overstated": max((int(k.replace(",", "")) for k in overstated), default=0),
         "contained_magnitude": max((int(k.replace(",", "")) for k in true), default=0),
     }
@@ -716,14 +765,18 @@ def report_baseline_four(trials: list[Trial], scored: dict[str, StepScore]) -> d
     # zero gap reports the opposite of what happened. So the per-comparison gap
     # is taken every trial as well, by pointing the amplifiers at the step
     # whether or not the loop already had it.
-    silent = [t for t in trials if _rate(t.reference, INTERMITTENT) == 0]
+    looked = [t for t in trials if _compared(t.reference, INTERMITTENT)]
+    silent = [t for t in looked if _rate(t.reference, INTERMITTENT) == 0]
     caught = [t for t in silent if _status(t.reference, INTERMITTENT) == STABLE_ON_THIS_INPUT]
-    stable = scored[INTERMITTENT].statuses.get(STABLE_ON_THIS_INPUT, 0)
+    stable = only(scored, INTERMITTENT).statuses.get(STABLE_ON_THIS_INPUT, 0)
     say(
-        f"\n  The five-run loop reported nothing on {INTERMITTENT} in {len(silent)} of "
-        f"{len(trials)} trials, and an amplifier"
+        f"\n  The five-run loop reported nothing on {INTERMITTENT} in {len(silent)} of the "
+        f"{len(looked)} trials it"
     )
-    say(f"  fired on {len(caught)} of those {len(silent)}. That is the gap at the trial level.")
+    say(
+        f"  compared, and an amplifier fired on {len(caught)} of those {len(silent)}. That is "
+        f"the gap at the trial level."
+    )
 
     say(f"\n  Per comparison on {INTERMITTENT}, with the amplifiers pointed at it every trial:")
     loop_fired = sum(_rate(t.reference, INTERMITTENT) for t in trials)
@@ -757,16 +810,26 @@ def report_baseline_four(trials: list[Trial], scored: dict[str, StepScore]) -> d
     return {
         "false_negative_trials": len(went_green),
         "stable_trials": stable,
+        "loop_looked_trials": len(looked),
         "loop_silent_trials": len(silent),
         "amplifier_caught": len(caught),
         "loop_rate": loop_fired / max(loop_of, 1),
         "best_amplifier_rate": amplified_gap,
+        # Condition 2 compares two rates, so it needs both denominators. Either
+        # of them at zero is an absence of measurement and not a zero gap.
+        "loop_comparisons": loop_of,
+        "amplifier_comparisons": sum(of for _, _, of, _ in rows[1:]),
     }
 
 
 def _rate(steps: list[StepMeasurement], name: str) -> int:
     step = next((s for s in steps if s.name == name), None)
     return 0 if step is None else step.fired
+
+
+def _compared(steps: list[StepMeasurement], name: str) -> bool:
+    step = next((s for s in steps if s.name == name), None)
+    return step is not None and step.artifacts_compared > 0
 
 
 def _status(steps: list[StepMeasurement], name: str) -> str | None:
@@ -840,7 +903,8 @@ def report_attribution(trials: list[Trial]) -> dict[str, int]:
 
 def report_conditions(
     trials: list[Trial],
-    scored: dict[str, StepScore],
+    broken: dict[str, StepScore],
+    twins: dict[str, StepScore],
     naive: dict[str, float],
     ablation: dict[str, float],
     amplification: dict[str, int],
@@ -854,66 +918,114 @@ def report_conditions(
     are printed either way, because a tool whose author cannot say what would
     have made it pointless has not tested the premise.
 
-    The third verdict is NOT MEASURED and it exists for one condition. The
-    amplification gap can only be seen on trials where the plain loop said
-    nothing, since amplification deliberately only touches steps that came back
-    quiet. On a run where the loop caught the step every time there is no gap to
-    observe, and calling that a zero gap would report the opposite of what
-    happened.
+    The third verdict is NOT MEASURED and seven of the eight can reach it. A
+    step that wrote no artifacts compares nothing, fires on none of the nothing
+    it compared, and reads exactly like a step that agreed with itself: the
+    naive baseline then has zero false positives, the amplification gap is two
+    zero rates, and the uncontained pass removes no falsely divergent step.
+    Those three are the conditions that call a piece of this project
+    unnecessary, so the absence of a measurement published as a zero argues
+    against the thing that was not measured. The one condition that cannot get
+    here is the wall clock, which is measured whatever the pipeline did.
     """
     n = len(trials)
+    intermittent = only(broken, INTERMITTENT)
+    downstream = only(broken, DOWNSTREAM)
     silent = amplification["loop_silent_trials"]
+    # Condition 2 compares two rates, so both sides need a denominator. Either
+    # of them at zero is no gap to see rather than a gap of zero.
+    gap_seen = min(amplification["loop_comparisons"], amplification["amplifier_comparisons"])
+    bounds_short = bounds["loose_cleared"] < bounds["step_passes"] if bounds else False
+    sensitivity = [(name, only(broken, name)) for name in BROKEN]
+    missed = [(name, step) for name, step in sensitivity if step.fired_in < step.trials]
+    short = [(name, step) for name, step in sensitivity if step.trials < n]
+    twin_fires = sum(only(twins, twin).fired_in for _, twin in PAIRS)
+    twin_trials = sum(only(twins, twin).trials for _, twin in PAIRS)
+    reached = intermittent.statuses.get(DIVERGENT, 0) + intermittent.statuses.get(
+        STABLE_ON_THIS_INPUT, 0
+    )
+
+    naive_words = (
+        f"it fired on {naive['benign_fired']:.0f} of {naive['benign_trials']:.0f} trials, median "
+        f"{naive['benign_median']:,.0f} rows unmatched on a step where nothing is wrong"
+        if naive["benign_trials"]
+        else f"{BENIGN} wrote no artifact for it to compare in any of the {n} trials"
+    )
+    gap_words = (
+        f"per comparison the loop is {amplification['loop_rate']:.2f} over "
+        f"{amplification['loop_comparisons']} and the best amplifier "
+        f"{amplification['best_amplifier_rate']:.2f} over "
+        f"{amplification['amplifier_comparisons']}; at the trial level the loop said nothing on "
+        f"{silent} of the {amplification['loop_looked_trials']} trials that compared the step "
+        f"and an amplifier fired on {amplification['amplifier_caught']} of those"
+        if gap_seen
+        else (
+            f"the loop compared {amplification['loop_comparisons']} and the amplifiers "
+            f"{amplification['amplifier_comparisons']}, so there is no pair of rates here"
+        )
+    )
+    containment_words = (
+        f"{DOWNSTREAM} fires uncontained on {ablation['falsely_divergent_trials']:.0f} of "
+        f"{ablation['downstream_trials']:.0f} trials that compared it, and contained on "
+        f"{downstream.fired_in} of {downstream.trials}"
+        if ablation["downstream_trials"]
+        else f"{DOWNSTREAM} compared nothing uncontained in any of the {n} trials"
+    )
+    sensitivity_words = ", ".join(
+        f"{name} {step.fired_in} of {step.trials}" for name, step in sensitivity
+    )
+    if short:
+        sensitivity_words += "; nothing compared on " + ", ".join(
+            f"{name} in {n - step.trials}" for name, step in short
+        )
+    twin_words = (
+        f"{twin_fires} twin step-passes fired across {twin_trials} twin trials that compared "
+        f"anything, out of {len(PAIRS) * n} attempted"
+    )
+
     checked = [
         (
             "the naive baseline's false positives on correct code are zero, so the oracle is "
             "more machinery than the problem needs",
-            _verdict(naive["benign_fired"] == 0),
-            f"it fired on {naive['benign_fired']:.0f} of {n} trials, median "
-            f"{naive['benign_median']:,.0f} rows unmatched on a step where nothing is wrong",
+            _measured(naive["benign_trials"], naive["benign_fired"] == 0),
+            naive_words,
         ),
         (
             "the amplification gap on the intermittent step is zero, so amplification is "
             "unmotivated on this evidence",
-            _verdict(amplification["best_amplifier_rate"] <= amplification["loop_rate"]),
-            f"per comparison the loop is {amplification['loop_rate']:.2f} and the best "
-            f"amplifier {amplification['best_amplifier_rate']:.2f}; at the trial level the "
-            f"loop said nothing on {silent} of {n} and an amplifier fired on "
-            f"{amplification['amplifier_caught']} of those",
+            _measured(
+                gap_seen,
+                amplification["best_amplifier_rate"] <= amplification["loop_rate"],
+            ),
+            gap_words,
         ),
         (
             f"observed drift is not {HEADROOM_REQUIRED:,.0f}x inside the computed bound",
-            "NOT MEASURED" if not bounds else _verdict(
-                bounds["loose_cleared"] < bounds["step_passes"]
-            ),
+            _measured(len(bounds), bounds_short),
             _bound_words(bounds),
         ),
         (
             "containment removes no falsely divergent step, so the Spot borrowing did not "
             "earn its place",
-            _verdict(ablation["falsely_divergent_trials"] == 0),
-            f"{DOWNSTREAM} fires uncontained on "
-            f"{ablation['falsely_divergent_trials']:.0f} of {n} trials and never contained",
+            _measured(ablation["downstream_trials"], ablation["falsely_divergent_trials"] == 0),
+            containment_words,
         ),
         (
             f"sensitivity below {n} of {n} on the four broken steps",
-            _verdict(any(scored[name].fired_in < n for name in BROKEN)),
-            ", ".join(f"{name} {scored[name].fired_in} of {n}" for name in BROKEN),
+            _observed(bool(missed), not short),
+            sensitivity_words,
         ),
         (
             "any twin fired at all",
-            _verdict(any(scored[twin].fired_in for _, twin in PAIRS if twin in scored)),
-            f"{sum(scored[twin].fired_in for _, twin in PAIRS if twin in scored)} twin "
-            f"step-passes fired",
+            _observed(bool(twin_fires), twin_trials == len(PAIRS) * n),
+            twin_words,
         ),
         (
             f"the intermittent step reached neither {DIVERGENT} nor {STABLE_ON_THIS_INPUT} "
             f"in every trial",
-            _verdict(
-                scored[INTERMITTENT].statuses.get(DIVERGENT, 0)
-                + scored[INTERMITTENT].statuses.get(STABLE_ON_THIS_INPUT, 0)
-                < n
-            ),
-            _render(scored[INTERMITTENT].statuses),
+            _observed(reached < intermittent.trials, intermittent.trials == n),
+            f"{_render(intermittent.statuses)}, over {intermittent.trials} of {n} trials that "
+            f"compared it",
         ),
         (
             f"the whole eval took longer than {BUDGET_SECONDS / 60:.0f} minutes",
@@ -933,6 +1045,28 @@ def report_conditions(
 
 def _verdict(triggered: bool) -> str:
     return "TRIGGERED" if triggered else "not triggered"
+
+
+def _measured(counted: int, triggered: bool) -> str:
+    """The verdict, or NOT MEASURED where the count behind it came out at zero.
+
+    For the four conditions whose TRIGGERED state is itself a zero. Nothing
+    found and nothing looked at are the same number, and three of those four
+    conclude that a piece of this project is unnecessary.
+    """
+    return NOT_MEASURED if not counted else _verdict(triggered)
+
+
+def _observed(triggered: bool, complete: bool) -> str:
+    """The verdict for the three conditions whose TRIGGERED state is a positive finding.
+
+    A fire is evidence whatever else went unmeasured, so it wins over an
+    incomplete sample. The other direction does not: 10 of 10 cannot be claimed
+    off nine trials, so a short sample is NOT MEASURED rather than a pass.
+    """
+    if triggered:
+        return _verdict(True)
+    return _verdict(False) if complete else NOT_MEASURED
 
 
 def _bound_words(bounds: dict[str, float]) -> str:
@@ -984,8 +1118,6 @@ def main(argv: list[str] | None = None) -> int:
     for trial in trials:
         score(trial.reference, broken_scores)
         score(trial.twins, twin_scores)
-    scored = {**twin_scores, **broken_scores}
-
     report_sensitivity(broken_scores, len(trials))
     report_specificity(twin_scores, len(trials))
     report_twin_comparisons(trials)
@@ -998,7 +1130,7 @@ def main(argv: list[str] | None = None) -> int:
 
     seconds = time.perf_counter() - began
     checked = report_conditions(
-        trials, scored, naive, ablation, amplification, bounds, seconds
+        trials, broken_scores, twin_scores, naive, ablation, amplification, bounds, seconds
     )
     say(f"\n{args.trials} trials in {seconds:.0f}s, "
         f"median {statistics.median(t.seconds for t in trials):.0f}s each.")
