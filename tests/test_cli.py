@@ -195,3 +195,34 @@ def test_a_manual_tolerance_appears_in_the_header_so_a_reader_knows(tmp_path, ca
     main(["run", str(pipeline(tmp_path, TOLERABLE_DRIFT)), "--runs", "2",
           "--tolerance-ulps", "2", "--run-dir", str(tmp_path / "artifacts")])
     assert "--tolerance-ulps 2" in capsys.readouterr().out
+
+
+def test_no_key_spelling_can_delete_the_pre_registered_check(tmp_path, capsys):
+    """The defect this is here to stop coming back.
+
+    --key daily_revenue=day,revenue used to be accepted. It moved the float
+    into the key, where bit equality turned one ulp of reassociation into a
+    missing row and an extra row, the step reported no drift at all, and the
+    whole reassociation bound section went with it, including the headroom
+    figure that fails on nearly every pass. No warning anywhere.
+    """
+    where = pipeline(tmp_path, TOLERABLE_DRIFT)
+    main(["run", str(where), "--runs", "3", "--run-dir", str(tmp_path / "a")])
+    assert "pre-registered check" in capsys.readouterr().out
+
+    code = main(["run", str(where), "--runs", "3", "--key", "total=g,v",
+                 "--run-dir", str(tmp_path / "b")])
+    printed = capsys.readouterr()
+    assert code == 2
+    assert "v (DOUBLE)" in printed.err
+    assert "ROW_MISSING" not in printed.out
+
+
+def test_a_key_that_leaves_the_float_out_still_measures_it(tmp_path, capsys):
+    """The half of --key that is allowed, and the check survives it."""
+    code = main(["run", str(pipeline(tmp_path, TOLERABLE_DRIFT)), "--runs", "3",
+                 "--key", "total=g", "--run-dir", str(tmp_path / "artifacts")])
+    printed = capsys.readouterr().out
+    assert code == 1
+    assert "VALUE_DRIFT" in printed
+    assert "pre-registered check" in printed

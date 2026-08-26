@@ -177,6 +177,8 @@ Exit codes are 0 for nothing diverged, 1 for something diverged, 2 for bad input
 
 `--key artifact=col,col` matches rows of one artifact on a subset of its exact columns. The columns it leaves out stop deciding what makes a row a row and start being compared as values, which changes the class a difference gets without changing the difference. It is how you say that a surrogate key is not part of the answer.
 
+It refuses a float column, and the reason is worth stating because the flag looks harmless. Matching on a float joins with bit equality, so one ulp of reassociation comes back as a missing row plus an extra row, which no policy can downgrade. The step then reports no drift, and a step with no drift has no reassociation bound to print, so `--key daily_revenue=day,revenue` used to delete the whole bound section including the headroom figure that fails. A flag that quietly removes the tool's own falsifiable check is worse than no flag.
+
 One pass writes about 200 MB of Parquet under `.twicerun/`, which is gitignored. By default only the current run directory is kept, so the footprint stays at roughly 200 MB however many times you run it. `--keep 0` turns pruning off, and `rm -rf .twicerun` reclaims the lot.
 
 The tests run with no credentials and no network:

@@ -61,6 +61,10 @@ class UnknownKeyColumn(LookupError):
     """--key asked for a column the artifact does not have."""
 
 
+class FloatInKey(ValueError):
+    """--key tried to match rows on a float, which would be bit equality."""
+
+
 def classify(sql_type: str) -> Partition:
     kind = sql_type.strip().upper()
     # INTEGER[] is a list and INTEGER[3] a fixed-size array; both end in a bracket
@@ -110,10 +114,6 @@ class ColumnPlan:
         """
         return self.approx_values() + self.exact_values()
 
-    @property
-    def floats_in_key(self) -> tuple[str, ...]:
-        return tuple(c for c in self.key if self.partition[c] is Partition.APPROX)
-
     def float_width(self, column: str) -> int:
         """Bits in the IEEE-754 layout, which the ULP transform needs.
 
@@ -133,9 +133,15 @@ def plan(columns: Mapping[str, str], key_override: Sequence[str] | None = None) 
     unordered rows is an assignment problem, and matching the exact part first
     turns the assignment problem into a join.
 
-    Floats stay out of the key unless --key puts one there, because a float is
-    the wrong thing to match rows on: the join would use bit equality, which is
-    the comparison this whole module exists to avoid.
+    Floats stay out of the key and --key cannot put one there. Matching rows on
+    a float means joining on bit equality, which is the comparison this module
+    exists to replace, and the damage is not confined to one artifact: a float
+    moved into the key stops being measured as drift, so its last-bit
+    reassociation arrives as ROW_MISSING and ROW_EXTRA that no policy can
+    downgrade, the step reports no drift at all, and the whole reassociation
+    bound section drops out of the report along with the pre-registered check
+    that is allowed to fail in it. A flag that deletes a falsifiable claim is
+    worse than no flag.
     """
     where = {column: classify(kind) for column, kind in columns.items()}
     refused = [
@@ -153,12 +159,12 @@ def plan(columns: Mapping[str, str], key_override: Sequence[str] | None = None) 
     if key_override is None:
         key = tuple(c for c, partition in where.items() if partition is Partition.EXACT)
     else:
-        key = _checked_override(key_override, where)
+        key = _checked_override(key_override, where, columns)
     return ColumnPlan(types=dict(columns), partition=where, key=key)
 
 
 def _checked_override(
-    requested: Sequence[str], where: Mapping[str, Partition]
+    requested: Sequence[str], where: Mapping[str, Partition], types: Mapping[str, str]
 ) -> tuple[str, ...]:
     missing = [c for c in requested if c not in where]
     if missing:
@@ -166,7 +172,19 @@ def _checked_override(
             f"--key named {', '.join(missing)}, which is not in this artifact. "
             f"It has {', '.join(where)}"
         )
-    return tuple(dict.fromkeys(requested))
+    key = tuple(dict.fromkeys(requested))
+    floats = tuple(c for c in key if where[c] is Partition.APPROX)
+    if floats:
+        named = ", ".join(f"{c} ({types[c]})" for c in floats)
+        raise FloatInKey(
+            f"--key put {named} in the key, and a float cannot be matched on. The join "
+            f"would use bit equality, so one ulp of reassociation would come back as a "
+            f"missing row and an extra row rather than as drift, and the step would "
+            f"report no drift for the reassociation bound to be checked against. Leave "
+            f"it out of --key and it is compared as a value, which is where its size "
+            f"gets measured"
+        )
+    return key
 
 
 def clock_columns(columns: Mapping[str, str], among: Iterable[str]) -> tuple[str, ...]:

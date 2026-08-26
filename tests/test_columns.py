@@ -4,6 +4,7 @@ import pytest
 
 from twicerun.columns import (
     ColumnPlan,
+    FloatInKey,
     Partition,
     UnknownKeyColumn,
     UnsupportedColumn,
@@ -72,10 +73,17 @@ def test_key_override_pushes_the_other_exact_columns_into_the_value_side():
     assert made.approx_values() == ("revenue",)
 
 
-def test_key_override_can_put_a_float_in_the_key_and_it_is_visible():
-    """--key is an explicit override, so it is allowed, but the report says so."""
-    made = plan({"day": "INTEGER", "revenue": "DOUBLE"}, key_override=["day", "revenue"])
-    assert made.floats_in_key == ("revenue",)
+def test_key_override_cannot_put_a_float_in_the_key():
+    """It is not a preference. It would delete the tool's own falsifiable check.
+
+    A float in the key is matched with bit equality, so one ulp of
+    reassociation arrives as a missing row plus an extra row, the step reports
+    no drift, and the reassociation bound section including the pre-registered
+    headroom check drops out of the report with no warning anywhere.
+    """
+    with pytest.raises(FloatInKey) as raised:
+        plan({"day": "INTEGER", "revenue": "DOUBLE"}, key_override=["day", "revenue"])
+    assert "revenue (DOUBLE)" in str(raised.value)
 
 
 def test_key_override_naming_a_column_that_is_not_there_says_what_is():

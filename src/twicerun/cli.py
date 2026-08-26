@@ -5,7 +5,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from twicerun.columns import UnknownKeyColumn, UnsupportedColumn
+from twicerun.columns import FloatInKey, UnknownKeyColumn, UnsupportedColumn
 from twicerun.policy import REDUCTION_ORDER, STRICT, Policy
 from twicerun.runner import PipelineError, run_pipeline
 from twicerun.storage import MissingArtifact
@@ -80,7 +80,9 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="ARTIFACT=COL[,COL]",
         help="match rows of one artifact on these columns instead of on every exact column. "
         "Repeatable, once per artifact. The columns it leaves out stop being part of what "
-        "makes a row a row and start being compared as values",
+        "makes a row a row and start being compared as values. Float columns are refused: "
+        "matching on one means joining on bit equality, and it would take the step out of "
+        "the reassociation bound report entirely",
     )
     return parser
 
@@ -120,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
     except (PipelineError, MissingArtifact, KeySyntaxError) as exc:
         print(f"twicerun: {exc}", file=sys.stderr)
         return 2
-    except (UnsupportedColumn, UnknownKeyColumn) as exc:
+    except (UnsupportedColumn, UnknownKeyColumn, FloatInKey) as exc:
         # A column the oracle refuses is a fact about the pipeline's output,
         # not a crash, so it shares exit 2 with the other bad-input cases.
         print(f"twicerun: {exc}", file=sys.stderr)
