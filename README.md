@@ -14,33 +14,36 @@ contained  on, so runs 2 to 5 read run 1's artifacts and a divergence at one ste
 policy     strict, so any difference at all is a divergence
 duckdb     1.5.5, threads=10
 platform   macOS-26.5.2-arm64-arm-64bit
-artifacts  .twicerun/run-20260826-142450
+artifacts  .twicerun/run-20260826-170951
 retention  keeping 1 run directory
 
   0 generate_inputs         0 of 4  NO_DIVERGENCE_OBSERVED
   1 daily_revenue           4 of 4  DIVERGENT  VALUE_DRIFT  cause PARALLEL_ORDER
-      daily_revenue: 748 of 1,000 paired rows moved on revenue
-      furthest move over 4 comparisons: revenue, 6 ulp and 6.88e-16 relative
-      507275.3538700737 against 507275.35387007403
+      daily_revenue: 754 of 1,000 paired rows moved on revenue
+      furthest move over 4 comparisons: revenue, 5 ulp and 5.84e-16 relative
+      498492.76419699733 against 498492.76419699704
   2 customer_keys           4 of 4  DIVERGENT  ROW_MISSING ROW_EXTRA  cause PARALLEL_ORDER
-      customer_keys: 491,520 of 500,000 reference rows and 491,520 later rows found no partner
-      dropping surrogate_id from the key takes unmatched reference rows from 491,520 to 0
+      customer_keys: 398,160 of 500,000 reference rows and 398,160 later rows found no partner
+      dropping surrogate_id from the key takes unmatched reference rows from 398,160 to 0
       event_id does the same, so surrogate_id is named first because it is the one no input to this step carries
-  3 apply_price_updates     0 of 4  STABLE_ON_THIS_INPUT
+  3 apply_price_updates     2 of 4  DIVERGENT  ROW_MISSING ROW_EXTRA  cause PARALLEL_ORDER
+      prices: 25,856 of 125,000 reference rows and 25,856 later rows found no partner
+      dropping price_cents from the key takes unmatched reference rows from 25,856 to 0
   4 append_audit_log        4 of 4  DIVERGENT  MULTIPLICITY  cause PERSISTS_SINGLE_THREADED
       audit_log: 3,953 later rows found no partner, against 3,953 reference rows
   5 mean_basket             4 of 4  DIVERGENT  VALUE_DRIFT  cause PARALLEL_ORDER
-      mean_basket: 640 of 1,000 paired rows moved on mean_amount
-      furthest move over 4 comparisons: mean_amount, 4 ulp and 4.59e-16 relative
-      247.6771335188818 against 247.67713351888167
+      mean_basket: 618 of 1,000 paired rows moved on mean_amount
+      furthest move over 4 comparisons: mean_amount, 4 ulp and 4.63e-16 relative
+      245.65407878963194 against 245.65407878963205
   6 sparse_customer_keys    0 of 4  STABLE_ON_THIS_INPUT
   7 roll_up_keys            0 of 4  NO_DIVERGENCE_OBSERVED
 
 cause, from re-executing each divergent step 5 times at threads=1:
-  1 daily_revenue     PARALLEL_ORDER            4 of 4 at threads=10, 0 of 4 at threads=1
-  2 customer_keys     PARALLEL_ORDER            4 of 4 at threads=10, 0 of 4 at threads=1
-  4 append_audit_log  PERSISTS_SINGLE_THREADED  4 of 4 at threads=10, 4 of 4 at threads=1
-  5 mean_basket       PARALLEL_ORDER            4 of 4 at threads=10, 0 of 4 at threads=1
+  1 daily_revenue        PARALLEL_ORDER            4 of 4 at threads=10, 0 of 4 at threads=1
+  2 customer_keys        PARALLEL_ORDER            4 of 4 at threads=10, 0 of 4 at threads=1
+  3 apply_price_updates  PARALLEL_ORDER            2 of 4 at threads=10, 0 of 4 at threads=1
+  4 append_audit_log     PERSISTS_SINGLE_THREADED  4 of 4 at threads=10, 4 of 4 at threads=1
+  5 mean_basket          PARALLEL_ORDER            4 of 4 at threads=10, 0 of 4 at threads=1
 
   Both rates are out of 4, which is what lets them be read against each other.
   PARALLEL_ORDER means the step stopped diverging with one thread. That is 4 clean comparisons and no
@@ -51,19 +54,15 @@ cause, from re-executing each divergent step 5 times at threads=1:
   than guessing between a clock read, a data-dependent branch, appended state and something
   outside the pipeline.
 
-amplification, 3 runs per amplifier on the 4 steps that never fired:
+amplification, 3 runs per amplifier on the 3 steps that never fired:
   0 generate_inputs
       tie collapse        not run: this step reads no artifact, so there is no input to substitute
       thread count        0 of 2, threads raised to 20 from the 10 in the loop above
       row multiplication  not run: this step reads no artifact, so there is no input to substitute
-  3 apply_price_updates
-      tie collapse        0 of 2, price_updates.sku into 400 buckets, from 2 to 500 rows per value
-      thread count        4 of 4, threads raised to 20 from the 10 in the loop above
-      row multiplication  0 of 2, price_updates 200,000 rows to 400,000
   6 sparse_customer_keys
       tie collapse        4 of 4, sparse_customers.cust into 1,000 buckets, from 2 to 500 rows per value
-      thread count        2 of 4, threads raised to 20 from the 10 in the loop above
-      row multiplication  1 of 4, sparse_customers 500,000 rows to 1,000,000
+      thread count        3 of 4, threads raised to 20 from the 10 in the loop above
+      row multiplication  4 of 4, sparse_customers 500,000 rows to 1,000,000
   7 roll_up_keys
       tie collapse        0 of 2, customer_keys.surrogate_id into 1,000 buckets, from 1 to 500 rows per value
       thread count        0 of 2, threads raised to 20 from the 10 in the loop above
@@ -73,54 +72,51 @@ amplification, 3 runs per amplifier on the 4 steps that never fired:
   it, and every value it substitutes is another real value from the same column. Anything that
   fires here is re-run at 5 runs so its rate can be read against the one above it.
 
-STABLE_ON_THIS_INPUT on 3 apply_price_updates, 6 sparse_customer_keys. Each of those gave the same
-answer 4 times out of 4 on the input this pipeline was handed, and stopped giving the same answer
-once that input was stressed:
-  3 apply_price_updates: 4 of 4 under thread count
-  6 sparse_customer_keys: 4 of 4 under tie collapse, 2 of 4 under thread count, 1 of 4 under row multiplication
+STABLE_ON_THIS_INPUT on 6 sparse_customer_keys. Each of those gave the same answer on 4
+comparisons against the input this pipeline was handed, and stopped giving the same answer once
+that input was stressed:
+  6 sparse_customer_keys: 4 of 4 under tie collapse, 3 of 4 under thread count, 4 of 4 under row multiplication
   That is the case a plain 5-run loop reports as a clean zero, which is the case this tool exists
   for. It is not a milder DIVERGENT, and it is not this tool saying the step is fine. It says the
   step did not fire under these particular stresses, the ones named above, and nothing beyond
   that.
 
-NO_DIVERGENCE_OBSERVED on 0 generate_inputs, 7 roll_up_keys. It is a fire rate and two lists, and
-it is not a verdict about the code.
-  0 of 4 on the real input, and 0 of 2 under each amplifier that ran. 4 clean comparisons rule out
-  a per-comparison divergence probability above 53 percent, 95 percent one-sided. An amplifier's 2
-  rule out one above 78 percent. That assumes an independence these runs do not have, since they
-  share a process, a page cache and a machine.
-  0 generate_inputs
-      varied: how many times the pipeline ran, thread count
-      not varied: tie collapse (this step reads no artifact, so there is no input to substitute),
-      row multiplication (this step reads no artifact, so there is no input to substitute)
-  7 roll_up_keys
-      varied: how many times the pipeline ran, tie collapse, thread count, row multiplication
-  Not varied anywhere: input distribution beyond what the amplifiers above changed, memory limit
-  and spill behaviour, DuckDB version, wall clock, filesystem.
+NO_DIVERGENCE_OBSERVED on 0 generate_inputs, 7 roll_up_keys. A fire rate and two lists, not a
+verdict about the code. 4 clean comparisons rule out a per-comparison divergence probability above
+53 percent, and 2 rule out one above 78 percent, 95 percent one-sided.
+  0 generate_inputs  varied: run repetition 0 of 4, thread count 0 of 2. Not varied: tie collapse,
+                     row multiplication, see the table above
+  7 roll_up_keys     varied: run repetition 0 of 4, tie collapse 0 of 2, thread count 0 of 2, row
+                     multiplication 0 of 2
 
 reassociation bound, computed rather than picked:
   1,000x of headroom was fixed before any of this was written and has not moved since.
   Below is that one check at two choices of n. The first is the count the spec settled on and carries a
-  factor of the output row count in slack. The second is the terms behind one output value, has no slack
-  in it, so it is normally the one that fails: it cleared on 1 of 40 step-passes here, at 1,229x. Both
-  print so the slack is visible rather than described.
+  factor of the output row count in slack. The second is the terms behind one output value and has none,
+  so it is normally the one that fails. On this run it cleared on 0 of 2 float steps. Both print
+  so the slack is visible rather than described.
   1 daily_revenue
-      observed furthest relative drift 6.8847e-16
-      n = 2,000,000 rows read by the step, bound 4.4409e-10, headroom 645,034x  CLEARS
-      n = 2,000 terms per output row, bound 4.4409e-13, headroom 645x  FAILS
+      observed furthest relative drift 5.8384e-16
+      n = 2,000,000 rows read by the step, bound 4.4409e-10, headroom 760,640x  CLEARS
+      n = 2,000 terms per output row, bound 4.4409e-13, headroom 761x  FAILS
   5 mean_basket
-      observed furthest relative drift 4.5901e-16
-      n = 2,000,000 rows read by the step, bound 4.4409e-10, headroom 967,489x  CLEARS
-      n = 2,000 terms per output row, bound 4.4409e-13, headroom 967x  FAILS
+      observed furthest relative drift 4.6279e-16
+      n = 2,000,000 rows read by the step, bound 4.4409e-10, headroom 959,586x  CLEARS
+      n = 2,000 terms per output row, bound 4.4409e-13, headroom 960x  FAILS
 
-4 of 8 steps diverged in 13.4s.
+5 of 8 steps diverged in 13.4s.
+
+Nothing above varied any of these, whatever status it carries: input distribution beyond what the
+amplifiers above changed, memory limit and spill behaviour, DuckDB version, wall clock,
+filesystem. Every bound above assumes an independence these runs do not have, since they share a
+process, a page cache and a machine.
 ```
 
-Step 5 is a correct float average. All 640 of those findings are the arithmetic behaving normally, and `--policy reduction-order` is the opt-in that says so.
+Step 5 is a correct float average. All 618 of those findings are the arithmetic behaving normally, and `--policy reduction-order` is the opt-in that says so.
 
 Step 4 is the one to read twice. `cause PERSISTS_SINGLE_THREADED` next to `4 of 4 at threads=1` is the tool saying the thread count is not the problem, on the one bug in the file that a rerun causes rather than parallelism.
 
-Steps 3 and 6 are the ones to read three times. Both are broken, both gave the same answer four times out of four on the input they were handed, and a five-run loop that stopped there would have printed two clean zeros. `STABLE_ON_THIS_INPUT` is what the tool prints instead, and the amplification block says which stress made each of them disagree with itself: tie collapse for one, a raised thread count for the other.
+Step 6 is the one to read three times. It is broken, it gave the same answer four times out of four on the input it was handed, and a five-run loop that stopped there would have printed a clean zero. `STABLE_ON_THIS_INPUT` is what the tool prints instead, and the amplification block above it names the stress that made it disagree with itself. Step 3 does the same thing on other passes; on this one the loop caught it at 2 of 4.
 
 **Your numbers will not match that transcript, and neither will mine on the next run.** This is a tool about non-determinism and its own output is non-deterministic, so quoting any single figure as fixed would be the wrong thing to do twice over.
 
@@ -257,7 +253,7 @@ NULLs needed a special case rather than falling out of that. `hash(NULL)` is an 
 
 **Each amplifier is built so that the bug's own fix survives it.** Tie collapse leaves the most distinct column alone, which is exactly what `ORDER BY cust, event_id` needs to stay decided. Row multiplication does not trouble a `CREATE OR REPLACE TABLE`, and a `MERGE` over a deduplicated source gives the same answer on twice the rows. An amplifier that made correct code fail would be measuring its own violence and the tool would be worthless.
 
-That is checkable rather than assertable, because `pipelines/twins.py` is the one-line fix for every bug in the reference pipeline. Exit 1 or 4 there means the amplifiers are broken, not the twins:
+That is checkable rather than assertable, because `pipelines/twins.py` is the one-line fix for every bug in the reference pipeline. Any non-zero exit there means the amplifiers are broken, not the twins:
 
 ```bash
 uv run twicerun run pipelines/twins.py
@@ -300,7 +296,7 @@ It points the amplifiers at that one step every pass. There is no flag for it, d
 
 **On all 7 of the passes where the five-run loop reported nothing, at least one amplifier fired**, and on all 7 that included tie collapse. That is the gap the feature exists to close, measured rather than argued: a step that is definitely broken, a loop that says nothing about it roughly one pass in six, and a per-comparison rate that goes from 0.54 to 0.96 when the input is stressed.
 
-The thread-count amplifier was the one I expected to find nothing. This machine already runs DuckDB at 10 threads, and the float aggregate is flat from 4 threads upward, so doubling to 20 looked like a second look at the same thing. It is not: it fires on the surrogate-key step 63 percent of the time, and it is the amplifier that catches the `MERGE` bug when the main loop misses it. The transcript at the top of this file is one of those passes, `3 apply_price_updates  0 of 4  STABLE_ON_THIS_INPUT` with `4 of 4 under thread count` underneath.
+The thread-count amplifier was the one I expected to find nothing. This machine already runs DuckDB at 10 threads, and the float aggregate is flat from 4 threads upward, so doubling to 20 looked like a second look at the same thing. It is not: it fires on the surrogate-key step 63 percent of the time, and on the passes where `apply_price_updates` comes back quiet it is the amplifier that catches the `MERGE` bug, at `4 of 4` where the other two report nothing. That step's own input has no repeated key to collapse and duplicating its rows does not create one the merge can trip over, so thread count is the only one of the three with anything to say about it.
 
 ### The four statuses
 
@@ -499,6 +495,7 @@ uv run twicerun run pipelines/twins.py                           # the fixed pip
 | 2 | bad input, including a column the oracle refuses to compare and a `--key` naming a column that is not there |
 | 3 | the run or the judge crashed |
 | 4 | a step diverged only under an amplifier |
+| 5 | an amplifier raised, so the check that would have tightened a zero did not run |
 
 1 means divergence on your data and only that, so a release gate keyed on it does not also trip on a broken pipeline, and a comparison downgraded to `TOLERATED` does not set it.
 
@@ -506,7 +503,7 @@ uv run twicerun run pipelines/twins.py                           # the fixed pip
 
 Both are non-zero, so `set -e` and `run || fail` behave as they did. A gate that wants real-data divergence only asks for `== 1`. There is deliberately no flag to choose between them: a flag that lets a gate pick its exit code is a flag that lets a gate turn a finding green, and `--key` and `--tolerance` have each already done a version of that here.
 
-`AMPLIFICATION_FAILED` sets neither 1 nor 4. Nothing there was seen giving two answers: an amplified input made the step raise, which is a fact about the pipeline, is printed loudly, and is not a divergence.
+**5 is the same argument one step further, and it took a second pass to see.** The first version had `AMPLIFICATION_FAILED` at 0, on the grounds that nothing there was seen giving two answers. That is true and it is not the question. Exit 0 was then carrying two meanings at once: "I checked and found nothing", and "the check that would have made that meaningful did not run". Those are further apart than 1 and 4 are, because this one is silent. A step sitting at `0 of 4` on real data leaves a 53 percent upper bound, amplification is the only thing here that tightens it, and an amplifier that raised leaves the weak bound with no signal at all. So it gets its own code, below 4, because a divergence you can reproduce is worth more than a check that did not happen.
 
 `twicerun judge <run directory>` re-scores a saved run under a different policy without executing anything, which is how the paragraph above is checkable rather than assertable. It takes several directories and judges the newest, saying which on stderr, because the glob above matches one only while retention is 1 and `--keep 0` is a documented flag. It refuses a manifest whose artifacts retention has already dropped rather than reporting on files that are not there.
 
@@ -543,7 +540,9 @@ uv run ruff check .
 uv run python scripts/check_fingerprint.py
 ```
 
-CI runs all three and so does the pre-commit hook, so a change that passes only the first will fail on push. `check_fingerprint.py` reads `BANNED.md` and refuses the writing tells listed there.
+CI runs all three. The pre-commit hook runs the second and third, not the tests, because a suite that takes twenty seconds on every commit gets disabled within a day. So a change that passes locally and skips the hook can still fail on push, and the hook is the cheap half rather than the whole gate.
+
+The hook resolves both tools out of `.venv/bin` and refuses to commit if ruff is missing rather than skipping it. That is not fussiness: it used `command -v ruff`, which on a machine following this README finds nothing at all, because `uv sync` does not put ruff on `PATH`. It skipped silently and let three lint errors through. Where `PATH` did have a ruff it was an unrelated 0.12.0 against the 0.16.4 pinned here, so the hook was running a different linter from CI and never said which. It prints its version now.
 
 If you pipe that into anything, check `PIPESTATUS` or redirect instead. `uv run pytest | tail -5` reports the exit code of `tail`, which is 0 whatever pytest did, and twice during this build a slice was committed against a suite whose failure had been swallowed exactly that way. `uv run pytest >/dev/null 2>&1; echo $?` is what the pre-commit hook and CI effectively do.
 
