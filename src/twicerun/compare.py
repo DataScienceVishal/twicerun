@@ -1,17 +1,19 @@
-"""Bit-exact multiset comparison of two artifacts.
+"""Bit-exact multiset comparison of two artifacts. The naive baseline, kept on purpose.
 
-Row order is not part of a pipeline's answer. DuckDB will hand back the same
-group-by in a different order between two runs and nothing is wrong, so the
-comparison is over multisets: hash each row into a canonical digest, count the
-digests on both sides, and report how many rows one side has that the other
-does not.
+This is what almost anyone would write first, and it is what the first version
+of this project's spec proposed. Row order is not part of a pipeline's answer,
+so it hashes each row into a canonical digest, counts the digests on both sides,
+and reports how many rows one side has that the other does not.
 
-Bit-exact is the whole method here and it is knowingly the wrong answer for
-floats. `sum()` over a DOUBLE column reassociates under parallelism and comes
-back different in the last bits, so this comparison reports hundreds of
-differences on arithmetic that is not wrong. Slice 2 replaces the float half of
-this with a typed oracle. The count it reports first is the number that
-justifies building one.
+`oracle.py` replaced it as the tool's comparison in slice 2. It stays because
+the number it produces is the argument for the replacement: bit-exact is
+knowingly the wrong answer for a float, so `sum()` over a DOUBLE column that
+reassociates under parallelism arrives here as several hundred differing rows on
+arithmetic that is not wrong. Slice 5's eval runs it as baseline 1 and publishes
+that count next to the oracle's.
+
+The equivalent raw-DuckDB measurement is in `scripts/measure_duckdb.py`, so the
+claim can be checked in about two seconds without going through this code at all.
 """
 
 from __future__ import annotations

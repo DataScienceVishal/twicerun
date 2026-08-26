@@ -4,20 +4,33 @@ Every DuckDB number this project reports depends on the version and the thread
 count, so both are recorded next to the artifacts rather than left to whoever
 reads the report to remember.
 
-`StepRecord.rows_read` is here for slice 2's reassociation bound, which is a
-function of the term count, and the storage interface is the only thing that
-sees it. Two things about it are worth stating before slice 2 leans on it.
+`StepRecord.rows_read` feeds the reassociation bound in `policy.py`, which is a
+function of the term count. Slice 1 recorded it and flagged two limits; slice 2
+is the consumer and had to decide what to do about them. It kept the number as
+it is, and here is what that costs in each direction.
 
-It is a lower bound, not a count of rows scanned. Only `ctx.read` and
+It is a lower bound on rows scanned, not a count of them. Only `ctx.read` and
 `ctx.state` add to it, so anything a step pulls in through `ctx.sql` is
 invisible: `apply_price_updates` records 300,000 while its two CREATE TABLE AS
-statements scan at least 300,000 more.
+statements scan at least 300,000 more. That makes n too small, the bound too
+tight, and the tool report a difference reassociation could in fact explain. A
+false positive, which is the direction to err in.
 
-And "brought into scope" is not "scanned" even where it is counted.
-`daily_revenue` records 2,000,000 for a step whose query reads `orders` once,
-and would record the same 2,000,000 if the query read it twice. The bound needs
-terms per aggregate, which is a narrower quantity than either. Slice 2 has to
-derive that rather than assume this field already is it.
+And "brought into scope" is not "terms behind one output value", which is what
+the bound actually wants. `daily_revenue` records 2,000,000 for a step whose
+1,000 output rows each sum about 2,000 terms, so n is too large by roughly the
+output row count, the bound too loose, and a difference reassociation cannot
+explain could be tolerated. That is the unsafe direction and for a group-by it
+dominates the other one.
+
+Getting the quantity the bound wants needs the query plan, which is out of
+scope. Deriving it as rows_read divided by the output row count is only correct
+for a single-input aggregate over equal-sized groups. So the number stays as it
+is and every report prints what the headroom would be at the narrower count, so
+the slack is visible rather than described.
+
+`StepRecord.input_columns` is the other consumer: leave-one-out attribution uses
+it to tell a column the step invented from one it copied in.
 """
 
 from __future__ import annotations
