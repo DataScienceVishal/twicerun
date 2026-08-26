@@ -60,6 +60,12 @@ def test_nothing_in_the_report_claims_a_step_is_deterministic(tmp_path, capsys):
         assert forbidden not in printed
 
 
+def test_the_header_does_not_say_one_comparisons(tmp_path, capsys):
+    main(["run", str(pipeline(tmp_path, CLEAN)), "--runs", "2",
+          "--run-dir", str(tmp_path / "artifacts")])
+    assert "so 1 comparison per step" in capsys.readouterr().out
+
+
 def test_a_crashing_step_exits_three_not_one(tmp_path, capsys):
     """1 has to mean divergence and nothing else, or a gate cannot trust it."""
     body = (

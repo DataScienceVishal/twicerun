@@ -36,6 +36,10 @@ class StepVerdict:
             self.worst = loudest
 
 
+def _plural(n: int) -> str:
+    return f"{n} comparison" if n == 1 else f"{n} comparisons"
+
+
 def _rank(diff: ArtifactDiff) -> tuple[bool, int]:
     """How interesting a diff is, given only one of them gets printed.
 
@@ -62,12 +66,13 @@ class Report:
         env = self.environment
         header = [
             f"pipeline   {self.pipeline}",
-            f"runs       {self.runs}, run 1 is the reference, "
-            f"so {self.runs - 1} comparisons per step",
+            f"runs       {self.runs}, run 1 is the reference, so {_plural(self.runs - 1)} "
+            f"per step",
             f"duckdb     {env.duckdb_version}, threads={env.threads}",
             f"platform   {env.platform}",
             f"artifacts  {self.run_dir}",
-            f"retention  keeping {self.keep} run director(ies)"
+            f"retention  keeping {self.keep} run "
+            + ("directory" if self.keep == 1 else "directories")
             + (f", dropped {self.pruned}" if self.pruned else ""),
             "",
         ]
