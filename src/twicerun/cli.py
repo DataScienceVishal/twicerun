@@ -24,10 +24,16 @@ def _judge(args: argparse.Namespace) -> int:
     the claim that a policy cannot move a measured number was left resting on a
     unit test. Judging one saved run twice puts it in front of a reader.
     """
-    where = args.manifest / "manifest.json" if args.manifest.is_dir() else args.manifest
+    given = _newest(args.manifest)
+    where = given / "manifest.json" if given.is_dir() else given
     if not where.is_file():
         print(f"twicerun: no manifest at {where}", file=sys.stderr)
         return 2
+    if len(args.manifest) > 1:
+        print(
+            f"twicerun: {len(args.manifest)} run directories given, judging the newest, {given}",
+            file=sys.stderr,
+        )
     try:
         report = rejudge(where, _policy_from(args), parse_keys(args.key))
     except (PipelineError, MissingArtifact, KeySyntaxError) as exc:
@@ -39,6 +45,18 @@ def _judge(args: argparse.Namespace) -> int:
 
     print(report.render())
     return 1 if any(verdict.fired for verdict in report.verdicts) else 0
+
+
+def _newest(given: list[Path]) -> Path:
+    """The most recently written of what the shell handed over.
+
+    The README documents `judge .twicerun/run-*`, and that glob matches one
+    directory only while retention is 1. Two paragraphs later the README
+    suggests --keep 0. The second directory then turned the documented command
+    into a bare argparse usage message that never mentioned run directories at
+    all.
+    """
+    return max(given, key=lambda p: p.stat().st_mtime if p.exists() else 0)
 
 
 def _policy_from(args: argparse.Namespace) -> Policy:
@@ -100,7 +118,10 @@ def build_parser() -> argparse.ArgumentParser:
     judge.add_argument(
         "manifest",
         type=Path,
-        help="a manifest.json written by a previous run, or the run directory holding one",
+        nargs="+",
+        help="a manifest.json written by a previous run, or the run directory holding one. "
+        "Several are accepted so that a shell glob works under --keep 0, and the newest of "
+        "them is judged",
     )
     _policy_flags(judge)
     return parser

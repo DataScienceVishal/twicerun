@@ -279,13 +279,13 @@ uv sync --all-extras
 ./scripts/install-hooks.sh
 
 uv run twicerun run pipelines/reference.py
-uv run twicerun judge .twicerun/run-* --policy reduction-order
+uv run twicerun judge .twicerun/run-* --policy reduction-order   # newest, if the glob matches several
 uv run twicerun run pipelines/reference.py --no-containment
 ```
 
 Exit codes are 0 for nothing diverged, 1 for something diverged, 2 for bad input and 3 for a crash. 2 covers a column the oracle refuses to compare and a `--key` naming a column that is not there, because both are facts about the pipeline's output rather than crashes. 1 means divergence and only divergence, so a release gate keyed on it does not also trip on a broken pipeline. A comparison downgraded to `TOLERATED` does not set it.
 
-`twicerun judge <run directory>` re-scores a saved run under a different policy without executing anything, which is how the paragraph above is checkable rather than assertable. It refuses a manifest whose artifacts retention has already dropped rather than reporting on files that are not there.
+`twicerun judge <run directory>` re-scores a saved run under a different policy without executing anything, which is how the paragraph above is checkable rather than assertable. It takes several directories and judges the newest, saying which on stderr, because the glob above matches one only while retention is 1 and `--keep 0` is a documented flag. It refuses a manifest whose artifacts retention has already dropped rather than reporting on files that are not there.
 
 `--key artifact=col,col` matches rows of one artifact on a subset of its exact columns. The columns it leaves out stop deciding what makes a row a row and start being compared as values, which changes the class a difference gets without changing the difference. It is how you say that a surrogate key is not part of the answer.
 

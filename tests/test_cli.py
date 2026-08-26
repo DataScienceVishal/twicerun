@@ -448,6 +448,29 @@ def test_judge_does_not_print_figures_that_are_not_true_of_the_run(tmp_path, cap
     assert "steps diverged." in printed_by_judge
 
 
+def test_judge_takes_a_glob_that_matched_more_than_one_run(tmp_path, capsys):
+    """The documented command against the state the documented flag creates.
+
+    `judge .twicerun/run-*` works only while retention is 1, and the README
+    suggests --keep 0 two paragraphs later. With two directories the shell
+    passed both and argparse answered with a usage message that never mentioned
+    run directories.
+    """
+    where = pipeline(tmp_path, TOLERABLE_DRIFT)
+    parent = tmp_path / "rd"
+    for _ in range(2):
+        main(["run", str(where), "--runs", "2", "--keep", "0", "--run-dir", str(parent)])
+    matched = sorted(parent.glob("run-*"))
+    assert len(matched) == 2
+    capsys.readouterr()
+
+    assert main(["judge", *[str(p) for p in matched]]) == 1
+    printed = capsys.readouterr()
+    newest = max(matched, key=lambda p: p.stat().st_mtime)
+    assert "judging the newest" in printed.err
+    assert str(newest) in printed.out
+
+
 def test_judge_works_from_a_different_directory_than_the_run(tmp_path, monkeypatch):
     """--run-dir defaults to a relative path and a manifest outlives one cwd.
 
