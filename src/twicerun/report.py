@@ -48,6 +48,7 @@ class Report:
     seconds: float
     policy: Policy = field(default_factory=Policy)
     contained: bool = True
+    bisect_error: str | None = None
     pruned: int = 0
     keep: int = 1
 
@@ -143,6 +144,20 @@ class Report:
         read.
         """
         bisected = [s for s in self.steps if s.cause is not None]
+        if self.bisect_error:
+            # Printed as it was raised, wrapping and all, because an edited
+            # error message is a worse thing to hand someone than an untidy one.
+            raised = [f"  {line}" for line in self.bisect_error.splitlines()]
+            return [
+                "",
+                "cause: the bisect did not run, so no step has one.",
+                *raised,
+                f"  The {self.runs} runs above completed and their comparison is unaffected. A "
+                f"step often cannot be",
+                "  re-executed on its own because a step the bisect skips created the table it "
+                "reads through",
+                "  ctx.sql, which no artifact holds.",
+            ]
         if not bisected:
             return []
         comparisons = bisected[0].bisect.comparisons

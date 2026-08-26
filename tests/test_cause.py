@@ -205,6 +205,49 @@ def test_the_bisect_really_runs_at_one_thread(tmp_path):
     assert stamped == {1}
 
 
+# `build` never diverges, so the bisect skips it, and the table it left in the
+# connection is not an artifact anything can resolve.
+SCRATCH_TABLE_FROM_A_SKIPPED_STEP = '''
+CALLS = {"n": 0}
+
+
+def build(ctx):
+    ctx.sql("CREATE TABLE scratch AS SELECT 1 AS i")
+    ctx.write("built", "SELECT * FROM scratch")
+
+
+def uses(ctx):
+    CALLS["n"] += 1
+    ctx.write("out", f"SELECT i + {CALLS['n']} AS i FROM scratch")
+
+
+STEPS = [build, uses]
+'''
+
+
+def test_a_bisect_that_cannot_run_keeps_the_measurement_it_was_diagnosing(tmp_path):
+    """Five completed runs must survive a diagnostic that failed after them.
+
+    This used to raise out of run_pipeline before manifest.save(), so the
+    command exited 3 with no report and no manifest, and judge could not
+    recover it either. The measurement was finished and correct at that point.
+    """
+    report, manifest = run_pipeline(
+        write_pipeline(tmp_path, SCRATCH_TABLE_FROM_A_SKIPPED_STEP),
+        runs=5,
+        parent=tmp_path / "artifacts",
+    )
+    assert report.steps[1].fired == 4
+    assert report.steps[1].cause is None
+    assert manifest.bisect == []
+    assert "does not exist" in manifest.bisect_error
+    assert (manifest.root / "manifest.json").is_file()
+
+    printed = report.render()
+    assert "the bisect did not run, so no step has one" in printed
+    assert "their comparison is unaffected" in printed
+
+
 def test_the_report_prints_both_rates_and_what_the_zero_is_worth(tmp_path):
     report, _ = run_pipeline(
         write_pipeline(tmp_path, SETTLES_DOWN), runs=5, parent=tmp_path / "artifacts"

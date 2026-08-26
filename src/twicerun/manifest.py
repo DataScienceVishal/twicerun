@@ -117,6 +117,10 @@ class Manifest:
     # that rate from the artifacts through the same comparison code the run
     # used instead of trusting a number this file could have got wrong.
     bisect: list[RunRecord] = field(default_factory=list)
+    # What stopped the bisect, where something did. It is kept because a run
+    # whose bisect failed is not a run whose steps have no cause, and judging
+    # the saved manifest later has no other way to tell those apart.
+    bisect_error: str | None = None
 
     def save(self) -> Path:
         where = self.root / "manifest.json"
@@ -146,6 +150,7 @@ class Manifest:
             started=body["started"],
             runs=[_run_record(run) for run in body["runs"]],
             bisect=[_run_record(run) for run in body.get("bisect", [])],
+            bisect_error=body.get("bisect_error"),
         )
 
 

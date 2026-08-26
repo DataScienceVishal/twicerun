@@ -191,10 +191,17 @@ def execute_run(
     so does every run under --no-containment.
 
     `only` and `threads` are the bisect's. Executing one step out of the middle
-    of a pipeline works for the same reason containment works: whatever the
-    skipped steps would have written is already on disk under run 1. Each run
-    gets its own in-memory database, so setting threads here changes this
-    execution and nothing else.
+    of a pipeline works for reads that go through `ctx.read` and `ctx.state`,
+    because those resolve against run 1's artifacts and a skipped step's output
+    is already on disk. It does not work for anything a skipped step left in
+    the connection through `ctx.sql`: each run gets its own in-memory database,
+    so a table another step created with CREATE TABLE is not there and a step
+    depending on one will raise. `bisect_runs` is called in a way that survives
+    that, because the bisect is downstream of an answer that is already
+    complete.
+
+    Setting threads here changes this execution and nothing else, for the same
+    reason: the database is this run's.
     """
     con = duckdb.connect()
     if threads is not None:
@@ -449,6 +456,7 @@ def rejudge(
         seconds=sum(run.seconds for run in manifest.runs),
         policy=policy,
         contained=manifest.contained,
+        bisect_error=manifest.bisect_error,
         keep=0,
     )
 
@@ -498,13 +506,24 @@ def run_pipeline(
             carried = reference_written if contained else written
 
         measured = measure(manifest, keys or {})
+        # Which steps get bisected comes off the measured fire rate rather than
+        # off the verdict, so the same pipeline under two policies re-executes
+        # the same steps and produces the same artifacts.
         divergent = [step.index for step in measured if step.fired]
         if divergent:
-            # Which steps get bisected comes off the measured fire rate rather
-            # than off the verdict, so the same pipeline under two policies
-            # re-executes the same steps and produces the same artifacts.
-            manifest.bisect = bisect_runs(steps, reference, divergent, run_dir, runs)
-            attach_bisect(manifest, measured, keys or {})
+            try:
+                manifest.bisect = bisect_runs(steps, reference, divergent, run_dir, runs)
+            except Exception as exc:  # noqa: BLE001
+                # The second and last blanket catch in this codebase, and it is
+                # here because the bisect is downstream of an answer that is
+                # already complete. A step that re-executes badly on its own,
+                # most often because a skipped step created the table it reads
+                # through ctx.sql, used to take five finished runs and their
+                # manifest with it and report the whole thing as exit 3.
+                # Nothing is swallowed: the report says the bisect did not run
+                # and prints what raised.
+                manifest.bisect_error = f"{type(exc).__name__}: {exc}".strip()
+        attach_bisect(manifest, measured, keys or {})
         manifest.save()
         report = Report(
             pipeline=str(pipeline),
@@ -515,6 +534,7 @@ def run_pipeline(
             seconds=time.perf_counter() - began,
             policy=policy or Policy(),
             contained=contained,
+            bisect_error=manifest.bisect_error,
             pruned=len(dropped),
             keep=keep,
         )
