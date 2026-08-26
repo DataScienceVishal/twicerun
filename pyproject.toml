@@ -39,4 +39,7 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+# BLE is here so the three deliberate blanket catches have to keep saying so.
+# The noqa comments on them predated it and were inert, which meant a fourth
+# could have arrived without anyone noticing.
+select = ["E", "F", "I", "UP", "B", "BLE", "SIM"]

@@ -8,12 +8,16 @@ from pathlib import Path
 from twicerun.amplify import STABLE_ON_THIS_INPUT
 from twicerun.columns import FloatInKey, UnknownKeyColumn, UnsupportedColumn
 from twicerun.policy import REDUCTION_ORDER, STRICT, Policy
+from twicerun.report import Report
 from twicerun.runner import PipelineError, UnknownArtifact, rejudge, run_pipeline
 from twicerun.storage import MissingArtifact
 
 
 class KeySyntaxError(ValueError):
     """--key was not spelled artifact=column."""
+
+
+_CRASHED = "twicerun: that crashed. Exit 3 is a crash, not a divergence."
 
 
 def _judge(args: argparse.Namespace) -> int:
@@ -48,28 +52,38 @@ def _judge(args: argparse.Namespace) -> int:
     return _exit_code(report)
 
 
-def _exit_code(report) -> int:
-    """1 when the tool watched a step give two different answers, and only then.
+def _exit_code(report: Report) -> int:
+    """1 for divergence on the real input, 4 for divergence only under an amplifier.
 
-    Under the default policy that includes the benign float drift, which is the
+    Under the default policy the 1 includes the benign float drift, which is the
     answer strict is supposed to give rather than a bug in it, and a comparison
     downgraded to TOLERATED does not set it.
 
-    STABLE_ON_THIS_INPUT sets it too, and that is the one worth arguing about. It
-    means the step agreed with itself on the input the pipeline was handed and
-    stopped agreeing once that input was stressed, so the step's own data did not
-    reproduce the failure while the step is still not reproducible. A tool whose
-    argument is that a green five-run loop lies about exactly this case cannot
-    then go green on it itself.
+    STABLE_ON_THIS_INPUT gets a code of its own rather than sharing either of
+    the others, and that took three attempts. Zero is disqualifying: this tool's
+    argument is that a green five-run loop lies about exactly that step, so
+    going green on it rebuilds the failure at the one channel a machine reads.
+    Folding it into 1 is wrong for the reason everything else here is split in
+    two. Measurement is kept apart from policy, PARALLEL_ORDER from
+    PERSISTS_SINGLE_THREADED, the derived bound from a user's threshold, `ran`
+    from `measured`, varied from not varied. "Your pipeline gave two answers on
+    your data" and "your pipeline gave two answers on an input we fabricated"
+    are different claims with different urgency, and this is where they would
+    have been collapsed into one integer.
 
-    AMPLIFICATION_FAILED does not set it. Nothing there was seen giving two
+    Both are non-zero, so a gate that trips on any failure is unaffected, and a
+    gate that wants real-data divergence only asks for 1. There is deliberately
+    no flag to choose between them: a flag that lets a gate pick its exit code
+    is a flag that lets a gate turn a finding green, which --key and --tolerance
+    have each already done a version of here.
+
+    AMPLIFICATION_FAILED sets neither. Nothing there was seen giving two
     answers: an amplified input made the step raise, which is a fact about the
-    pipeline and is printed loudly, but it is not a divergence and 1 has to keep
-    meaning one thing.
+    pipeline, is printed loudly, and is not a divergence.
     """
     if any(verdict.fired for verdict in report.verdicts):
         return 1
-    return 1 if any(step.status == STABLE_ON_THIS_INPUT for step in report.steps) else 0
+    return 4 if any(step.status == STABLE_ON_THIS_INPUT for step in report.steps) else 0
 
 
 def _newest(given: list[Path]) -> Path:
@@ -97,11 +111,13 @@ def build_parser() -> argparse.ArgumentParser:
         prog="twicerun",
         description="Run a pipeline several times on the same input and report, "
         "per step, how often it failed to give the same answer.",
-        epilog="Exit codes: 0 nothing diverged, 1 something diverged, "
-        "2 bad input, 3 the run crashed. 1 means only divergence, so a release "
-        "gate keyed on it does not also trip on a broken pipeline. A step that "
-        "diverged only under an amplifier sets 1 as well: the tool watched it "
-        "give two answers, and the input it took to get there does not change that.",
+        epilog="Exit codes: 0 nothing diverged, 1 a step diverged on the real "
+        "input, 2 bad input, 3 crashed, 4 a step diverged only under an "
+        "amplifier. 4 is separate from 1 because they are different claims: 1 "
+        "says your pipeline gave two answers on your data, 4 says it gave two "
+        "answers on an input twicerun fabricated. Both are non-zero, so a gate "
+        "that trips on failure keeps working; a gate that wants real-data "
+        "divergence only asks for 1.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -223,7 +239,17 @@ def parse_keys(declared: list[str]) -> dict[str, tuple[str, ...]]:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "judge":
-        return _judge(args)
+        try:
+            return _judge(args)
+        except Exception:  # noqa: BLE001
+            # Same reason as the catch in the run branch below, and judge was
+            # outside it. Anything getting past rejudge's own checks came out as
+            # an unhandled traceback and a shell exit of 1, which this program's
+            # epilog defines as divergence, so a gate keyed on 1 would record a
+            # missing Parquet file as a pipeline that gave two answers.
+            traceback.print_exc()
+            print(_CRASHED, file=sys.stderr)
+            return 3
     if not args.pipeline.is_file():
         print(f"twicerun: no pipeline file at {args.pipeline}", file=sys.stderr)
         return 2
@@ -265,10 +291,7 @@ def main(argv: list[str] | None = None) -> int:
         # two as the same event. Nothing is swallowed: the traceback goes to
         # stderr unchanged.
         traceback.print_exc()
-        print(
-            "twicerun: the run crashed. Exit 3 is a crash, not a divergence.",
-            file=sys.stderr,
-        )
+        print(_CRASHED, file=sys.stderr)
         return 3
 
     print(report.render())

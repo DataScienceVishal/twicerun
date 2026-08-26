@@ -180,14 +180,14 @@ def test_the_thread_floor_clears_where_the_mechanism_switches_on(default, raised
     assert amplified_threads(default) == raised
 
 
-def test_an_amplified_input_is_a_file_so_all_three_runs_read_the_same_bytes(
-    con, tmp_path, sparse
-):
-    """Regenerating the input per run would put the amplifier's own noise in the answer.
+def test_collapsing_the_same_artifact_twice_gives_the_same_answer(con, tmp_path, sparse):
+    """The amplifier must not contribute noise of its own to the thing it is measuring.
 
-    Nothing in the collapse is order-dependent, `min()` over an exact column
-    being the reason, but the runs read one path rather than re-deriving it, and
-    that is what the assertion below pins.
+    Two collapses of one input agree because `min()` over an exact column does
+    not care how the scan was divided. The runs read one materialised file
+    rather than re-deriving it, so this property is not what keeps them honest,
+    but an amplifier that could not reproduce itself would be a bad amplifier
+    whatever the runner did with it.
     """
     first = tie_collapse(con, tmp_path / "a", {"sparse_customers": sparse}, threads=1)
     second = tie_collapse(con, tmp_path / "b", {"sparse_customers": sparse}, threads=1)
@@ -202,3 +202,27 @@ def test_an_amplified_input_is_a_file_so_all_three_runs_read_the_same_bytes(
         f")"
     ).fetchone()[0]
     assert differing == 0
+
+
+def test_tie_collapse_keeps_every_null_it_was_given(con, tmp_path, make_artifact):
+    """`hash(NULL)` is an ordinary constant, so NULLs landed in a bucket of real values.
+
+    300 NULLs in 3,000 rows came out as zero NULLs, under a report line
+    claiming the type, the row count and the value domain all survive. Two of
+    the three did. A step that branches on NULL was being handed a different
+    question from the one printed beside it.
+    """
+    holey = make_artifact(
+        "holey",
+        "SELECT CASE WHEN i % 10 = 0 THEN NULL ELSE (i % 700)::INTEGER END AS cust, "
+        "i AS event_id FROM range(3000) AS s(i)",
+    )
+    attempt = tie_collapse(con, tmp_path / "amp", {"holey": holey}, threads=1)
+    amplified = attempt.artifacts["holey"].path
+
+    rows, nulls, distinct = con.execute(
+        f"SELECT count(*), count(*) FILTER (WHERE cust IS NULL), count(DISTINCT cust) "
+        f"FROM read_parquet('{amplified}')"
+    ).fetchone()
+    assert (rows, nulls) == (3000, 300)
+    assert distinct < 700

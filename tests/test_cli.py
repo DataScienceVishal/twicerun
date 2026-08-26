@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import re
+import shutil
 from pathlib import Path
 
 import pytest
 from test_statuses import BREAKS_ON_A_DUPLICATE_KEY, ONLY_ON_TIED_INPUT
 
+from twicerun import cli
 from twicerun.amplify import (
     AMPLIFICATION_FAILED,
     DIVERGENT,
@@ -58,6 +60,26 @@ def test_divergence_exits_one_so_it_can_gate_a_release(tmp_path, capsys):
     assert "2 of 2" in capsys.readouterr().out
 
 
+def test_real_input_divergence_outranks_an_amplified_one(tmp_path, capsys):
+    """A gate keyed on `== 1` has to keep seeing 1 when there is real divergence.
+
+    The pipeline below has one step of each kind, so the codes are competing.
+    """
+    both = ONLY_ON_TIED_INPUT.replace(
+        "STEPS = [generate, sensitive]",
+        "def wobble(ctx):\n"
+        "    CALLS['n'] += 1\n"
+        "    ctx.write('rows', f\"SELECT {CALLS['n']} AS attempt\")\n\n\n"
+        "STEPS = [generate, sensitive, wobble]",
+    )
+    code = main(["run", str(pipeline(tmp_path, both)), "--runs", "3",
+                 "--run-dir", str(tmp_path / "artifacts")])
+    printed = capsys.readouterr().out
+
+    assert code == 1
+    assert STABLE_ON_THIS_INPUT in printed and DIVERGENT in printed
+
+
 def test_the_header_carries_the_version_and_the_thread_count(tmp_path, capsys):
     main(["run", str(pipeline(tmp_path, CLEAN)),
           "--runs", "2", "--run-dir", str(tmp_path / "artifacts")])
@@ -84,19 +106,19 @@ def test_nothing_in_the_report_claims_a_step_is_deterministic(tmp_path, capsys, 
         assert forbidden not in without_the_token
 
 
-def test_a_step_only_an_amplifier_could_move_still_sets_the_exit_code(tmp_path, capsys):
-    """The one exit-code decision slice 4 had to make, and it goes the other way.
+def test_a_step_only_an_amplifier_could_move_gets_its_own_exit_code(tmp_path, capsys):
+    """Non-zero, because 0 rebuilds this tool's own complaint at the exit code.
 
-    This step agrees with itself on the input the pipeline was handed. A tool
-    that then exits 0 has reproduced, at the exit code, the exact failure its
-    whole argument is about: a green five-run loop over a step that is not
-    reproducible.
+    Not 1, because 1 already means the pipeline gave two answers on the user's
+    data and this one gave two answers on an input twicerun fabricated. Those
+    are different claims, and every other pair of claims in this codebase gets
+    two names.
     """
     code = main(["run", str(pipeline(tmp_path, ONLY_ON_TIED_INPUT)),
                  "--runs", "3", "--run-dir", str(tmp_path / "artifacts")])
     printed = capsys.readouterr().out
 
-    assert code == 1
+    assert code == 4
     assert "0 of 2  STABLE_ON_THIS_INPUT" in printed
 
 
@@ -659,3 +681,45 @@ def test_judging_a_run_whose_artifacts_were_pruned_says_so(tmp_path, capsys):
 def test_judge_on_a_path_with_no_manifest_exits_two(tmp_path, capsys):
     assert main(["judge", str(tmp_path / "nowhere")]) == 2
     assert "no manifest at" in capsys.readouterr().err
+
+
+def test_judging_a_run_whose_amplified_artifacts_are_gone_says_so(tmp_path, capsys):
+    """The existence check listed the main loop and the bisect and not the third loop.
+
+    So a pruned directory reached attach_amplification, which read files that
+    were not there and raised out of a command whose contract is that it
+    re-scores or explains itself.
+    """
+    main(["run", str(pipeline(tmp_path, ONLY_ON_TIED_INPUT)), "--runs", "3",
+          "--run-dir", str(tmp_path / "rd")])
+    run_dir = next((tmp_path / "rd").glob("run-*"))
+    shutil.rmtree(run_dir / "amplified")
+    capsys.readouterr()
+
+    code = main(["judge", str(run_dir)])
+    assert code == 2
+    assert "artifact(s) named in" in capsys.readouterr().err
+
+
+def test_a_crash_inside_judge_exits_three_like_every_other_crash(tmp_path, capsys):
+    """`judge` was dispatched outside the try block that every crash path relies on.
+
+    An unhandled traceback leaves a shell exit of 1, and 1 is what this
+    program's epilog defines as divergence, so a gate recorded a broken read as
+    a pipeline that gave two answers.
+    """
+    main(["run", str(pipeline(tmp_path, CLEAN)), "--runs", "2",
+          "--run-dir", str(tmp_path / "rd")])
+    run_dir = next((tmp_path / "rd").glob("run-*"))
+    capsys.readouterr()
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(cli, "rejudge", _explode)
+        code = main(["judge", str(run_dir)])
+
+    assert code == 3
+    assert "Exit 3 is a crash, not a divergence" in capsys.readouterr().err
+
+
+def _explode(*args, **kwargs):
+    raise MemoryError("the comparison ran out of memory")
