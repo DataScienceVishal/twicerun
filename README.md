@@ -261,14 +261,14 @@ Over 12 passes of that file, 72 step-passes, every step came out `NO_DIVERGENCE_
 
 Step 6 of the reference pipeline is the surrogate-key bug at 2 rows per tie group, the density where it fires only sometimes. Over 40 fresh passes on this machine, with the amplifiers pointed at that step whether or not the main loop had already caught it:
 
-| | fired | per-comparison rate |
-|---|---|---|
-| the plain five-run loop | 87 of 160 comparisons, and **7 of the 40 passes were a flat 0 of 4** | 0.54 |
-| tie collapse | 153 of 160, firing on 40 of 40 passes | 0.96 |
-| row multiplication | 145 of 160, firing on 40 of 40 passes | 0.91 |
-| thread count | 91 of 144, firing on 32 of 40 passes | 0.63 |
+| | comparisons that fired | per-comparison rate | passes with nothing at all |
+|---|---|---|---|
+| the plain five-run loop | 87 of 160 | 0.54 | **7 of 40** |
+| tie collapse | 153 of 160 | 0.96 | 0 of 40 |
+| row multiplication | 145 of 160 | 0.91 | 0 of 40 |
+| thread count | 91 of 144 | 0.63 | 8 of 40 |
 
-Medians and counts over 40 passes, on DuckDB 1.5.5 at `threads=10`. Not bounds, and a larger sample will move them.
+Counts over 40 passes, on DuckDB 1.5.5 at `threads=10`. A larger sample will move all of them. The thread-count row has 144 comparisons rather than 160 because an amplifier that finds nothing in its first two comparisons is not escalated to the full five runs, which is the whole cost argument working.
 
 **On all 7 of the passes where the five-run loop reported nothing, at least one amplifier fired**, and on all 7 that included tie collapse. That is the gap the feature exists to close, measured rather than argued: a step that is definitely broken, a loop that says nothing about it roughly one pass in six, and a per-comparison rate that goes from 0.54 to 0.96 when the input is stressed.
 
@@ -491,7 +491,7 @@ amplification is off (--no-amplify), so no status is printed for the 2 steps tha
 
 That paragraph exists because two earlier flags failed the same audit. `--key` with a float column deleted the whole reassociation bound section, including the pre-registered check that is allowed to fail in it, and `--tolerance` deleted the sentence explaining why the mechanism story did not hold. A flag that quietly removes the tool's own falsifiable claim is worse than no flag, so there is a test asserting the bound sentence survives `--no-amplify`.
 
-One pass writes a median 376 MB of Parquet under `.twicerun/`, which is gitignored, over 12 passes: 272 MB for the five runs and the single-threaded bisect, and 104 MB more for the amplified inputs and the runs over them. `--no-amplify` takes it back to 272 MB. Retention keeps one directory **per concurrent invocation**, so run it serially and the footprint stays there however many times you run it. `--keep 0` turns pruning off, and `rm -rf .twicerun` reclaims the lot.
+One pass writes a median 376 MB of Parquet under `.twicerun/`, which is gitignored, over 12 passes: 272 MB for the five runs and the single-threaded bisect, and 104 MB more for the amplified inputs and the runs over them. This file said 260 MB before that sample existed, which was the decomposition rather than a measurement. `--no-amplify` takes it back to 272 MB. Retention keeps one directory **per concurrent invocation**, so run it serially and the footprint stays there however many times you run it. `--keep 0` turns pruning off, and `rm -rf .twicerun` reclaims the lot.
 
 Two things that follow from how retention works, both deliberate and neither obvious. Pruning happens at the end of a successful run, not the start, so a run that fails cannot delete the run you would have judged instead, and peak disk during a pass is one directory more than `--keep` says. And a run still writing is never a deletion candidate, because deleting it would pull the Parquet out from under another process, so three parallel invocations leave three directories and 778 MB. The header says when that happened rather than repeating a promise it suspended.
 
@@ -591,8 +591,6 @@ What that buys back is why it is a design choice rather than a workaround. One a
 **Tie collapse declines more often than it applies.** It targets 500 rows per distinct value and refuses to touch a column that is already at or past that, since raising tie density is the whole job and there is nothing to raise. On the twins that meant 24 of 72 chances taken. The refusal is printed with its reason on the same line as the amplifier, and the declined amplifier goes in the not-varied list, but a reader skimming for zeros should know that most of the boxes tie collapse leaves are unticked rather than green.
 
 **An amplifier only sees a step's `ctx.read` inputs.** State pulled in through `ctx.state` resolves against the previous run's copy rather than an upstream step's output, so there is nothing for an amplifier to substitute that the step's own last execution did not already decide. On the append bug that is the right answer and on some other shape of bug it may not be.
-
-**Amplified runs are only ever compared with each other.** The outputs differ from the real run's by construction, so the fire rate under an amplifier is a statement about that amplified input and not about your data. That is the entire content of `STABLE_ON_THIS_INPUT` and the reason it is spelled the way it is.
 
 **Three amplifiers is three, and there is no argument that they are the right three.** Each is aimed at a bug that was measured here. A pipeline whose non-determinism comes from a clock read, a hash seed, a file listing order or a network response gets nothing from any of them, and the not-varied list is where the report admits it.
 
