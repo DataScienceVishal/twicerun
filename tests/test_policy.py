@@ -25,7 +25,9 @@ from twicerun.policy import (
 )
 
 
-def drifting(relative: float, ulps: int = 3, *, approximate: bool = True) -> ArtifactFindings:
+def drifting(
+    relative: float, ulps: int | None = 3, *, approximate: bool = True
+) -> ArtifactFindings:
     return ArtifactFindings(
         name="totals",
         key=("day",),
@@ -238,3 +240,23 @@ def test_replacing_the_policy_on_a_report_does_not_touch_the_findings():
     before = replace(measured.rounds[0][0])
     judge(measured, Policy(REDUCTION_ORDER))
     assert measured.rounds[0][0] == before
+
+
+def test_an_unmeasurable_ulp_distance_refuses_the_ulp_threshold():
+    """Every float replaced by NULL, which is as wrong as an artifact gets.
+
+    ULP distance comes back NULL because abs(NULL - x) is NULL and max() over
+    only NULLs is NULL. Folding that to zero told --tolerance-ulps the values
+    were nought last-bit steps apart and the tool exited 0. The relative figure
+    is infinite in that case and says so, but with only --tolerance-ulps set it
+    was never consulted.
+    """
+    nulled = step([drifting(float("inf"), ulps=None)])
+    assert judge(nulled, Policy(STRICT, tolerance_ulps=4)).fired == 1
+    assert judge(nulled, Policy(STRICT, tolerance_ulps=10**18)).fired == 1
+
+
+def test_an_unmeasurable_ulp_distance_does_not_block_a_relative_threshold():
+    """The two thresholds test different figures, so one missing is not both."""
+    lenient = Policy(STRICT, tolerance_relative=1.0)
+    assert judge(step([drifting(0.5, ulps=None)]), lenient).tolerated == 1

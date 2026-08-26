@@ -22,6 +22,7 @@ two of them exist today; see `MISSING_CONDITION`.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from twicerun.measurement import StepMeasurement, name_classes
@@ -238,8 +239,10 @@ def _tolerable(
     if any(not moved.approximate for moved in findings.drift):
         return None
 
-    worst_relative = max((m.max_relative or 0.0) for m in findings.drift)
-    worst_ulps = max((m.max_ulps or 0) for m in findings.drift)
+    worst_relative = _worst(m.max_relative for m in findings.drift)
+    worst_ulps = _worst(m.max_ulps for m in findings.drift)
+    if worst_relative is None:
+        return None
 
     # The derived bound is tried first so that whenever it can explain a
     # difference it is the reason on record, and a manual threshold only ever
@@ -251,19 +254,37 @@ def _tolerable(
         and pure
         and bound is not None
         and worst_relative <= bound.bound
-    ):
+    ):  # worst_relative is never None here, and never NaN: sql.py sends both to infinity
+
         return BY_BOUND
     if policy.manual and _inside_manual(policy, worst_relative, worst_ulps):
         return BY_THRESHOLD
     return None
 
 
-def _inside_manual(policy: Policy, relative: float, ulps: int) -> bool:
-    """Every threshold that was set has to be cleared, not just one of them."""
-    return not (
-        (policy.tolerance_relative is not None and relative > policy.tolerance_relative)
-        or (policy.tolerance_ulps is not None and ulps > policy.tolerance_ulps)
-    )
+def _worst(measured: Iterable[float | int | None]) -> float | int | None:
+    """The largest magnitude, or None if any column could not be measured at all.
+
+    None here means unmeasurable rather than small, and the difference decides
+    an exit code. ULP distance comes back NULL when every differing pair had a
+    NULL on one side, because abs(NULL - x) is NULL and max() over only NULLs is
+    NULL. Folding that to zero with `or 0` told --tolerance-ulps that an
+    artifact whose every float had been replaced by NULL was nought last-bit
+    steps away from the original, and the tool exited 0 on it.
+    """
+    seen = list(measured)
+    return None if any(m is None for m in seen) else max(seen)
+
+
+def _inside_manual(policy: Policy, relative: float, ulps: int | None) -> bool:
+    """Every threshold that was set has to be cleared, not just one of them.
+
+    A threshold cannot clear a figure that does not exist, so an unmeasurable
+    ULP distance refuses the ULP threshold rather than passing it by default.
+    """
+    if policy.tolerance_ulps is not None and (ulps is None or ulps > policy.tolerance_ulps):
+        return False
+    return policy.tolerance_relative is None or relative <= policy.tolerance_relative
 
 
 def _blocked(
