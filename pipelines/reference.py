@@ -230,6 +230,41 @@ def sparse_customer_keys(ctx: StepContext) -> None:
     )
 
 
+def roll_up_keys(ctx):
+    """No bug of its own. It is here to be downstream of one.
+
+    Every other step in this file reads `generate_inputs`, whose output is
+    identical in every run, so nothing here read a diverging artifact and the
+    cascade containment exists to stop could not happen. That made the
+    containment ablation score zero on the one quantity the eval pre-registered
+    for it, and a feature nothing exercises is a coverage gap rather than proof
+    it is unnecessary. So this step is constructed, not a failure anyone here
+    has been bitten by, and the README says which.
+
+    It reads `customer_keys`, whose surrogate ids shuffle between runs, and
+    buckets on `event_id / 1000` so that each bucket holds one row from every
+    cust group. Two obvious bucketings do not work and both fail the same way.
+    `cust` keeps the same block of surrogate ids per group and only shuffles
+    the pairing inside it, which is the tie the attribution section of the
+    README is about. `event_id % 1000` is worse: it equals `cust` exactly for
+    this generator, so the first attempt at this step reported 0 of 4 with
+    containment off and looked like evidence against the feature it was built
+    to exercise.
+
+    Contained, it reads run 1's copy every time and reports 0 of 4. Under
+    --no-containment it reads its own run's and fires, which is the ablation
+    number. The aggregate itself is an integer minimum and cannot reassociate
+    into a different answer, so a fire rate above zero here means it was fed
+    something different, never that it computed something different.
+    """
+    ctx.read("customer_keys")
+    ctx.write(
+        "key_buckets",
+        "SELECT (event_id // 1000)::INTEGER AS bucket, min(surrogate_id) AS lowest_id "
+        "FROM customer_keys GROUP BY bucket",
+    )
+
+
 STEPS = [
     generate_inputs,
     daily_revenue,
@@ -238,4 +273,5 @@ STEPS = [
     append_audit_log,
     mean_basket,
     sparse_customer_keys,
+    roll_up_keys,
 ]

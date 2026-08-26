@@ -326,6 +326,7 @@ def test_the_reference_pipeline_still_loads():
         "append_audit_log",
         "mean_basket",
         "sparse_customer_keys",
+        "roll_up_keys",
     ]
 
 
