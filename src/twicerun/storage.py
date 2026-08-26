@@ -146,7 +146,12 @@ class StepContext:
 
     def write(self, name: str, query: str) -> Artifact:
         self._step_dir.mkdir(parents=True, exist_ok=True)
-        parquet = self._step_dir / f"{name}.parquet"
+        # Absolute, because the manifest outlives the working directory it was
+        # written from. --run-dir defaults to a relative .twicerun, and judging
+        # that run from anywhere else resolved 80 present files against the
+        # wrong cwd and reported every one of them gone, under an error message
+        # suggesting retention had dropped them.
+        parquet = (self._step_dir / f"{name}.parquet").resolve()
         self._con.execute(f"COPY ({query}) TO {quote(parquet)} (FORMAT PARQUET)")
 
         schema = self._con.execute(

@@ -425,6 +425,22 @@ def test_judge_does_not_print_figures_that_are_not_true_of_the_run(tmp_path, cap
     assert "steps diverged." in printed_by_judge
 
 
+def test_judge_works_from_a_different_directory_than_the_run(tmp_path, monkeypatch):
+    """--run-dir defaults to a relative path and a manifest outlives one cwd.
+
+    Artifact paths were stored as given, so a run made in one directory and
+    judged from another resolved every path against the wrong root and reported
+    all of them gone, blaming retention for files that were there.
+    """
+    where = pipeline(tmp_path, TOLERABLE_DRIFT)
+    monkeypatch.chdir(tmp_path)
+    main(["run", str(where), "--runs", "2", "--run-dir", ".twicerun"])
+    run_dir = next((tmp_path / ".twicerun").glob("run-*")).resolve()
+
+    monkeypatch.chdir(tmp_path.parent)
+    assert main(["judge", str(run_dir)]) == 1
+
+
 def test_judge_takes_the_manifest_file_as_well_as_the_directory(tmp_path):
     where = pipeline(tmp_path, TOLERABLE_DRIFT)
     main(["run", str(where), "--runs", "2", "--run-dir", str(tmp_path / "rd")])
