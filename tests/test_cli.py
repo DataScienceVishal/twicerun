@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -283,3 +284,62 @@ def test_an_artifact_with_no_exact_column_says_it_paired_by_sort_order(tmp_path,
     main(["run", str(pipeline(tmp_path, body)), "--runs", "2",
           "--run-dir", str(tmp_path / "artifacts")])
     assert "rows pair by sort order" in capsys.readouterr().out
+
+
+def measured_lines(printed: str) -> list[str]:
+    """The indented detail lines, which are the measurements rather than the verdicts.
+
+    The step line carries the fire rate and is meant to move with the policy.
+    Everything under it is what the oracle found and must not.
+    """
+    return [ln for ln in printed.splitlines() if re.match(r"^ {6}\S", ln)]
+
+
+def test_judging_one_saved_run_twice_shows_the_measurement_holding_still(tmp_path, capsys):
+    """The project's central claim, made observable instead of only tested.
+
+    Two invocations of `run` execute the pipeline twice, so the figures move
+    between them for exactly the reason this tool exists, and the README
+    paragraph describing the property looked like it was contradicted by the
+    two commands printed beside it. Judging one saved run under two policies
+    re-runs nothing.
+    """
+    where = pipeline(tmp_path, TOLERABLE_DRIFT)
+    main(["run", str(where), "--runs", "3", "--run-dir", str(tmp_path / "rd")])
+    run_dir = next((tmp_path / "rd").glob("run-*"))
+    capsys.readouterr()
+
+    assert main(["judge", str(run_dir)]) == 1
+    strict = capsys.readouterr().out
+    assert main(["judge", str(run_dir), "--policy", "reduction-order"]) == 0
+    tolerant = capsys.readouterr().out
+
+    assert "2 of 2  VALUE_DRIFT" in strict
+    assert "0 of 2  VALUE_DRIFT TOLERATED on 2 of 2" in tolerant
+    assert measured_lines(strict) == measured_lines(tolerant)
+    assert measured_lines(strict), "the comparison would be vacuous with nothing measured"
+
+
+def test_judge_takes_the_manifest_file_as_well_as_the_directory(tmp_path):
+    where = pipeline(tmp_path, TOLERABLE_DRIFT)
+    main(["run", str(where), "--runs", "2", "--run-dir", str(tmp_path / "rd")])
+    run_dir = next((tmp_path / "rd").glob("run-*"))
+    assert main(["judge", str(run_dir / "manifest.json")]) == 1
+
+
+def test_judging_a_run_whose_artifacts_were_pruned_says_so(tmp_path, capsys):
+    """Retention drops old run directories, so a stale manifest is the normal mistake."""
+    where = pipeline(tmp_path, TOLERABLE_DRIFT)
+    main(["run", str(where), "--runs", "2", "--run-dir", str(tmp_path / "rd")])
+    run_dir = next((tmp_path / "rd").glob("run-*"))
+    saved = tmp_path / "manifest.json"
+    saved.write_text((run_dir / "manifest.json").read_text(), encoding="utf-8")
+    main(["run", str(where), "--runs", "2", "--run-dir", str(tmp_path / "rd")])
+
+    assert main(["judge", str(saved)]) == 2
+    assert "are gone" in capsys.readouterr().err
+
+
+def test_judge_on_a_path_with_no_manifest_exits_two(tmp_path, capsys):
+    assert main(["judge", str(tmp_path / "nowhere")]) == 2
+    assert "no manifest at" in capsys.readouterr().err

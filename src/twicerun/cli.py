@@ -7,12 +7,46 @@ from pathlib import Path
 
 from twicerun.columns import FloatInKey, UnknownKeyColumn, UnsupportedColumn
 from twicerun.policy import REDUCTION_ORDER, STRICT, Policy
-from twicerun.runner import PipelineError, UnknownArtifact, run_pipeline
+from twicerun.runner import PipelineError, UnknownArtifact, rejudge, run_pipeline
 from twicerun.storage import MissingArtifact
 
 
 class KeySyntaxError(ValueError):
     """--key was not spelled artifact=column."""
+
+
+def _judge(args: argparse.Namespace) -> int:
+    """Re-score a run that already happened.
+
+    The point of this command is that it re-runs nothing. Two invocations of
+    `twicerun run` under different policies execute the pipeline twice, so the
+    figures move between them for exactly the reason this project exists, and
+    the claim that a policy cannot move a measured number was left resting on a
+    unit test. Judging one saved run twice puts it in front of a reader.
+    """
+    where = args.manifest / "manifest.json" if args.manifest.is_dir() else args.manifest
+    if not where.is_file():
+        print(f"twicerun: no manifest at {where}", file=sys.stderr)
+        return 2
+    try:
+        report = rejudge(where, _policy_from(args), parse_keys(args.key))
+    except (PipelineError, MissingArtifact, KeySyntaxError) as exc:
+        print(f"twicerun: {exc}", file=sys.stderr)
+        return 2
+    except (UnsupportedColumn, UnknownKeyColumn, FloatInKey, UnknownArtifact) as exc:
+        print(f"twicerun: {exc}", file=sys.stderr)
+        return 2
+
+    print(report.render())
+    return 1 if any(verdict.fired for verdict in report.verdicts) else 0
+
+
+def _policy_from(args: argparse.Namespace) -> Policy:
+    return Policy(
+        name=args.policy,
+        tolerance_relative=args.tolerance_rel,
+        tolerance_ulps=args.tolerance_ulps,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,7 +84,22 @@ def build_parser() -> argparse.ArgumentParser:
         "about 200 MB and nothing yet reads a previous one, so the default keeps only the "
         "current run. Use 0 to keep everything",
     )
-    run.add_argument(
+    _policy_flags(run)
+    judge = commands.add_parser(
+        "judge",
+        help="score a saved run again under a different policy, without re-running it",
+    )
+    judge.add_argument(
+        "manifest",
+        type=Path,
+        help="a manifest.json written by a previous run, or the run directory holding one",
+    )
+    _policy_flags(judge)
+    return parser
+
+
+def _policy_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
         "--policy",
         choices=[STRICT, REDUCTION_ORDER],
         default=STRICT,
@@ -58,7 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
         "reduction-order downgrades float drift to TOLERATED when it is the step's only "
         "class and its size is inside the derived reassociation bound",
     )
-    run.add_argument(
+    parser.add_argument(
         "--tolerance-rel",
         type=float,
         metavar="X",
@@ -66,14 +115,14 @@ def build_parser() -> argparse.ArgumentParser:
         "at or below this relative size as TOLERATED. Never a default, and it does not "
         "excuse a missing or duplicated row",
     )
-    run.add_argument(
+    parser.add_argument(
         "--tolerance-ulps",
         type=int,
         metavar="N",
         help="the same escape hatch measured in last-bit steps rather than relative size. "
         "Set both and a difference has to clear both",
     )
-    run.add_argument(
+    parser.add_argument(
         "--key",
         action="append",
         default=[],
@@ -84,7 +133,8 @@ def build_parser() -> argparse.ArgumentParser:
         "matching on one means joining on bit equality, and it would take the step out of "
         "the reassociation bound report entirely",
     )
-    return parser
+
+
 
 
 def parse_keys(declared: list[str]) -> dict[str, tuple[str, ...]]:
@@ -110,6 +160,8 @@ def parse_keys(declared: list[str]) -> dict[str, tuple[str, ...]]:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "judge":
+        return _judge(args)
     if not args.pipeline.is_file():
         print(f"twicerun: no pipeline file at {args.pipeline}", file=sys.stderr)
         return 2
@@ -130,11 +182,7 @@ def main(argv: list[str] | None = None) -> int:
             parent=args.run_dir,
             keep=args.keep,
             keys=parse_keys(args.key),
-            policy=Policy(
-                name=args.policy,
-                tolerance_relative=args.tolerance_rel,
-                tolerance_ulps=args.tolerance_ulps,
-            ),
+            policy=_policy_from(args),
         )
     except (PipelineError, MissingArtifact, KeySyntaxError) as exc:
         print(f"twicerun: {exc}", file=sys.stderr)

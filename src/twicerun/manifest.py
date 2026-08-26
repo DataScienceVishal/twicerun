@@ -112,3 +112,39 @@ class Manifest:
         body["root"] = str(self.root)
         where.write_text(json.dumps(body, indent=2), encoding="utf-8")
         return where
+
+    @classmethod
+    def load(cls, where: Path) -> Manifest:
+        """Read a saved run back, so it can be judged again without re-running it.
+
+        This exists because the claim that a policy cannot move a measured
+        number was only checkable by reading a test. Two invocations of the run
+        command execute the pipeline twice and the figures move between them for
+        the reason the whole project is about, so the two documented commands
+        looked like they refuted the paragraph describing them.
+        """
+        body = json.loads(where.read_text(encoding="utf-8"))
+        return cls(
+            pipeline=body["pipeline"],
+            root=Path(body["root"]),
+            environment=Environment(**body["environment"]),
+            started=body["started"],
+            runs=[
+                RunRecord(
+                    run=run["run"],
+                    seconds=run["seconds"],
+                    steps=[
+                        StepRecord(
+                            index=step["index"],
+                            name=step["name"],
+                            seconds=step["seconds"],
+                            rows_read=step["rows_read"],
+                            input_columns=step["input_columns"],
+                            artifacts=[Artifact(**a) for a in step["artifacts"]],
+                        )
+                        for step in run["steps"]
+                    ],
+                )
+                for run in body["runs"]
+            ],
+        )

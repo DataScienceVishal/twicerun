@@ -288,6 +288,61 @@ def compare_runs(
         con.close()
 
 
+def measure(
+    manifest: Manifest, keys: Mapping[str, Sequence[str]]
+) -> list[StepMeasurement]:
+    """Compare every later run against run 1, whether it just ran or was loaded.
+
+    Split out so `judge` can re-derive a saved run's measurements from the same
+    code path the run command used. Comparing artifacts on disk is a pure
+    function of those artifacts, which is why a saved run can be re-scored at
+    all.
+    """
+    reference = manifest.runs[0]
+    _check_keys_named_something(keys, reference)
+    measured = [
+        StepMeasurement(
+            index=s.index, name=s.name, comparisons=len(manifest.runs) - 1, terms=s.rows_read
+        )
+        for s in reference.steps
+    ]
+    for later in manifest.runs[1:]:
+        for step, found in zip(measured, compare_runs(reference, later, keys), strict=True):
+            step.observe(found)
+    return measured
+
+
+def rejudge(
+    manifest_path: Path, policy: Policy, keys: Mapping[str, Sequence[str]] | None = None
+) -> Report:
+    manifest = Manifest.load(manifest_path)
+    if len(manifest.runs) < 2:
+        raise PipelineError(f"{manifest_path} holds one run, so there is nothing to compare")
+    missing = [
+        a.path
+        for run in manifest.runs
+        for step in run.steps
+        for a in step.artifacts
+        if not Path(a.path).exists()
+    ]
+    if missing:
+        raise PipelineError(
+            f"{len(missing)} artifact(s) named in {manifest_path} are gone, starting with "
+            f"{missing[0]}. Retention drops old run directories, so judge the current one or "
+            f"rerun with --keep"
+        )
+    return Report(
+        pipeline=manifest.pipeline,
+        run_dir=str(manifest.root),
+        runs=len(manifest.runs),
+        environment=manifest.environment,
+        steps=measure(manifest, keys or {}),
+        seconds=sum(run.seconds for run in manifest.runs),
+        policy=policy,
+        keep=0,
+    )
+
+
 def run_pipeline(
     pipeline: Path,
     runs: int,
@@ -317,17 +372,7 @@ def run_pipeline(
             manifest.runs.append(record)
             carried = written
 
-        keys = keys or {}
-        _check_keys_named_something(keys, manifest.runs[0])
-        measured = [
-            StepMeasurement(index=s.index, name=s.name, comparisons=runs - 1, terms=s.rows_read)
-            for s in manifest.runs[0].steps
-        ]
-        for later in manifest.runs[1:]:
-            rounds = compare_runs(manifest.runs[0], later, keys)
-            for step, found in zip(measured, rounds, strict=True):
-                step.observe(found)
-
+        measured = measure(manifest, keys or {})
         manifest.save()
         report = Report(
             pipeline=str(pipeline),
