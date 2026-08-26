@@ -374,17 +374,16 @@ class Report:
         ]
         return [
             *_wrap(
-                f"{STABLE_ON_THIS_INPUT} on {_named(steps)}. Each of those reproduced on the "
-                f"input this pipeline was given, {self.runs - 1} of {self.runs - 1} clean, and "
-                f"stopped reproducing once the input was stressed:"
+                f"{STABLE_ON_THIS_INPUT} on {_named(steps)}. Each of those gave the same "
+                f"answer {self.runs - 1} times out of {self.runs - 1} on the input this pipeline "
+                f"was handed, and stopped giving the same answer once that input was stressed:"
             ),
             *hits,
             *_wrap(
-                f"That is the case a plain {self.runs}-run loop reports as a clean zero, which is "
-                f"the case this tool exists for. It is not a milder DIVERGENT and it is not a "
-                f"pass. It says the step did not fire under these particular stresses, the ones "
-                f"named above. It does not say the step is reproducible, and no number of runs "
-                f"could say that.",
+                f"That is the case a plain {self.runs}-run loop reports as a clean zero, which "
+                f"is the case this tool exists for. It is not a milder DIVERGENT, and it is not "
+                f"this tool saying the step is fine. It says the step did not fire under these "
+                f"particular stresses, the ones named above, and nothing beyond that.",
                 indent="  ",
             ),
         ]

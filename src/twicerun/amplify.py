@@ -189,7 +189,8 @@ def tie_collapse(
         collapsed[name] = _rewrite(con, artifact, into / f"{name}.parquet", query)
         was = min(artifact.rows / max(counts[c], 1) for c in collapsing)
         notes.append(
-            f"{name}.{', '.join(collapsing)} into {buckets:,} buckets, from {was:,.0f} to "
+            f"{name}.{', '.join(collapsing)} into {buckets:,} "
+            f"bucket{'' if buckets == 1 else 's'}, from {was:,.0f} to "
             f"{artifact.rows / buckets:,.0f} rows per value"
         )
 

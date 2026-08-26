@@ -4,9 +4,18 @@ import re
 from pathlib import Path
 
 import pytest
+from test_statuses import ONLY_ON_TIED_INPUT
 
+from twicerun.amplify import (
+    AMPLIFICATION_FAILED,
+    DIVERGENT,
+    NO_DIVERGENCE_OBSERVED,
+    STABLE_ON_THIS_INPUT,
+)
 from twicerun.cli import KeySyntaxError, main, parse_keys
 from twicerun.runner import RUNNING
+
+STATUSES = (DIVERGENT, STABLE_ON_THIS_INPUT, NO_DIVERGENCE_OBSERVED, AMPLIFICATION_FAILED)
 
 CLEAN = '''
 def only_step(ctx):
@@ -56,19 +65,93 @@ def test_the_header_carries_the_version_and_the_thread_count(tmp_path, capsys):
     assert "duckdb " in printed and "threads=" in printed
 
 
-@pytest.mark.parametrize("body", [CLEAN, DIVERGES])
+@pytest.mark.parametrize("body", [CLEAN, DIVERGES, ONLY_ON_TIED_INPUT])
 def test_nothing_in_the_report_claims_a_step_is_deterministic(tmp_path, capsys, body):
-    """Both shapes of report, because they do not print the same prose.
+    """Three shapes of report, because they do not print the same prose.
 
     A report that found something also prints the cause section, and a sentence
     about what a zero at threads=1 rules out is exactly where one of these
-    words would have got in.
+    words would have got in. The third pipeline reaches STABLE_ON_THIS_INPUT,
+    which is the one status with a banned word inside it: the token is allowed
+    and the bare word is not, so the token comes out of the text first and what
+    is left has to be clean.
     """
     main(["run", str(pipeline(tmp_path, body)),
           "--runs", "3", "--run-dir", str(tmp_path / "artifacts")])
-    printed = capsys.readouterr().out.lower()
+    printed = capsys.readouterr().out
+    without_the_token = printed.replace(STABLE_ON_THIS_INPUT, "").lower()
     for forbidden in ("deterministic", "stable", "reproducible", "passed"):
-        assert forbidden not in printed
+        assert forbidden not in without_the_token
+
+
+def test_the_one_status_with_a_banned_word_in_it_carries_its_own_disclaimer(tmp_path, capsys):
+    """STABLE_ON_THIS_INPUT is the obvious place for this tool to start overclaiming.
+
+    It has to mean the step did not fire under the stresses named beside it,
+    never that the step is reproducible, and the sentence saying so belongs in
+    the terminal rather than in a README the reader does not have open.
+    """
+    main(["run", str(pipeline(tmp_path, ONLY_ON_TIED_INPUT)),
+          "--runs", "3", "--run-dir", str(tmp_path / "artifacts")])
+    printed = " ".join(capsys.readouterr().out.split())
+
+    assert STABLE_ON_THIS_INPUT in printed
+    assert "it is not this tool saying the step is fine" in printed
+    assert "did not fire under these particular stresses, the ones named above" in printed
+
+
+def test_no_amplify_removes_the_status_and_says_what_it_is_no_longer_claiming(tmp_path, capsys):
+    """The audit two flags failed before this one: what disappears when it is set.
+
+    --key with a float once deleted the whole reassociation bound section
+    including the pre-registered check that is allowed to fail in it, and
+    --tolerance once deleted the sentence explaining why the mechanism story did
+    not hold. A flag that quietly removes the tool's own falsifiable claim is
+    worse than no flag.
+
+    So this one removes a status that amplification is what earns, and it has to
+    replace it with the bound the status was resting on rather than with
+    silence. The step reads 0 of 2 either way and means something weaker without
+    the amplifiers.
+    """
+    where = pipeline(tmp_path, ONLY_ON_TIED_INPUT)
+    main(["run", str(where), "--runs", "3", "--run-dir", str(tmp_path / "on")])
+    amplified = capsys.readouterr().out
+    main(["run", str(where), "--runs", "3", "--no-amplify", "--run-dir", str(tmp_path / "off")])
+    plain = capsys.readouterr().out
+
+    on_the_steps = [ln for ln in plain.splitlines() if re.match(r"^  \d \w+ ", ln)]
+    assert on_the_steps
+    assert not any(status in ln for ln in on_the_steps for status in STATUSES)
+    assert any(STABLE_ON_THIS_INPUT in ln for ln in amplified.splitlines())
+
+    flattened = " ".join(plain.split())
+    assert "amplification is off (--no-amplify), so no status is printed" in flattened
+    assert f"{NO_DIVERGENCE_OBSERVED} needs a zero under every amplifier as well" in flattened
+
+    bound = "rule out a per-comparison divergence probability above 78 percent"
+    assert bound in " ".join(amplified.split()), "the amplified report states the bound"
+    assert bound in flattened, "and the flag must not delete it on the way out"
+
+
+def test_judge_re_derives_the_statuses_from_the_saved_artifacts(tmp_path, capsys):
+    """The amplified runs are kept rather than summarised, for the bisect's reason.
+
+    A fire rate copied into the manifest is a number this tool could have got
+    wrong. Re-scoring one goes back through the same comparison code the run
+    used.
+    """
+    main(["run", str(pipeline(tmp_path, ONLY_ON_TIED_INPUT)), "--runs", "3",
+          "--run-dir", str(tmp_path / "rd")])
+    from_the_run = capsys.readouterr().out
+    main(["judge", str(next((tmp_path / "rd").glob("run-*")))])
+    from_the_judge = capsys.readouterr().out
+
+    def about_the_step(text: str) -> list[str]:
+        return [ln for ln in text.splitlines() if "sensitive" in ln]
+
+    assert about_the_step(from_the_run) == about_the_step(from_the_judge)
+    assert any(STABLE_ON_THIS_INPUT in ln for ln in about_the_step(from_the_judge))
 
 
 def test_the_header_does_not_say_one_comparisons(tmp_path, capsys):
