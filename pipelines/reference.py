@@ -74,7 +74,9 @@ def customer_keys(ctx: StepContext) -> None:
     reading the same Parquet file do not: across 13 invocations of the five-run
     loop this step fired 2 to 4 times out of 4, never fewer than 2 and not
     always 4. The spec has it firing every time, which was true of the narrower
-    measurement it came from.
+    measurement it came from. Twenty passes of the contained loop gave the same
+    2 to 4, and the single-threaded bisect gave 0 of 4 on every one of them, so
+    the report reads PARALLEL_ORDER here.
     """
     ctx.read("customers")
     ctx.write(
@@ -128,6 +130,13 @@ def apply_price_updates(ctx: StepContext) -> None:
     4 and it went in as "every time"; the next eight put the floor at 1; twenty
     put it at 0. Each correction came from widening the sample, which is the
     same mistake this project exists to catch, one layer up.
+
+    Under containment the merge always runs over run 1's catalogue rather than
+    over a catalogue three runs of drift deep. Twenty contained passes fired 0
+    to 4 of 4 with two flat zeros, and the magnitude widened at both ends, from
+    9,248 to 35,104 rows to 1,344 to 42,304. The bisect gave 0 of 4 every time,
+    which agrees with the standalone measurement: at threads=1 this merge gave
+    one answer at every scale tried.
     """
     ctx.read("price_updates")
     ctx.state(
@@ -149,6 +158,19 @@ def append_audit_log(ctx: StepContext) -> None:
     Deliberately kept even though `grep -c "INSERT INTO"` would find it. It is
     the one bug of the four a code reader gets for free, and the eval's static
     baseline exists to show that it is the only one.
+
+    It is also the step containment changes most, because it is the only one
+    whose input is its own last output. Uncontained, run 4 appends to run 3's
+    log and the four comparisons report 3,953, 7,906, 11,859 and 15,812 extra
+    rows: four reruns' worth of duplication, all of it attributed to one step.
+    Contained, every run appends to run 1's log and all four report 3,953,
+    which is what one rerun of this step actually does. Both figures held on
+    every pass, 20 contained and 10 not.
+
+    And it is the one step in this file the bisect labels
+    PERSISTS_SINGLE_THREADED, 4 of 4 at threads=1 as well as at threads=10. An
+    append with no unique key duplicates on rerun whatever the thread count,
+    and that is the answer telling you threads are not your problem.
     """
     ctx.read("orders")
     ctx.state(
@@ -172,6 +194,10 @@ def mean_basket(ctx: StepContext) -> None:
     distance and the relative size attached, because the user asked whether the
     pipeline gave the same answer twice and it did not. Under
     --policy reduction-order the count goes to zero and the magnitudes stay.
+
+    Since slice 3 that downgrade also has to show its mechanism: this step and
+    daily_revenue both gave 0 of 4 at threads=1 on all 20 contained passes,
+    which is the condition that used to be missing.
     """
     ctx.read("orders")
     ctx.write("mean_basket", "SELECT day, avg(amount) AS mean_amount FROM orders GROUP BY day")
@@ -184,6 +210,10 @@ def sparse_customer_keys(ctx: StepContext) -> None:
     the table, with zero coming up about a third of the time. Inside the
     five-run loop it fires 0 to 4 times out of 4 over 20 invocations, and it was
     a flat 0 on five of them.
+
+    Twenty contained passes put that floor at 1 in 20 rather than 5, on the same
+    machine and the same code, which is a reminder that a floor counted off 20
+    samples is not a floor. Every pass where it fired gave 0 of 4 at threads=1.
 
     That floor is the real argument for slice 4. Five runs are much better than
     two, but they are not enough: on 5 invocations in 20 this step is broken,
