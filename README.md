@@ -203,7 +203,7 @@ Twin specificity held in every run: **zero fires across 240 main-loop comparison
 
 | baseline | what it is | what it gave |
 |---|---|---|
-| 1 | two runs, bit-exact multiset equality, no tolerance and no classes. Rescored from each trial's own runs 1 and 2, so the comparison is the only thing that differs from the oracle | fired on `mean_basket` in 10 of 10 trials in all four runs, at medians of 1,265, 1,270, 1,269 and 1,208 unmatched rows out of the 1,000 on each side, on a step where nothing is wrong. Caught the intermittent step in 7, 5, 4 and 6 of 10, against the five-run loop's 10, 10, 9 and 9 |
+| 1 | two runs, bit-exact multiset equality, no tolerance and no classes. Rescored from each trial's own runs 1 and 2, so the comparison is the only thing that differs from the oracle | fired on `mean_basket` in 10 of 10 trials in all four runs, at medians of 1,265, 1,270, 1,269 and 1,208 rows that failed to pair, counted across both sides out of the 2,000 the two runs put in front of it, on a step where nothing is wrong. Caught the intermittent step in 7, 5, 4 and 6 of 10, against the five-run loop's 10, 10, 9 and 9 |
 | 2 | four static patterns over the pipeline source, parsed per step | separated 4 of the 5 matched pairs, flagged `mean_basket` which has no bug, and could not separate the `MERGE` from its own fix |
 | 3 | the same oracle with `--no-containment` | `roll_up_keys` fires on 10 of 10 trials uncontained and never contained, and is given `cause PARALLEL_ORDER`. `append_audit_log` reports 15,812 extra rows uncontained against 3,953 contained, on every trial of every run |
 | 4 | the same measurements with the amplifiers dropped, scored through the tool's own `exit_code` | 0 of 10 trials would exit 0 in any of the four runs, because the loop caught something on every one. Per comparison on the intermittent step the loop ran 0.65, 0.47, 0.47 and 0.60, against row multiplication's 0.95, 0.93, 1.00 and 0.87 |
@@ -695,7 +695,9 @@ So this is a thing you run deliberately, before a release or on a schedule. `--r
 
 Pre-registered with the rest, and it belongs here rather than in a footnote: **if the naive baseline's false-positive count on correct code had come out at zero, the oracle would be more machinery than the problem needs**, and this section would say so.
 
-It did not. Baseline 1 fired on `mean_basket` in 10 of 10 trials in every one of the eval's four runs, at medians of 1,265, 1,270, 1,269 and 1,208 unmatched rows out of the 1,000 on each side, on a step where nothing is wrong. Those numbers are counted on both sides at once, so they are roughly 600 of the 1,000 groups.
+It did not. Baseline 1 fired on `mean_basket` in 10 of 10 trials in every one of the eval's four runs, at medians of 1,265, 1,270, 1,269 and 1,208 rows that failed to pair, on a step where nothing is wrong. That count is across both sides, so it is out of 2,000 rather than 1,000: roughly 600 of the 1,000 groups differ, and each differing group loses a row on each side.
+
+Those four figures were published as `median 1,265 rows unmatched out of 1,000 on each side`, which is a magnitude larger than the ceiling it names, on a line whose own rule is that a ceiling cannot be beaten. The numerator summed the two sides and the denominator took one of them. The eval prints the two sides separately now, against the total of both, and the four figures above are unchanged because the quantity was right and only its denominator was wrong. The split is not back-derivable from a sum, so these four keep the sum and a rerun is what shows the two sides.
 
 `src/twicerun/compare.py` is that comparison, kept rather than deleted, and `scripts/eval.py` runs it against each trial's own runs 1 and 2. Pointing it at the same bytes the oracle saw is what makes the pair a comparison of comparisons rather than of two separate experiments.
 

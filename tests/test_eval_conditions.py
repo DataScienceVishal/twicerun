@@ -121,8 +121,8 @@ def a_trial(*, artifacts: int = 1, downstream_uncontained: int = 3, fires: dict 
         twins=twins,
         uncontained=uncontained,
         naive={
-            BENIGN: NaiveScore(1265, 1000, artifacts),
-            INTERMITTENT: NaiveScore(0, 1000, artifacts),
+            BENIGN: NaiveScore(632, 633, 2000, artifacts),
+            INTERMITTENT: NaiveScore(0, 0, 2000, artifacts),
         },
         forced={
             "tie collapse": (4 if artifacts else 0, 4 if artifacts else 0),

@@ -112,20 +112,34 @@ def hang(label: str, body: str) -> None:
 
 @dataclass(frozen=True)
 class NaiveScore:
-    """Baseline 1 on one step: what failed to pair, out of what, over how many artifacts.
+    """Baseline 1 on one step: what failed to pair on each side, out of what, over how many files.
 
-    The third field is the guard the other three loops already carry. A step
-    that wrote nothing pairs nothing and reports zero rows unmatched, which is
-    the same zero a step whose two runs agreed reports, and the first
-    pre-registered condition reads that zero as grounds for calling the oracle
-    unnecessary. It counts the reference run's artifacts: a name that exists
-    only in the second run is invisible to this pass, which is one of the ways
-    it is deliberately naive.
+    The two sides are separate for the reason `StepScore.observe` keeps them
+    separate: they mean different things and one of them is often zero. They
+    used to be summed into a single count that was then printed against the
+    reference row count alone, so a step where 632 rows failed to pair each way
+    reported `median 1,265 rows unmatched out of 1,000 on each side`, a
+    magnitude larger than the ceiling on the very line asserting a ceiling
+    cannot be beaten. `rows_compared` is both sides added up, which is what 1,265
+    is actually out of.
+
+    `artifacts` is the guard the other three loops already carry. A step that
+    wrote nothing pairs nothing and reports zero unmatched, which is the same
+    zero a step whose two runs agreed reports, and the first pre-registered
+    condition reads it as grounds for calling the oracle unnecessary. It counts
+    the reference run's artifacts, because a name that exists only in the second
+    run is invisible to this pass, which is one of the ways it is deliberately
+    naive.
     """
 
-    unmatched: int
-    rows: int
+    unmatched_reference: int
+    unmatched_candidate: int
+    rows_compared: int
     artifacts: int
+
+    @property
+    def unmatched(self) -> int:
+        return self.unmatched_reference + self.unmatched_candidate
 
 
 @dataclass
@@ -311,8 +325,9 @@ def naive_pass(manifest: Manifest) -> dict[str, tuple[int, int]]:
     ones, so the only difference between this and the oracle's answer is the
     comparison: same bytes, same containment, same everything else.
 
-    Per step it returns the rows one side had that the other did not, the
-    reference row count they came out of, and how many artifacts it looked at.
+    Per step it returns the rows each side had that the other did not, the
+    total rows the two runs put in front of it, and how many artifacts it
+    looked at.
     """
     con = duckdb.connect()
     found: dict[str, NaiveScore] = {}
@@ -320,17 +335,20 @@ def naive_pass(manifest: Manifest) -> dict[str, tuple[int, int]]:
         reference, second = manifest.runs[0], manifest.runs[1]
         for ref_step, cand_step in zip(reference.steps, second.steps, strict=True):
             written = {a.name: a for a in cand_step.artifacts}
-            unmatched = rows = 0
+            missing = appeared = rows = 0
             for artifact in ref_step.artifacts:
                 later = written.get(artifact.name)
                 if later is None:
-                    unmatched += artifact.rows
+                    missing += artifact.rows
                     rows += artifact.rows
                     continue
                 diff = bit_exact(con, artifact, later)
-                unmatched += diff.only_in_reference + diff.only_in_candidate
-                rows += artifact.rows
-            found[ref_step.name] = NaiveScore(unmatched, rows, len(ref_step.artifacts))
+                missing += diff.only_in_reference
+                appeared += diff.only_in_candidate
+                rows += artifact.rows + later.rows
+            found[ref_step.name] = NaiveScore(
+                missing, appeared, rows, len(ref_step.artifacts)
+            )
     finally:
         con.close()
     return found
@@ -604,8 +622,11 @@ def report_baseline_one(trials: list[Trial], scored: dict[str, StepScore]) -> di
     hang(
         f"{BENIGN:<22}",
         f"fired on {fired} of {len(benign)} trials, median "
-        f"{statistics.median(counts):,.0f} rows unmatched out of "
-        f"{statistics.median(n.rows for n in benign):,.0f} on each side",
+        f"{statistics.median(counts):,.0f} of the "
+        f"{statistics.median(n.rows_compared for n in benign):,.0f} rows compared found no "
+        f"partner: {statistics.median(n.unmatched_reference for n in benign):,.0f} on the "
+        f"reference side and "
+        f"{statistics.median(n.unmatched_candidate for n in benign):,.0f} on the later run's",
     )
     if len(benign) < len(trials):
         hang(" " * 22, f"{len(trials) - len(benign)} trial(s) compared nothing here")
@@ -622,7 +643,12 @@ def report_baseline_one(trials: list[Trial], scored: dict[str, StepScore]) -> di
         f"{scored[INTERMITTENT].fired_in} of {scored[INTERMITTENT].trials}",
     )
     return {
+        # The median of both sides added up, which is the figure the README has
+        # published since slice 5, now with the denominator it is out of.
         "benign_median": statistics.median(counts),
+        "benign_rows_compared": statistics.median(n.rows_compared for n in benign),
+        "benign_reference_side": statistics.median(n.unmatched_reference for n in benign),
+        "benign_later_side": statistics.median(n.unmatched_candidate for n in benign),
         "benign_fired": fired,
         "benign_trials": len(benign),
     }
@@ -947,7 +973,8 @@ def report_conditions(
 
     naive_words = (
         f"it fired on {naive['benign_fired']:.0f} of {naive['benign_trials']:.0f} trials, median "
-        f"{naive['benign_median']:,.0f} rows unmatched on a step where nothing is wrong"
+        f"{naive['benign_median']:,.0f} rows unmatched of the "
+        f"{naive['benign_rows_compared']:,.0f} compared, on a step where nothing is wrong"
         if naive["benign_trials"]
         else f"{BENIGN} wrote no artifact for it to compare in any of the {n} trials"
     )

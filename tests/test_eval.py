@@ -3,8 +3,11 @@
 There are four loops in this repository now: the main one, the single-threaded
 bisect, amplification, and this. Three times a guard written for one of them
 failed to reach its twins, so this file enumerates what the main loop refuses to
-do and checks the eval refuses the same. It does not re-measure the pipelines,
-which takes six minutes and belongs in `scripts/eval.py`.
+do and checks the eval refuses the same. It does not re-measure
+`pipelines/reference.py`, which takes six minutes and belongs in
+`scripts/eval.py`. One test runs a fifty-row pipeline of its own, because
+baseline 1's arithmetic is over real artifacts and a hand-built score would
+assert nothing but the fixture.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from twicerun.amplify import DIVERGENT, STABLE_ON_THIS_INPUT, Amplification
 from twicerun.cause import Bisect
 from twicerun.measurement import StepMeasurement
 from twicerun.oracle import ArtifactFindings
+from twicerun.runner import run_pipeline
 
 EVAL = Path(__file__).resolve().parent.parent / "scripts" / "eval.py"
 
@@ -34,9 +38,24 @@ from eval import (  # noqa: E402
     StepScore,
     claim_workspace,
     main,
+    naive_pass,
     static_flags,
     without_amplifiers,
 )
+
+# Fifty rows, every one of them a different id on the second run, so both sides
+# of the comparison lose all fifty.
+BOTH_SIDES_MOVE = """
+CALLS = {"n": 0}
+
+
+def shifts(ctx):
+    CALLS["n"] += 1
+    ctx.write("rows", f"SELECT i + {CALLS['n']} * 100 AS id FROM range(50) AS s(i)")
+
+
+STEPS = [shifts]
+"""
 
 
 def measured(name: str, *, fired: int = 0, compared: int = 1) -> StepMeasurement:
@@ -180,6 +199,29 @@ def test_the_pairs_name_steps_that_exist_in_both_pipelines():
         assert right in twins, right
     for name in (*BROKEN, INTERMITTENT):
         assert name in broken, name
+
+
+def test_baseline_one_counts_two_sides_against_a_total_that_can_hold_them(tmp_path):
+    """A ceiling cannot be beaten, and baseline 1 beat its own by a factor of 1.27.
+
+    Both sides went into the numerator while the denominator took the reference
+    row count alone, so ten trials published `median 1,265 rows unmatched out of
+    1,000 on each side`. Fifty rows that all move is 50 unmatched each way out
+    of the 100 rows the two runs put in front of it; the old arithmetic made
+    that 100 out of 50.
+
+    This one runs a pipeline, unlike the rest of the file, because the
+    arithmetic being checked is over real artifacts and a hand-built
+    `NaiveScore` would only assert the fixture.
+    """
+    where = tmp_path / "shifts.py"
+    where.write_text(BOTH_SIDES_MOVE, encoding="utf-8")
+    _, manifest = run_pipeline(where, runs=2, parent=tmp_path / "artifacts", keep=1)
+
+    scored = naive_pass(manifest)["shifts"]
+    assert (scored.unmatched_reference, scored.unmatched_candidate) == (50, 50)
+    assert scored.rows_compared == 100
+    assert scored.unmatched <= scored.rows_compared
 
 
 def test_the_eval_refuses_an_into_that_already_exists(tmp_path):
