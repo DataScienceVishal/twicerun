@@ -7,8 +7,11 @@
 
 Every threshold below was written into `specs/2026-08-26-rerun-determinism-spec.md`
 before any of this project existed, including three that declare a part of it
-unnecessary. They are printed with whatever they came out as. Two of them do not
-hold and the section at the bottom says so rather than quietly widening.
+unnecessary. They print with whatever they came out as, and a triggered
+condition is a published result rather than a failed run, so this exits 0
+either way. Which of them trigger moves between runs of the same code: the
+README publishes four ten-trial runs and one of the four breached the spec's
+sensitivity threshold.
 
 A trial is three passes: the broken pipeline at the defaults, its matched twin at
 the defaults, and the broken pipeline again with containment off. The first two
@@ -37,6 +40,7 @@ import sys
 import textwrap
 import time
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -86,17 +90,6 @@ WIDTH = 98
 
 def say(line: str = "") -> None:
     print(line, flush=True)
-
-
-def wrap(body: str, indent: str = "  ") -> None:
-    """Fill a sentence that carries a step name or a measured figure in it.
-
-    The fixed prose here is wrapped by hand, which is fine while the words never
-    change. These sentences interpolate, so a longer step name moves every line
-    break after it and the hand-wrapped version is wrong the first time it does.
-    """
-    for line in textwrap.wrap(body, width=WIDTH, initial_indent=indent, subsequent_indent=indent):
-        say(line)
 
 
 def hang(label: str, body: str) -> None:
@@ -343,10 +336,17 @@ STATIC_CHECKS = (
 def static_flags(pipeline: Path) -> dict[str, list[str]]:
     """Which of the four patterns hit which step, per function body.
 
-    Parsed rather than grepped so a pattern cannot match a docstring in a
-    neighbouring function and be credited to the wrong step. The docstrings are
-    where these bugs are described in words, so grep over the file scores every
-    check against every step.
+    Parsed rather than grepped because the pairing is what the baseline is
+    scored on and a file-level hit cannot be attributed to a step. Grep the
+    twins file for the append pattern and it hits, because
+    `apply_price_updates_deduped` reads and writes `prices`; a file-level check
+    would report an append bug in the file whose entire purpose is that it has
+    none.
+
+    Docstrings are dropped on the way. On these two files that changes no hit,
+    which was measured rather than assumed, but every bug here is described in
+    words directly above its own code and leaving them in would make the
+    patterns depend on how the prose is worded.
     """
     tree = ast.parse(pipeline.read_text(encoding="utf-8"))
     flagged = {}
@@ -385,9 +385,9 @@ def forced_amplification(
     loop stays quiet throws away most of them.
 
     So this points the shipped amplifiers at one step directly, through the same
-    `amplify_runs` the runner calls. It is the measurement `scripts/
-    amplification_gap.py` makes over 40 passes, folded into a trial that has
-    already paid for the pipeline run underneath it.
+    `amplify_runs` the runner calls. It is what `amplification_gap.py` next door
+    measures over 40 passes, folded into a trial that has already paid for the
+    pipeline run underneath it.
     """
     rates: dict[str, tuple[int, int]] = {}
     for entry in amplify_runs(
@@ -643,8 +643,8 @@ def report_baseline_three(trials: list[Trial], scored: dict[str, StepScore]) -> 
     say("  main loop and not the bisect.")
     say("  The other steps move too, and that is the intermittent pair rather than containment.")
 
-    overstated = _append_magnitudes(trials, "uncontained")
-    true = _append_magnitudes(trials, "reference")
+    overstated = _append_magnitudes(trial.uncontained for trial in trials)
+    true = _append_magnitudes(trial.reference for trial in trials)
     say(f"\n  append_audit_log extra rows, uncontained  {_render(overstated)}")
     say(f"  {'':<41}contained  {_render(true)}")
     say("  Four reruns' worth of duplication charged to one step, against what one rerun of it")
@@ -657,10 +657,17 @@ def report_baseline_three(trials: list[Trial], scored: dict[str, StepScore]) -> 
     }
 
 
-def _append_magnitudes(trials: list[Trial], which: str) -> Counter:
+def _append_magnitudes(passes: Iterable[list[StepMeasurement]]) -> Counter:
+    """How many extra rows the append bug produced, per pass, as a distribution.
+
+    The count is on the later side. An append with no key loses nothing from the
+    reference run and gains rows in every run after it, so the reference-side
+    figure is zero and reading it would report the loudest bug in the pipeline
+    as a magnitude of nothing.
+    """
     seen = Counter()
-    for trial in trials:
-        step = next((s for s in getattr(trial, which) if s.name == "append_audit_log"), None)
+    for steps in passes:
+        step = next((s for s in steps if s.name == "append_audit_log"), None)
         worst = None if step is None else step.worst
         if worst is not None:
             seen[f"{worst.unmatched_candidate:,}"] += 1
@@ -911,10 +918,6 @@ def _bound_words(bounds: dict[str, float]) -> str:
         f"cleared on {bounds['loose_cleared']:.0f} of {bounds['step_passes']:.0f} at n = rows "
         f"read, and {bounds['tight_cleared']:.0f} of {bounds['step_passes']:.0f} at the tight n"
     )
-
-
-def _shape(counted: list[int]) -> str:
-    return _render(Counter(str(n) for n in counted))
 
 
 def _render(counted: Counter) -> str:
