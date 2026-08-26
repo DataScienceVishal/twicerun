@@ -2,9 +2,22 @@
 
 Every DuckDB number this project reports depends on the version and the thread
 count, so both are recorded next to the artifacts rather than left to whoever
-reads the report to remember. The per-step input row count is recorded for the
-same reason: the reassociation bound in slice 2 is a function of it, and the
-storage interface is the only thing that ever sees it.
+reads the report to remember.
+
+`StepRecord.rows_read` is here for slice 2's reassociation bound, which is a
+function of the term count, and the storage interface is the only thing that
+sees it. Two things about it are worth stating before slice 2 leans on it.
+
+It is a lower bound, not a count of rows scanned. Only `ctx.read` and
+`ctx.state` add to it, so anything a step pulls in through `ctx.sql` is
+invisible: `apply_price_updates` records 300,000 while its two CREATE TABLE AS
+statements scan at least 300,000 more.
+
+And "brought into scope" is not "scanned" even where it is counted.
+`daily_revenue` records 2,000,000 for a step whose query reads `orders` once,
+and would record the same 2,000,000 if the query read it twice. The bound needs
+terms per aggregate, which is a narrower quantity than either. Slice 2 has to
+derive that rather than assume this field already is it.
 """
 
 from __future__ import annotations

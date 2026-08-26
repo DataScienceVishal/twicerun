@@ -99,3 +99,38 @@ def test_rows_read_accumulates_across_several_reads(con, tmp_path):
 
 def test_quote_survives_an_apostrophe_in_the_path():
     assert quote(Path("/tmp/vishal's runs/a.parquet")) == "'/tmp/vishal''s runs/a.parquet'"
+
+
+def test_sql_runs_ddl_and_returns_nothing_for_it(con, tmp_path):
+    ctx = context(con, tmp_path)
+    assert ctx.sql("CREATE TABLE staged AS SELECT i FROM range(3) AS s(i)") is None
+    assert con.execute("SELECT count(*) FROM staged").fetchone() == (3,)
+
+
+def test_sql_hands_back_a_relation_for_a_select(con, tmp_path):
+    ctx = context(con, tmp_path)
+    assert ctx.sql("SELECT 41 + 1 AS answer").fetchone() == (42,)
+
+
+def test_sql_lets_a_step_build_something_write_can_then_capture(con, tmp_path):
+    """The reason the escape hatch exists: MERGE is not a single SELECT."""
+    ctx = context(con, tmp_path)
+    ctx.sql("CREATE TABLE target AS SELECT 1 AS id, 10 AS v")
+    ctx.sql("CREATE TABLE source AS SELECT 1 AS id, 99 AS v")
+    ctx.sql(
+        "MERGE INTO target t USING source s ON t.id = s.id "
+        "WHEN MATCHED THEN UPDATE SET v = s.v"
+    )
+    assert ctx.write("merged", "SELECT * FROM target").rows == 1
+    assert con.execute("SELECT v FROM target").fetchone() == (99,)
+
+
+def test_rows_read_does_not_see_anything_pulled_in_through_sql(con, tmp_path):
+    """The documented hole in rows_read, asserted rather than left as a comment.
+
+    Slice 2's reassociation bound consumes this number, so the gap needs to be
+    visible in the suite rather than discovered by whoever writes that bound.
+    """
+    ctx = context(con, tmp_path)
+    ctx.sql("CREATE TABLE staged AS SELECT i FROM range(5000) AS s(i)")
+    assert ctx.rows_read == 0

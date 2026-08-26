@@ -11,6 +11,15 @@ where artifacts get captured, where reads get redirected for containment, where
 input rows get counted for the tolerance bound, and where amplified inputs will
 be substituted. A step calling `ctx.write()` gets all four. A step calling
 `duckdb.execute("COPY ... TO ...")` behind its back gets none.
+
+`ctx.sql` is the seam in that argument and it is deliberate rather than
+overlooked. A step needs to run DDL and statements like MERGE that are not a
+single SELECT, so the escape hatch has to exist. What it costs is that anything
+`ctx.sql` scans is uncounted and anything it writes outside `ctx.write` is
+uncaptured. The reference pipeline uses it three times, all inside
+`apply_price_updates`, and that step's `rows_read` is short by at least 300,000
+as a result. Narrowing this is slice 2's problem, since slice 2 is the first
+thing that consumes the number.
 """
 
 from __future__ import annotations
@@ -88,6 +97,11 @@ class StepContext:
         return self._view_over(name, artifact)
 
     def sql(self, query: str) -> duckdb.DuckDBPyRelation | None:
+        """Run a statement the other three methods cannot express, such as MERGE.
+
+        Returns None for anything without a result set, which is what DuckDB
+        does. Nothing here is counted or captured; see the module docstring.
+        """
         return self._con.sql(query)
 
     def write(self, name: str, query: str) -> Artifact:
