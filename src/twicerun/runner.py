@@ -17,6 +17,7 @@ fresh connections reading the same Parquet file, 493 to 696 groups of 1,000.
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
 import shutil
 import time
@@ -38,6 +39,11 @@ Step = Callable[[StepContext], None]
 # Only directories matching this get pruned, so pointing --run-dir at a
 # directory holding anything else cannot delete it.
 RUN_DIR_NAME = re.compile(r"^run-\d{8}-\d{6}(-\d+)?$")
+
+# Dropped in a run directory while it is being written and removed at the end.
+# It holds the pid, so a run killed part way through leaves one behind that the
+# next invocation can tell is stale rather than blocking cleanup forever.
+RUNNING = ".running"
 
 
 class PipelineError(RuntimeError):
@@ -80,6 +86,37 @@ def new_run_dir(parent: Path) -> Path:
     raise PipelineError(f"1000 run directories already exist for {stamp} under {parent}")
 
 
+def mark_running(run_dir: Path) -> Path:
+    marker = run_dir / RUNNING
+    marker.write_text(str(os.getpid()), encoding="utf-8")
+    return marker
+
+
+def is_running(run_dir: Path) -> bool:
+    """Whether another invocation is still writing this directory.
+
+    Signal 0 does no signalling: it only asks whether the process exists and
+    whether we could signal it. A pid left by a crashed run fails that and the
+    directory becomes prunable again, so a crash cannot pin a run directory in
+    place forever.
+    """
+    marker = run_dir / RUNNING
+    try:
+        pid = int(marker.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return False
+    if pid == os.getpid():
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Alive and owned by someone else, which still means do not delete it.
+        return True
+    return True
+
+
 def prune_run_dirs(parent: Path, keep: int, current: Path | None = None) -> list[Path]:
     """Drop all but the most recent `keep` run directories, `current` always among them.
 
@@ -104,12 +141,20 @@ def prune_run_dirs(parent: Path, keep: int, current: Path | None = None) -> list
     So recency comes from mtime rather than from the name, and `current` is
     excluded from the candidates outright. It still counts toward `keep`, so
     --keep 1 means one directory in total.
+
+    `current` only covers this process. Two invocations sharing a --run-dir
+    would have the second delete the first's artifacts mid-run, and the first
+    would exit 3 blaming a missing Parquet file rather than the other process.
+    A live run leaves a .running marker holding its pid, and a directory with a
+    live marker is not a candidate. Skipping anything recently written would
+    have been simpler and would have broken retention outright, since
+    back-to-back runs are the normal case and every one of them is recent.
     """
     if keep < 1:
         return []
     everything = [p for p in parent.glob("run-*") if p.is_dir() and RUN_DIR_NAME.match(p.name)]
     candidates = sorted(
-        (p for p in everything if current is None or p != current),
+        (p for p in everything if p != current and not is_running(p)),
         key=lambda p: (p.stat().st_mtime, p.name),
     )
     dropped = candidates[: max(0, len(everything) - keep)]
@@ -256,41 +301,45 @@ def run_pipeline(
 
     steps = load_steps(pipeline)
     run_dir = new_run_dir(parent)
+    marker = mark_running(run_dir)
     dropped = prune_run_dirs(parent, keep, current=run_dir)
-    probe = duckdb.connect()
-    environment = Environment.observe(probe)
-    probe.close()
+    try:
+        probe = duckdb.connect()
+        environment = Environment.observe(probe)
+        probe.close()
 
-    manifest = Manifest(pipeline=str(pipeline), root=run_dir, environment=environment)
-    began = time.perf_counter()
+        manifest = Manifest(pipeline=str(pipeline), root=run_dir, environment=environment)
+        began = time.perf_counter()
 
-    carried: dict[str, Artifact] = {}
-    for run in range(1, runs + 1):
-        record, written = execute_run(steps, run, run_dir / f"run-{run:02d}", carried)
-        manifest.runs.append(record)
-        carried = written
+        carried: dict[str, Artifact] = {}
+        for run in range(1, runs + 1):
+            record, written = execute_run(steps, run, run_dir / f"run-{run:02d}", carried)
+            manifest.runs.append(record)
+            carried = written
 
-    keys = keys or {}
-    _check_keys_named_something(keys, manifest.runs[0])
-    measured = [
-        StepMeasurement(index=s.index, name=s.name, comparisons=runs - 1, terms=s.rows_read)
-        for s in manifest.runs[0].steps
-    ]
-    for later in manifest.runs[1:]:
-        rounds = compare_runs(manifest.runs[0], later, keys)
-        for step, found in zip(measured, rounds, strict=True):
-            step.observe(found)
+        keys = keys or {}
+        _check_keys_named_something(keys, manifest.runs[0])
+        measured = [
+            StepMeasurement(index=s.index, name=s.name, comparisons=runs - 1, terms=s.rows_read)
+            for s in manifest.runs[0].steps
+        ]
+        for later in manifest.runs[1:]:
+            rounds = compare_runs(manifest.runs[0], later, keys)
+            for step, found in zip(measured, rounds, strict=True):
+                step.observe(found)
 
-    manifest.save()
-    report = Report(
-        pipeline=str(pipeline),
-        run_dir=str(run_dir),
-        runs=runs,
-        environment=environment,
-        steps=measured,
-        seconds=time.perf_counter() - began,
-        policy=policy or Policy(),
-        pruned=len(dropped),
-        keep=keep,
-    )
+        manifest.save()
+        report = Report(
+            pipeline=str(pipeline),
+            run_dir=str(run_dir),
+            runs=runs,
+            environment=environment,
+            steps=measured,
+            seconds=time.perf_counter() - began,
+            policy=policy or Policy(),
+            pruned=len(dropped),
+            keep=keep,
+        )
+    finally:
+        marker.unlink(missing_ok=True)
     return report, manifest

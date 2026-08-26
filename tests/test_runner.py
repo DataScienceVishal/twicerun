@@ -16,7 +16,13 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from twicerun.runner import PipelineError, load_steps, prune_run_dirs, run_pipeline
+from twicerun.runner import (
+    RUNNING,
+    PipelineError,
+    load_steps,
+    prune_run_dirs,
+    run_pipeline,
+)
 
 CONTROLLED = '''
 CALLS = {"n": 0}
@@ -292,3 +298,51 @@ def test_recency_comes_from_the_clock_not_from_the_name(tmp_path):
 
     assert prune_run_dirs(parent, keep=1) == [older]
     assert newer.is_dir()
+
+
+def test_a_live_run_directory_is_not_a_deletion_candidate(tmp_path):
+    """Two invocations sharing a --run-dir used to eat each other's artifacts.
+
+    The loser exited 3 blaming a missing Parquet file rather than the other
+    process. A pid that is not ours and is still alive means leave it alone.
+    """
+    parent = tmp_path / "artifacts"
+    parent.mkdir()
+    live, done, current = (
+        parent / "run-20260826-100715",
+        parent / "run-20260826-100716",
+        parent / "run-20260826-100717",
+    )
+    for path in (live, done, current):
+        path.mkdir()
+    # pid 1 exists on every unix and is not this process.
+    (live / RUNNING).write_text("1", encoding="utf-8")
+
+    assert prune_run_dirs(parent, keep=1, current=current) == [done]
+    assert live.is_dir()
+
+
+def test_a_marker_left_by_a_crashed_run_does_not_pin_the_directory(tmp_path):
+    parent = tmp_path / "artifacts"
+    parent.mkdir()
+    stale = parent / "run-20260826-100715"
+    stale.mkdir()
+    (parent / "run-20260826-100716").mkdir()
+    # A pid that cannot be running, so the marker is rubbish left by a crash.
+    (stale / RUNNING).write_text("999999999", encoding="utf-8")
+    os.utime(stale, (1, 1))
+
+    assert prune_run_dirs(parent, keep=1) == [stale]
+
+
+def test_rapid_sequential_runs_still_settle_at_the_retention_limit(tmp_path):
+    """The marker must not turn every recent directory into a survivor.
+
+    Skipping anything recently written would have been the simpler fix and
+    would have broken this, because back-to-back runs are the normal case.
+    """
+    where = write_pipeline(tmp_path, ALWAYS_CLEAN)
+    parent = tmp_path / "artifacts"
+    for _ in range(8):
+        run_pipeline(where, runs=2, parent=parent, keep=1)
+    assert len(list(parent.glob("run-*"))) == 1
