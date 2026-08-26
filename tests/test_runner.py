@@ -125,3 +125,23 @@ def test_a_step_that_raises_is_not_swallowed(tmp_path):
     body = "def broken(ctx):\n    ctx.write('x', 'SELECT * FROM nope')\n\n\nSTEPS = [broken]\n"
     with pytest.raises(duckdb.CatalogException, match="nope"):
         run_pipeline(write_pipeline(tmp_path, body), runs=2, parent=tmp_path / "artifacts")
+
+
+def test_the_reference_pipeline_still_loads():
+    """Cheap guard, and deliberately not a run of it.
+
+    Executing the reference pipeline takes six seconds and its whole purpose is
+    to give a different answer each time, so it does not belong in a suite that
+    has to pass on a 4-vCPU runner. Importing it catches the thing CI can catch:
+    a broken import or a STEPS list that no longer matches the file.
+    """
+    steps = load_steps(Path(__file__).resolve().parents[1] / "pipelines" / "reference.py")
+    assert [s.__name__ for s in steps] == [
+        "generate_inputs",
+        "daily_revenue",
+        "customer_keys",
+        "apply_price_updates",
+        "append_audit_log",
+        "mean_basket",
+        "sparse_customer_keys",
+    ]
