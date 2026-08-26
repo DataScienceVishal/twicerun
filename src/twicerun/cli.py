@@ -49,10 +49,10 @@ def _judge(args: argparse.Namespace) -> int:
         return 2
 
     print(report.render())
-    return _exit_code(report)
+    return exit_code(report)
 
 
-def _exit_code(report: Report) -> int:
+def exit_code(report: Report) -> int:
     """1 real divergence, 4 amplified divergence, 5 an amplifier that could not ask.
 
     Under the default policy the 1 includes the benign float drift, which is the
@@ -308,7 +308,7 @@ def main(argv: list[str] | None = None) -> int:
         return 3
 
     print(report.render())
-    return _exit_code(report)
+    return exit_code(report)
 
 
 if __name__ == "__main__":

@@ -30,7 +30,7 @@ import sys
 from pathlib import Path
 
 from twicerun.amplify import AMPLIFIERS
-from twicerun.runner import _scored, amplify_runs, load_steps, run_pipeline
+from twicerun.runner import amplify_runs, load_steps, run_pipeline, scored_runs
 
 LOOP = "the five-run loop"
 REFERENCE = Path(__file__).resolve().parent.parent / "pipelines" / "reference.py"
@@ -51,7 +51,7 @@ def one_pass(into: Path) -> dict[str, tuple[int, int]]:
         manifest.environment.threads,
         {},
     ):
-        rates[entry.amplifier] = (_scored(entry.runs, {})[0], max(len(entry.runs) - 1, 0))
+        rates[entry.amplifier] = (scored_runs(entry.runs, {})[0], max(len(entry.runs) - 1, 0))
     shutil.rmtree(into, ignore_errors=True)
     return rates
 

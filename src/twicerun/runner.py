@@ -584,7 +584,7 @@ def _one_amplifier(
         )
         started = repeat(runs=probe)
         records = started.records
-        if runs > probe and _scored(records, keys)[0]:
+        if runs > probe and scored_runs(records, keys)[0]:
             records = records + repeat(
                 runs=runs, start=probe + 1, carried=started.carried
             ).records
@@ -596,7 +596,7 @@ def _one_amplifier(
     return AmplifiedRuns(index, amplifier, note=note, runs=records, error=error)
 
 
-def _scored(
+def scored_runs(
     records: Sequence[RunRecord], keys: Mapping[str, Sequence[str]]
 ) -> tuple[int, int]:
     """How many of runs 2 to N disagreed with run 1, and how many artifacts said so.
@@ -630,7 +630,7 @@ def attach_amplification(
         step = on.get(entry.step_index)
         if step is None:
             continue
-        fired, compared = _scored(entry.runs, keys)
+        fired, compared = scored_runs(entry.runs, keys)
         step.amplifications.append(
             Amplification(
                 amplifier=entry.amplifier,
