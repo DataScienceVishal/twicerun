@@ -58,12 +58,24 @@ class Bisect:
 
     comparisons: int
     fired: int
+    artifacts_compared: int
     threads: int = BISECT_THREADS
 
     @property
-    def label(self) -> str:
-        return PERSISTS_SINGLE_THREADED if self.fired else PARALLEL_ORDER
+    def measured(self) -> bool:
+        """Whether the re-execution compared any artifact at all.
+
+        A step can write nothing when it is re-executed on its own, most often
+        by checking for a table a skipped step would have created and doing
+        nothing when it is absent. Its rate then comes out `0 of 4` from four
+        comparisons of nothing, because `any([])` is False, and reads exactly
+        like four clean ones. The main loop already refuses to treat an empty
+        comparison as evidence and this has to match it.
+        """
+        return self.artifacts_compared > 0
 
     @property
-    def bound(self) -> float:
-        return upper_bound(self.comparisons)
+    def label(self) -> str | None:
+        if not self.measured:
+            return None
+        return PERSISTS_SINGLE_THREADED if self.fired else PARALLEL_ORDER

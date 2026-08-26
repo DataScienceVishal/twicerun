@@ -64,13 +64,18 @@ def losing_rows() -> ArtifactFindings:
 
 
 def step(
-    *rounds: list[ArtifactFindings], terms: int = 2_000_000, single_threaded: int | None = 0
+    *rounds: list[ArtifactFindings],
+    terms: int = 2_000_000,
+    single_threaded: int | None = 0,
+    bisect_artifacts: int | None = None,
 ) -> StepMeasurement:
     """A step's measurements, carrying by default the bisect condition 2 needs.
 
     `single_threaded` is the bisect's own fire rate. 0 is a step whose drift
     went away at one thread, which is what reduction-order asks for. None is a
     step that was never bisected, which is no evidence rather than good news.
+    `bisect_artifacts` defaults to one per comparison and is set to 0 for the
+    step that re-executed and wrote nothing.
     """
     measured = StepMeasurement(
         index=1,
@@ -80,7 +85,11 @@ def step(
         bisect=(
             None
             if single_threaded is None
-            else Bisect(comparisons=len(rounds), fired=single_threaded)
+            else Bisect(
+                comparisons=len(rounds),
+                fired=single_threaded,
+                artifacts_compared=len(rounds) if bisect_artifacts is None else bisect_artifacts,
+            )
         ),
     )
     for round_ in rounds:
@@ -206,6 +215,23 @@ def test_a_threshold_downgrading_everything_still_reports_why_the_bound_did_not(
 def test_a_step_the_bound_does_cover_has_no_refusal_to_report():
     """The other side of it, or the line above would print on every clean downgrade."""
     assert judge(step([drifting(4.5e-16)]), Policy(REDUCTION_ORDER)).bound_refusal is None
+
+
+def test_a_bisect_that_compared_nothing_is_not_a_clean_bisect():
+    """`any([])` is False, so a rate out of no artifacts reads like four clean ones.
+
+    A step can write nothing when it is re-executed alone, most often by
+    checking for a table a skipped step would have created. The main loop
+    already refuses to read an empty comparison as evidence about a step and
+    the bisect has to match it, or reduction-order downgrades on a zero that
+    counted nothing.
+    """
+    empty = step([drifting(4.5e-16)], single_threaded=0, bisect_artifacts=0)
+    verdict = judge(empty, Policy(REDUCTION_ORDER))
+
+    assert (verdict.fired, verdict.tolerated) == (1, 0)
+    assert "out of nothing" in verdict.bound_refusal
+    assert empty.cause is None
 
 
 def test_a_manual_threshold_does_not_need_the_bisect_to_agree_with_it():

@@ -143,7 +143,7 @@ class Report:
         every line, and six copies of a warning is how a warning stops being
         read.
         """
-        bisected = [s for s in self.steps if s.cause is not None]
+        bisected = [s for s in self.steps if s.fired and s.bisect is not None]
         if self.bisect_error:
             # Printed as it was raised, wrapping and all, because an edited
             # error message is a worse thing to hand someone than an untidy one.
@@ -186,8 +186,15 @@ class Report:
             )
         width = max(len(f"{s.index} {s.name}") for s in bisected)
         for step in bisected:
+            label = f"  {f'{step.index} {step.name}'.ljust(width)}  "
+            if step.cause is None:
+                lines.append(
+                    f"{label}{'no rate':<24}  re-executed and wrote no artifacts, so there "
+                    f"was nothing to compare"
+                )
+                continue
             lines.append(
-                f"  {f'{step.index} {step.name}'.ljust(width)}  {step.cause:<24}  "
+                f"{label}{step.cause:<24}  "
                 f"{step.fired} of {step.comparisons} at threads={self.environment.threads}, "
                 f"{step.bisect.fired} of {step.bisect.comparisons} at "
                 f"threads={step.bisect.threads}"

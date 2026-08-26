@@ -64,8 +64,9 @@ class StepMeasurement:
         """What the single-threaded re-execution made of this step's divergence.
 
         None where there is nothing to explain, which is a step that never
-        fired, and where nothing was measured, which is a manifest written
-        before the bisect existed.
+        fired; where nothing was measured, which is a manifest written before
+        the bisect existed or a bisect that failed; and where the re-execution
+        wrote no artifacts, which is a rate out of nothing.
         """
         if self.bisect is None or not self.fired:
             return None

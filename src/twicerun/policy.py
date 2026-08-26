@@ -185,7 +185,9 @@ def judge(step: StepMeasurement, policy: Policy) -> StepVerdict:
     # others, and a step that still diverges on one thread has not shown that
     # the order of a parallel reduction is what moved it.
     pure = step.classes == frozenset({Divergence.VALUE_DRIFT})
-    quiet_at_one_thread = step.bisect is not None and step.bisect.fired == 0
+    quiet_at_one_thread = (
+        step.bisect is not None and step.bisect.measured and step.bisect.fired == 0
+    )
     fired = tolerated = 0
     routes: set[str] = set()
     for round_ in step.diverged:
@@ -354,6 +356,11 @@ def _no_mechanism(step: StepMeasurement) -> str:
         return (
             "it was not re-executed at threads=1, so nothing here shows the drift is "
             "reduction order"
+        )
+    if not step.bisect.measured:
+        return (
+            "it wrote no artifacts when re-executed at threads=1, so its rate there is "
+            "out of nothing"
         )
     return (
         f"it still diverges at threads=1, {step.bisect.fired} of "

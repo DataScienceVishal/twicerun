@@ -392,13 +392,19 @@ def attach_bisect(
         return
     reference, *later = manifest.bisect
     fired = dict.fromkeys((s.index for s in reference.steps), 0)
+    compared = dict.fromkeys((s.index for s in reference.steps), 0)
     for run in later:
         for step, found in zip(reference.steps, compare_runs(reference, run, keys), strict=True):
+            compared[step.index] += len(found)
             if any(f.diverged for f in found):
                 fired[step.index] += 1
     for step in measured:
         if step.index in fired:
-            step.bisect = Bisect(comparisons=len(later), fired=fired[step.index])
+            step.bisect = Bisect(
+                comparisons=len(later),
+                fired=fired[step.index],
+                artifacts_compared=compared[step.index],
+            )
 
 
 def measure(

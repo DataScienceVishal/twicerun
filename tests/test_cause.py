@@ -248,6 +248,56 @@ def test_a_bisect_that_cannot_run_keeps_the_measurement_it_was_diagnosing(tmp_pa
     assert "their comparison is unaffected" in printed
 
 
+# The careful author's shape: a step checking for a table an earlier step left
+# in the connection, and doing nothing where it is absent. Under `only` the
+# earlier step is skipped, so the re-execution writes nothing at all.
+GUARDS_AGAINST_A_MISSING_TABLE = '''
+CALLS = {"n": 0}
+
+
+def build(ctx):
+    ctx.sql("CREATE TABLE scratch AS SELECT 1 AS i")
+    ctx.write("built", "SELECT * FROM scratch")
+
+
+def guarded(ctx):
+    CALLS["n"] += 1
+    present = ctx.sql(
+        "SELECT count(*) FROM duckdb_tables() WHERE table_name = 'scratch'"
+    ).fetchone()[0]
+    if not present:
+        return
+    ctx.write("out", f"SELECT {CALLS['n']} AS i FROM scratch")
+
+
+STEPS = [build, guarded]
+'''
+
+
+def test_a_bisect_that_compared_no_artifacts_gets_no_label(tmp_path):
+    """The same guard the main loop has, which the bisect was missing.
+
+    Four comparisons of nothing sum to `0 of 4` because `any([])` is False, and
+    the step printed PARALLEL_ORDER over nothing compared against nothing. The
+    main loop says "wrote no artifacts, so nothing was compared" in that
+    situation and has since slice 1.
+    """
+    report, _ = run_pipeline(
+        write_pipeline(tmp_path, GUARDS_AGAINST_A_MISSING_TABLE),
+        runs=5,
+        parent=tmp_path / "artifacts",
+    )
+    guarded = report.steps[1]
+    assert guarded.fired == 4
+    assert guarded.bisect.fired == 0
+    assert guarded.bisect.artifacts_compared == 0
+    assert guarded.cause is None
+
+    printed = report.render()
+    assert "wrote no artifacts, so there was nothing to compare" in printed
+    assert "PARALLEL_ORDER" not in printed
+
+
 def test_the_report_prints_both_rates_and_what_the_zero_is_worth(tmp_path):
     report, _ = run_pipeline(
         write_pipeline(tmp_path, SETTLES_DOWN), runs=5, parent=tmp_path / "artifacts"
