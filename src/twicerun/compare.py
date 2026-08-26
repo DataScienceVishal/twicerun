@@ -25,24 +25,33 @@ import duckdb
 from twicerun.manifest import Artifact
 from twicerun.storage import quote
 
-FIELD_SEPARATOR = 31  # ASCII unit separator
-
 
 def row_digest(columns: Iterable[str]) -> str:
     """SQL for a canonical 128-bit digest of a row.
 
-    DuckDB casts a DOUBLE to the shortest decimal string that reads back as the
-    same double, so the text is injective over the bit patterns: 0.0 and -0.0
-    encode differently, and so do two doubles one ULP apart. That is what makes
-    this bit-exact rather than approximately exact.
+    Each field is hashed on its own and the fixed-width hashes are concatenated,
+    rather than joining the raw values with a separator and hashing once. A
+    separator is not safe here: any byte chosen as one can occur inside a
+    VARCHAR, so ('x', 'y<sep>=z') and ('x<sep>=y', 'z') join to the same string
+    and digest identically. Both spellings were run and the collision is real.
+    Fixed-width hashes cannot span a field boundary, so the ambiguity goes away
+    at the cost of one md5 per column.
 
-    Every field is prefixed with '=' before being joined, because concat_ws
-    silently drops NULL arguments and ('a', NULL) would otherwise digest the
-    same as ('a'). The prefix means no real value can collide with the NULL
-    marker.
+    Every field is prefixed with '=' before hashing, because a NULL has to be
+    distinguishable from the text a value would print as, and '~' cannot be
+    produced by any non-NULL value once every one of them starts with '='.
+
+    On the encoding itself: DuckDB casts a DOUBLE to the shortest decimal string
+    that reads back as the same double, so distinct finite doubles get distinct
+    text. 0.0 and -0.0 differ, and so do two doubles one ULP apart. The one
+    exception is NaN. Sign survives, as 'nan' against '-nan', but the payload
+    does not: 7ff8000000000000 and 7ff8000000000001 both render 'nan' and this
+    digest cannot tell them apart, before or after a Parquet round trip.
     """
-    fields = ", ".join(f"coalesce('=' || \"{column}\"::VARCHAR, '~')" for column in columns)
-    return f"md5(concat_ws(chr({FIELD_SEPARATOR}), {fields}))"
+    fields = " || ".join(
+        f"md5(coalesce('=' || \"{column}\"::VARCHAR, '~'))" for column in columns
+    )
+    return f"md5({fields})"
 
 
 @dataclass(frozen=True)

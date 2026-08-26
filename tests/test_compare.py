@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import struct
+
 from twicerun.compare import compare, row_digest
 
 ROWS = "SELECT i AS id, (i % 7)::VARCHAR AS label, (i * 1.5)::DOUBLE AS score "\
@@ -97,3 +99,35 @@ def test_a_widened_column_is_reported_as_a_type_change(con, make_artifact):
 
 def test_digest_sql_quotes_awkward_column_names():
     assert '"order by"' in row_digest(["order by"])
+
+
+def test_a_field_cannot_swallow_the_boundary_to_the_next_one(con, make_artifact):
+    """The collision that killed the separator spelling.
+
+    Joining raw values with any byte and hashing once lets a value containing
+    that byte impersonate a field boundary. Digesting each field to a
+    fixed-width hash first makes it unrepresentable rather than unlikely.
+    """
+    left = make_artifact("t", "SELECT 'x' AS a, 'y' || chr(31) || '=z' AS b", run=1)
+    right = make_artifact("t", "SELECT 'x' || chr(31) || '=y' AS a, 'z' AS b", run=2)
+    diff = compare(con, left, right)
+    assert (diff.only_in_reference, diff.only_in_candidate) == (1, 1)
+
+
+def test_two_nan_payloads_digest_the_same_and_that_is_documented(con):
+    """A known hole, asserted so it cannot quietly become a surprise.
+
+    DuckDB renders every quiet NaN as 'nan' whatever the payload, so the digest
+    cannot separate 7ff8000000000000 from 7ff8000000000001. The sign bit does
+    survive, which the second half checks, and row_digest says both things.
+    """
+    nans = [struct.unpack("<d", struct.pack("<Q", bits))[0] for bits in
+            (0x7FF8000000000000, 0x7FF8000000000001, 0xFFF8000000000000)]
+    con.execute("CREATE TABLE n (v DOUBLE)")
+    con.executemany("INSERT INTO n VALUES (?)", [(v,) for v in nans])
+
+    quiet, payload, negative = con.execute(
+        f"SELECT {row_digest(['v'])} FROM n"
+    ).fetchall()
+    assert quiet == payload
+    assert negative != quiet
