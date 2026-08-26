@@ -91,6 +91,11 @@ def apply_price_updates(ctx: StepContext) -> None:
     with no error and no warning. No linter finds it, because it depends on the
     data rather than the query.
 
+    The one bug in this file nobody here has been bitten by. The other three are
+    failures Vishal hit running Databricks pipelines and SQL migrations; this one
+    came out of an experiment for this project, and the window it fires in is
+    narrow enough that most pipelines would never land in it.
+
     It needs scale. At 100,000 target rows and 200,000 source rows it gave 4 to
     8 distinct answers across 10 fresh connections at threads=8; at 50,000 it
     gave one answer every time, and at threads=1 it gave one answer at every
@@ -162,8 +167,11 @@ def mean_basket(ctx: StepContext) -> None:
     """No bug here. A correct float average that legitimately reassociates.
 
     Bit-exact comparison reports several hundred of the 1,000 groups as
-    differing, and every one of those is a false positive. This step is the
-    reason slice 2 exists.
+    differing and every one is a false positive, which is what the oracle was
+    built for. Under the default policy it still reports them, with the ULP
+    distance and the relative size attached, because the user asked whether the
+    pipeline gave the same answer twice and it did not. Under
+    --policy reduction-order the count goes to zero and the magnitudes stay.
     """
     ctx.read("orders")
     ctx.write("mean_basket", "SELECT day, avg(amount) AS mean_amount FROM orders GROUP BY day")
