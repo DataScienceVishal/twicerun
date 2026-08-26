@@ -126,7 +126,7 @@ def test_reduction_order_refuses_a_step_that_also_lost_rows():
     """
     verdict = judge(step([drifting(4.5e-16)], [losing_rows()]), Policy(REDUCTION_ORDER))
     assert (verdict.fired, verdict.tolerated) == (2, 0)
-    assert "ROW_MISSING ROW_EXTRA" in verdict.blocked
+    assert "ROW_MISSING ROW_EXTRA" in verdict.bound_refusal
 
 
 def test_reduction_order_refuses_a_difference_too_large_to_be_reassociation():
@@ -137,7 +137,7 @@ def test_reduction_order_refuses_a_difference_too_large_to_be_reassociation():
     """
     verdict = judge(step([drifting(1e-6)]), Policy(REDUCTION_ORDER))
     assert (verdict.fired, verdict.tolerated) == (1, 0)
-    assert "outside the reassociation bound" in verdict.blocked
+    assert "outside the reassociation bound" in verdict.bound_refusal
 
 
 def test_drift_on_an_exact_column_is_never_reassociation():
@@ -172,7 +172,7 @@ def test_drift_that_survives_one_thread_is_not_reassociation_however_small():
     """
     verdict = judge(step([drifting(4.5e-16)], single_threaded=1), Policy(REDUCTION_ORDER))
     assert (verdict.fired, verdict.tolerated) == (1, 0)
-    assert "still diverges at threads=1, 1 of 1" in verdict.blocked
+    assert "still diverges at threads=1, 1 of 1" in verdict.bound_refusal
 
 
 def test_a_step_that_was_never_bisected_has_nothing_to_downgrade_on():
@@ -184,7 +184,28 @@ def test_a_step_that_was_never_bisected_has_nothing_to_downgrade_on():
     """
     verdict = judge(step([drifting(4.5e-16)], single_threaded=None), Policy(REDUCTION_ORDER))
     assert (verdict.fired, verdict.tolerated) == (1, 0)
-    assert "was not re-executed at threads=1" in verdict.blocked
+    assert "was not re-executed at threads=1" in verdict.bound_refusal
+
+
+def test_a_threshold_downgrading_everything_still_reports_why_the_bound_did_not():
+    """The all-tolerated half of a hole that had already been widened once.
+
+    The reason was computed only where something still fired, so a threshold
+    wide enough to cover every comparison deleted it. This step diverges 4 of 4
+    at threads=1 and moves five orders of magnitude outside the bound, and it
+    exited 0 with the tool saying nothing about either. A flag that quietly
+    removes a falsifiable check is the defect class this project keeps finding.
+    """
+    far_out = step(*[[drifting(4.0e-07, ulps=9)] for _ in range(4)], single_threaded=4)
+    verdict = judge(far_out, Policy(REDUCTION_ORDER, tolerance_relative=1e-6))
+
+    assert (verdict.fired, verdict.tolerated) == (0, 4)
+    assert "still diverges at threads=1, 4 of 4" in verdict.bound_refusal
+
+
+def test_a_step_the_bound_does_cover_has_no_refusal_to_report():
+    """The other side of it, or the line above would print on every clean downgrade."""
+    assert judge(step([drifting(4.5e-16)]), Policy(REDUCTION_ORDER)).bound_refusal is None
 
 
 def test_a_manual_threshold_does_not_need_the_bisect_to_agree_with_it():
@@ -337,4 +358,4 @@ def test_a_step_with_some_comparisons_tolerated_still_explains_the_ones_that_fir
     mixed = step([drifting(4.5e-16)], [drifting(1e-6)])
     verdict = judge(mixed, Policy(REDUCTION_ORDER))
     assert (verdict.fired, verdict.tolerated) == (1, 1)
-    assert "outside the reassociation bound" in verdict.blocked
+    assert "outside the reassociation bound" in verdict.bound_refusal

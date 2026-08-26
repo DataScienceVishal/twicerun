@@ -131,8 +131,8 @@ class Report:
             lines.extend(f"      {line}" for line in _magnitudes(step))
             lines.extend(f"      {hint}" for hint in step.hints)
             lines.extend(f"      {line}" for line in _fallbacks(step))
-            if verdict.blocked:
-                lines.append(f"      {verdict.blocked}")
+            if verdict.bound_refusal:
+                lines.append(f"      {verdict.bound_refusal}")
         return lines
 
     def _causes(self) -> list[str]:

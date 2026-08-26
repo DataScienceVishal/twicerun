@@ -163,7 +163,12 @@ class StepVerdict:
     fired: int
     tolerated: int
     bound: DriftBound | None = None
-    blocked: str | None = None
+    # Why the derived route did not cover this step, where it did not. Named
+    # for the bound rather than for the outcome because it prints whether or
+    # not anything was blocked: a --tolerance threshold can downgrade every
+    # comparison, and the reason reassociation does not explain the step is
+    # still the thing a reader needs.
+    bound_refusal: str | None = None
     # Which routes actually downgraded something here, so the report can say
     # what a TOLERATED rests on instead of leaving two different claims looking
     # identical on the step line.
@@ -198,7 +203,7 @@ def judge(step: StepMeasurement, policy: Policy) -> StepVerdict:
         fired=fired,
         tolerated=tolerated,
         bound=bound,
-        blocked=_blocked(step, policy, bound, pure, quiet_at_one_thread) if fired else None,
+        bound_refusal=_bound_refusal(step, policy, bound, pure, quiet_at_one_thread),
         routes=tuple(route for route in ROUTES if route in routes),
     )
 
@@ -290,38 +295,47 @@ def _inside_manual(policy: Policy, relative: float, ulps: int | None) -> bool:
     return policy.tolerance_relative is None or relative <= policy.tolerance_relative
 
 
-def _blocked(
+def _bound_refusal(
     step: StepMeasurement,
     policy: Policy,
     bound: DriftBound | None,
     pure: bool,
     quiet_at_one_thread: bool,
 ) -> str | None:
-    """Why a step's drift was not downgraded, wherever any comparison still fired.
+    """Why the derived route does not cover this step's drift, if it does not.
 
-    This used to require that nothing at all had been downgraded, so a step
-    with some comparisons tolerated and others not explained the ones that
-    fired to nobody. The figures it quotes are step-wide, which the wording
-    says, because a per-comparison reason would need a per-comparison line and
-    the report already prints one summary per step.
+    This has been widened twice for the same reason and the second time is why
+    it is now about the bound rather than about the outcome. It first required
+    that nothing at all had been downgraded, so a step tolerated on one
+    comparison and firing on another explained the firing to nobody. It then
+    required that something still fired, so a --tolerance threshold wide enough
+    to downgrade every comparison deleted the sentence saying the mechanism
+    story does not hold. A step diverging 4 of 4 at threads=1, moving five
+    orders of magnitude outside the bound, exited 0 saying nothing about
+    either.
+
+    So it is computed for every judged step and returns None when there is
+    nothing to say, which is what a step the bound genuinely covers gets.
 
     The conditions are tested in the order a reader would ask about them: what
     else the step did, then whether one thread makes it stop, then how far the
-    drift went.
+    drift went. The figures are step-wide, which the wording says, because a
+    per-comparison reason needs a per-comparison line and the report prints one
+    summary per step.
     """
     if policy.name != REDUCTION_ORDER or Divergence.VALUE_DRIFT not in step.classes:
         return None
     if not pure:
         others = step.classes - {Divergence.VALUE_DRIFT}
         return (
-            f"drift not downgraded: the step also shows {name_classes(others)}, "
+            f"the bound does not explain this step: it also shows {name_classes(others)}, "
             f"which reassociation cannot produce"
         )
     if not quiet_at_one_thread:
-        return _no_mechanism(step)
+        return f"the bound does not explain this step: {_no_mechanism(step)}"
     if bound is not None and bound.observed > bound.bound:
         return (
-            f"drift not downgraded everywhere: the furthest move in this step, "
+            f"the bound does not explain this step: its furthest move, "
             f"{bound.observed:.4e}, is outside the reassociation bound {bound.bound:.4e}"
         )
     return None
@@ -338,11 +352,10 @@ def _no_mechanism(step: StepMeasurement) -> str:
     """
     if step.bisect is None:
         return (
-            "drift not downgraded: the step was not re-executed at threads=1, so nothing "
-            "here shows the drift is reduction order"
+            "it was not re-executed at threads=1, so nothing here shows the drift is "
+            "reduction order"
         )
     return (
-        f"drift not downgraded: the step still diverges at threads=1, "
-        f"{step.bisect.fired} of {step.bisect.comparisons}, so the order of a parallel "
-        f"reduction is not what moved it"
+        f"it still diverges at threads=1, {step.bisect.fired} of "
+        f"{step.bisect.comparisons}, so the order of a parallel reduction is not what moved it"
     )
