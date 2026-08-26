@@ -197,7 +197,7 @@ def judge(step: StepMeasurement, policy: Policy) -> StepVerdict:
         fired=fired,
         tolerated=tolerated,
         bound=bound,
-        blocked=_blocked(step, policy, bound, pure) if fired and not tolerated else None,
+        blocked=_blocked(step, policy, bound, pure) if fired else None,
         unverified=unverified,
     )
 
@@ -290,7 +290,14 @@ def _inside_manual(policy: Policy, relative: float, ulps: int | None) -> bool:
 def _blocked(
     step: StepMeasurement, policy: Policy, bound: DriftBound | None, pure: bool
 ) -> str | None:
-    """Why a step's drift was not downgraded. Silent on a step with no drift to downgrade."""
+    """Why a step's drift was not downgraded, wherever any comparison still fired.
+
+    This used to require that nothing at all had been downgraded, so a step
+    with some comparisons tolerated and others not explained the ones that
+    fired to nobody. The figures it quotes are step-wide, which the wording
+    says, because a per-comparison reason would need a per-comparison line and
+    the report already prints one summary per step.
+    """
     if policy.name != REDUCTION_ORDER or Divergence.VALUE_DRIFT not in step.classes:
         return None
     if not pure:
@@ -301,7 +308,7 @@ def _blocked(
         )
     if bound is not None and bound.observed > bound.bound:
         return (
-            f"not downgraded: max relative drift {bound.observed:.4e} is outside "
-            f"the reassociation bound {bound.bound:.4e}"
+            f"drift not downgraded everywhere: the furthest move in this step, "
+            f"{bound.observed:.4e}, is outside the reassociation bound {bound.bound:.4e}"
         )
     return None

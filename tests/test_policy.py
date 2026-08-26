@@ -279,3 +279,15 @@ def test_the_step_line_and_the_bound_quote_the_same_observation():
     assert measured.worst.drift_rows == 900
     assert measured.furthest_drift.max_relative == 4.6e-16
     assert judge(measured, Policy(STRICT)).bound.observed == measured.furthest_drift.max_relative
+
+
+def test_a_step_with_some_comparisons_tolerated_still_explains_the_ones_that_fired():
+    """It used to require that nothing at all had been downgraded.
+
+    A step drifting inside the bound on one comparison and far outside it on
+    another reported a fire rate with no reason attached to it.
+    """
+    mixed = step([drifting(4.5e-16)], [drifting(1e-6)])
+    verdict = judge(mixed, Policy(REDUCTION_ORDER))
+    assert (verdict.fired, verdict.tolerated) == (1, 1)
+    assert "outside the reassociation bound" in verdict.blocked
