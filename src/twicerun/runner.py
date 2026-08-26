@@ -24,6 +24,7 @@ import time
 from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NamedTuple
 
 import duckdb
 
@@ -49,6 +50,11 @@ RUNNING = ".running"
 
 class PipelineError(RuntimeError):
     pass
+
+
+class Retention(NamedTuple):
+    dropped: list[Path]
+    live: int
 
 
 def load_steps(path: Path) -> list[Step]:
@@ -151,18 +157,24 @@ def prune_run_dirs(parent: Path, keep: int, current: Path | None = None) -> list
     live marker is not a candidate. Skipping anything recently written would
     have been simpler and would have broken retention outright, since
     back-to-back runs are the normal case and every one of them is recent.
+
+    The live count comes back with the dropped list because skipping those
+    directories suspends the retention the header states as a fact. Three
+    parallel invocations leave three directories and 778 MB, each report
+    claiming to keep one, and a reader with eight CI jobs deserves to be told
+    by the tool rather than by their disk.
     """
     if keep < 1:
-        return []
+        return Retention([], 0)
     everything = [p for p in parent.glob("run-*") if p.is_dir() and RUN_DIR_NAME.match(p.name)]
+    others = [p for p in everything if p != current]
     candidates = sorted(
-        (p for p in everything if p != current and not is_running(p)),
-        key=lambda p: (p.stat().st_mtime, p.name),
+        (p for p in others if not is_running(p)), key=lambda p: (p.stat().st_mtime, p.name)
     )
     dropped = candidates[: max(0, len(everything) - keep)]
     for path in dropped:
         shutil.rmtree(path)
-    return dropped
+    return Retention(dropped, len(others) - len(candidates))
 
 
 def artifacts_before(record: RunRecord, step_index: int) -> dict[str, Artifact]:
@@ -554,7 +566,7 @@ def run_pipeline(
         # exist, so a typo raises after five executions have finished, and
         # pruning up front had already deleted the run the user could have
         # judged instead. A crashing step lost it the same way.
-        dropped = prune_run_dirs(parent, keep, current=run_dir)
+        retention = prune_run_dirs(parent, keep, current=run_dir)
         report = Report(
             pipeline=str(pipeline),
             run_dir=str(run_dir),
@@ -565,7 +577,8 @@ def run_pipeline(
             policy=policy or Policy(),
             contained=contained,
             bisect_error=manifest.bisect_error,
-            pruned=len(dropped),
+            pruned=len(retention.dropped),
+            live=retention.live,
             keep=keep,
         )
     finally:

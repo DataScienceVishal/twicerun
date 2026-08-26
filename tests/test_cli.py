@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from twicerun.cli import KeySyntaxError, main, parse_keys
+from twicerun.runner import RUNNING
 
 CLEAN = '''
 def only_step(ctx):
@@ -340,6 +341,28 @@ def test_a_key_that_names_no_column_is_refused(spelling):
     """
     with pytest.raises(KeySyntaxError):
         parse_keys([spelling])
+
+
+def test_the_header_says_when_a_live_directory_suspended_retention(tmp_path, capsys):
+    """Three parallel invocations leave three directories, each claiming to keep one.
+
+    A run still writing is never a deletion candidate, deliberately, because
+    deleting it would pull the Parquet out from under another process. The
+    header stated retention as a fact anyway, so eight CI jobs was 2 GB and a
+    report insisting on 260 MB.
+    """
+    parent = tmp_path / "artifacts"
+    parent.mkdir()
+    live = parent / "run-20260101-000001"
+    live.mkdir()
+    # pid 1 exists on every unix and is not this process.
+    (live / RUNNING).write_text("1", encoding="utf-8")
+
+    main(["run", str(pipeline(tmp_path, CLEAN)), "--runs", "2", "--run-dir", str(parent)])
+    printed = capsys.readouterr().out
+
+    assert "left 1 directory alone that another invocation is still writing" in printed
+    assert live.is_dir()
 
 
 def test_a_negative_keep_is_a_typo_not_a_stronger_zero(tmp_path, capsys):

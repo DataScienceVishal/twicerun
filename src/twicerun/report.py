@@ -48,6 +48,7 @@ class Report:
     contained: bool = True
     bisect_error: str | None = None
     pruned: int = 0
+    live: int = 0
     keep: int | None = None
 
     @property
@@ -88,7 +89,16 @@ class Report:
             if self.keep == 0
             else _plural(self.keep, "run directory", "run directories")
         )
-        return [f"retention  keeping {kept}" + (f", dropped {self.pruned}" if self.pruned else "")]
+        line = f"retention  keeping {kept}" + (f", dropped {self.pruned}" if self.pruned else "")
+        if not self.live:
+            return [line]
+        # Retention is per invocation while another one is running, because a
+        # live directory is never a deletion candidate. Saying "keeping 1"
+        # over three directories on disk would be the tool misreporting itself.
+        return [
+            f"{line}, and left {_plural(self.live, 'directory', 'directories')} alone that "
+            f"another invocation is still writing"
+        ]
 
     def _containment(self) -> str:
         if self.contained:
