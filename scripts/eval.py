@@ -292,11 +292,11 @@ class StepScore:
         """
         parts = []
         if self.classes:
-            parts.append(_render(self.classes))
+            parts.append(tally(self.classes))
         if self.causes:
-            parts.append(f"cause {_render(self.causes)}")
+            parts.append(f"cause {tally(self.causes)}")
         if self.single_threaded:
-            parts.append(f"threads=1 {_render(self.single_threaded)}")
+            parts.append(f"threads=1 {tally(self.single_threaded)}")
         if any(self.unmatched):
             parts.append(
                 f"median {statistics.median(self.unmatched):,.0f} of the "
@@ -847,10 +847,10 @@ def report_baseline_one(trials: list[Trial], scored: dict[str, StepScore]) -> di
         "benign_fired": fired,
         "benign_trials": len(benign),
     }
-    return {**figures, **report_run_matched(trials, scored)}
+    return {**figures, **report_run_matched(trials)}
 
 
-def report_run_matched(trials: list[Trial], scored: dict[str, StepScore]) -> dict[str, float]:
+def report_run_matched(trials: list[Trial]) -> dict[str, float]:
     """The same comparison over the same runs the oracle got, which is the honest control.
 
     Everything above this line hands the cheap comparison one comparison and the
@@ -983,7 +983,7 @@ def report_baseline_three(
         f"of the {downstream.trials} trials"
     )
     say(
-        f"  that compared it, and is given cause {_render(downstream.causes) or 'none'}, "
+        f"  that compared it, and is given cause {tally(downstream.causes) or 'none'}, "
         f"which is a confident wrong diagnosis:"
     )
     say("  it computes an integer minimum, and an integer minimum cannot reassociate into a")
@@ -1001,7 +1001,7 @@ def report_baseline_three(
     width = len(f"{APPEND} extra rows,")
     say("")
     for label, uncontained, contained in (
-        (f"{APPEND} extra rows,", _render(overstated), _render(true)),
+        (f"{APPEND} extra rows,", tally(overstated), tally(true)),
         ("fire rate,", without.distribution(), with_it.distribution()),
     ):
         say(f"  {label:>{width}} {'uncontained':>11}  {uncontained}")
@@ -1049,7 +1049,7 @@ def report_baseline_four(
     say("  model of it: the same measurements with the amplifiers taken away.")
     went_green = [t for t in trials if t.exit_without == 0 and t.exit_with_amplifiers != 0]
     codes = Counter(f"{t.exit_with_amplifiers} to {t.exit_without}" for t in trials)
-    say(f"  exit code with amplifiers to without   {_render(codes)}")
+    say(f"  exit code with amplifiers to without   {tally(codes)}")
     say(
         f"  {len(went_green)} of {len(trials)} trials exit 0 without the amplifiers on a "
         f"pipeline that is broken."
@@ -1486,7 +1486,7 @@ def report_conditions(
             f"the intermittent step reached neither {DIVERGENT} nor {STABLE_ON_THIS_INPUT} "
             f"in every trial",
             _observed(reached < intermittent.trials, intermittent.trials == n),
-            f"{_render(intermittent.statuses)}, over {intermittent.trials} of {n} trials that "
+            f"{tally(intermittent.statuses)}, over {intermittent.trials} of {n} trials that "
             f"compared it",
         ),
         (
@@ -1539,10 +1539,6 @@ def _bound_words(bounds: dict[str, float]) -> str:
         f"cleared on {bounds['loose_cleared']:.0f} of {bounds['step_passes']:.0f} at n = rows "
         f"read, and {bounds['tight_cleared']:.0f} of {bounds['step_passes']:.0f} at the tight n"
     )
-
-
-def _render(counted: Counter) -> str:
-    return tally(counted)
 
 
 @dataclass(frozen=True)
