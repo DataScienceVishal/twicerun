@@ -6,8 +6,8 @@ is a property of the code and not a proof of it. The proof was four words in
 
     addopts = "-q --disable-socket --allow-unix-socket"
 
-Delete them and 305 tests still pass, the badge stays green, and nothing in the
-repository notices. What was in `tests/__pycache__` instead was a compiled
+Deleting them left all 305 tests of the day passing, the badge green, and nothing
+in the repository noticing. What was in `tests/__pycache__` instead was a compiled
 `test_zz_socket_probe` with no source file beside it, which is what checking this
 once by hand and then deleting the check looks like from the outside.
 
