@@ -377,6 +377,13 @@ DuckDB takes the column set from the first file in the list. Put the 2024 partit
 </details>
 
 <details>
+<summary>Two of the figures above cannot go down when the detector gets worse: rewire it to report no divergence at all and both still score perfectly</summary>
+
+The two are the leave-one-out attribution rate and the pre-registered drift bound check. Attribution is a rate over findings the oracle produced, and the bound check is a rate over float step-passes that drifted, so both are conditional on something having been found. A detector rewired to report no divergence at all still scores perfectly on both, because neither consults a fire count: they read `step.worst` and `step.rounds` directly. They are quality-of-explanation figures rather than detection figures, and the eval now says so on the attribution line and prints `NOT MEASURED` rather than a zero when there is nothing to score.
+
+</details>
+
+<details>
 <summary>Only pipelines written against `ctx.read` and `ctx.write` get tested at all</summary>
 
 **twicerun only tests pipelines written against its storage interface.** It does not test arbitrary pipelines.
@@ -388,15 +395,13 @@ What that buys back is why it is a design choice rather than a workaround. One a
 </details>
 
 <details>
-<summary>Everything else it gets wrong, including two published figures that cannot go down when the detector gets worse</summary>
+<summary>Everything else it gets wrong, from row pairing that can only understate a difference to six figures in this file that a longer run beat</summary>
 
 **Sorting to pair rows inside a key group is a heuristic once there is more than one float column.** The ordinal sorts both sides the same way, and for a single float column sorted-to-sorted pairing is the assignment that minimises total absolute difference, so it is optimal. With several, a lexicographic sort can pair the wrong two rows inside one key group. That can only understate a difference, so the failure mode is a bounded false negative confined to within-key-group permutations of float-only differences.
 
 A key group with no exact columns is one big group. If every column is a float, there is no key, the whole artifact sorts as one group and rows pair by order alone. It is the weakest case here and it is where the heuristic above does the most work, so the report says `matched on no key` when it happens rather than leaving it to be inferred.
 
 NaN payloads are not distinguished. The sign survives and the payload does not.
-
-**Two of the published figures cannot go down when the detector gets worse.** Attribution is a rate over findings the oracle produced, and the bound check is a rate over float step-passes that drifted, so both are conditional on something having been found. A detector rewired to report no divergence at all still scores perfectly on both, because neither consults a fire count: they read `step.worst` and `step.rounds` directly. They are quality-of-explanation figures rather than detection figures, and the eval now says so on the attribution line and prints `NOT MEASURED` rather than a zero when there is nothing to score.
 
 `rows_read` is not the term count the bound wants. Both directions it is wrong in are measured in [docs/comparison.md](docs/comparison.md), and the size of the error prints in every report.
 
