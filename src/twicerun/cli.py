@@ -29,6 +29,23 @@ class KeySyntaxError(ValueError):
 
 _CRASHED = "twicerun: that crashed. Exit 3 is a crash, not a divergence."
 
+# Everything that means the command cannot do what it was asked, as opposed to a
+# pipeline that diverged (1) or one that crashed (3). A column the oracle refuses
+# belongs here rather than with the crashes: it is a fact about the pipeline's
+# output, so it shares exit 2 with the flag and manifest mistakes. `run` and
+# `judge` both catch the whole set and print the same line, and they used to do
+# it as two clauses each, with the reason for the split written under one of the
+# four copies.
+_BAD_INPUT = (
+    PipelineError,
+    MissingArtifact,
+    KeySyntaxError,
+    UnsupportedColumn,
+    UnknownKeyColumn,
+    FloatInKey,
+    UnknownArtifact,
+)
+
 
 def _judge(args: argparse.Namespace) -> int:
     """Re-score a run that already happened.
@@ -51,10 +68,7 @@ def _judge(args: argparse.Namespace) -> int:
         )
     try:
         report = rejudge(where, _policy_from(args), parse_keys(args.key))
-    except (PipelineError, MissingArtifact, KeySyntaxError) as exc:
-        print(f"twicerun: {exc}", file=sys.stderr)
-        return 2
-    except (UnsupportedColumn, UnknownKeyColumn, FloatInKey, UnknownArtifact) as exc:
+    except _BAD_INPUT as exc:
         print(f"twicerun: {exc}", file=sys.stderr)
         return 2
 
@@ -368,12 +382,7 @@ def main(argv: list[str] | None = None) -> int:
             contained=not args.no_containment,
             amplify=not args.no_amplify,
         )
-    except (PipelineError, MissingArtifact, KeySyntaxError) as exc:
-        print(f"twicerun: {exc}", file=sys.stderr)
-        return 2
-    except (UnsupportedColumn, UnknownKeyColumn, FloatInKey, UnknownArtifact) as exc:
-        # A column the oracle refuses is a fact about the pipeline's output,
-        # not a crash, so it shares exit 2 with the other bad-input cases.
+    except _BAD_INPUT as exc:
         print(f"twicerun: {exc}", file=sys.stderr)
         return 2
     except Exception:  # noqa: BLE001
