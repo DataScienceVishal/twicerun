@@ -292,13 +292,10 @@ def _silent_note(artifact: dict) -> list[str]:
 
 
 def _bisect_n(rates: dict[str, int]) -> int:
-    """The largest denominator the bisect's own rates were taken out of.
-
-    Read off the keys, which are `{fired} of {comparisons}` written by the eval
-    and split the same way `distribution` splits them. That is structure rather
-    than prose: the objection to parsing a rendered figure back apart is that the
-    figure is a sentence, and these are keys.
-    """
+    # Split off the key, which the eval writes as `{fired} of {comparisons}` and
+    # which `distribution` already inspects the same way. That is structure and
+    # not prose: the objection to taking a figure back out of rendered text is
+    # that the text is a sentence, and these are keys.
     return max(int(rate.rsplit(" of ", 1)[1]) for rate in rates)
 
 

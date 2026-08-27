@@ -150,7 +150,8 @@ def test_the_gap_table_carries_the_same_stamp_as_the_eval_one(rendered):
 
 
 def a_row(block: str, step: str) -> str:
-    """One step's row out of a rendered table, found by its own cell rather than by position."""
+    # Found by the step's own backticked cell, not by row number, so reordering
+    # the table does not silently point these assertions at a different step.
     return next(line for line in block.splitlines() if f"`{step}`" in line)
 
 
