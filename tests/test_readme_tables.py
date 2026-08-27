@@ -71,9 +71,26 @@ def test_the_stamp_in_the_readme_names_the_artifact_it_came_from(markdown, artif
 
 
 def test_the_artifacts_were_written_by_the_current_pipelines(artifacts):
-    """A stale artifact renders a table about steps the reference pipeline no longer has."""
-    from eval import PAIRS, WHAT_EACH_STEP_IS  # noqa: PLC0415
+    """A stale artifact renders a table about steps the reference pipeline no longer has.
 
+    The pipeline is the anchor, which this docstring said and the assertion did
+    not. It compared the artifact against `eval.WHAT_EACH_STEP_IS`, a dict typed
+    into the eval, so the two could agree with each other while both had drifted
+    away from the file that produces the artifacts. Three lists of step names
+    have to line up and only two of the three edges were checked: renaming
+    `roll_up_keys` in the pipeline and in `test_runner.py` left all 388 tests
+    green, and `report_sensitivity` skips a name it cannot find, so the step
+    dropped out of the eval's own table without a word.
+
+    Order too, not just membership. The dict is the order the terminal prints in
+    and the list is execution order, and the artifact carries a step index off
+    the second one.
+    """
+    from eval import PAIRS, REFERENCE, WHAT_EACH_STEP_IS  # noqa: PLC0415
+    from twicerun.runner import load_steps  # noqa: PLC0415
+
+    executed = [step.__name__ for step in load_steps(REFERENCE)]
+    assert list(WHAT_EACH_STEP_IS) == executed, "the eval describes steps the pipeline runs"
     measured = {step["name"] for step in artifacts[EVAL]["steps"]}
-    assert measured == set(WHAT_EACH_STEP_IS)
+    assert measured == set(executed)
     assert {twin["name"] for twin in artifacts[EVAL]["twins"]} == {twin for _, twin in PAIRS}
