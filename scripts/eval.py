@@ -30,6 +30,15 @@ once. Each trial's are removed before the next one starts, so that is a peak
 rather than a total. The first estimate here was 800 MB and came from arithmetic
 rather than from watching it, which is the same mistake the cost section of the
 README already records once.
+
+It is a long file and stays one file for one reason: the command above is a
+published interface and `python scripts/eval.py` works while that path is a file
+rather than a package. Most of the length is the `report_*` functions, each
+called once, in the order the sections print, which is the shape a package would
+reorganise. No line count is quoted here on purpose. Every figure in this
+repository that was typed rather than measured has been wrong at least once, and
+a self-description that goes stale on the next edit with nothing counting it
+would be that mistake in the one file arguing against it.
 """
 
 from __future__ import annotations

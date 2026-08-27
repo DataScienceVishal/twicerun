@@ -40,6 +40,12 @@ addopts = "-q --disable-socket --allow-unix-socket"
 # imports carrying `# noqa: E402` because they came after the statement.
 # test_check_fingerprint.py still does its own, and should: that test also runs
 # in the factory, where the script is its sibling rather than in ../scripts.
+#
+# One script imports a sibling script, tlc_schema.py taking MONTHS out of
+# fetch_tlc.py, and this line is what makes that resolve under pytest. It used
+# to carry its own sys.path.insert and no longer does. That is the whole of the
+# cross-script coupling here, and the argument for leaving scripts/ unpackaged
+# rests on the README's command line rather than on there being none.
 pythonpath = ["scripts"]
 
 [tool.ruff]

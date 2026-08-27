@@ -198,6 +198,16 @@ def prune_run_dirs(parent: Path, keep: int, current: Path | None = None) -> Rete
     it prunes the other two and the directory count comes back to --keep on its
     own. What the header is reporting is true when it prints and stops being
     true shortly afterwards, which is the most a per-invocation view can say.
+
+    This, `Retention`, `mark_running` and `is_running` are the obvious candidate
+    for a module of their own and they stay here anyway. The reason is size and
+    nothing else: 36 lines of code between them, counted, so a `retention.py`
+    would be a file whose import statement is a fifth of its content. The
+    argument once given for keeping them was that a member of the cluster raises
+    `PipelineError`, and that is `new_run_dir`, one of the five. These four raise
+    nothing and reach only `RUNNING`, `RUN_DIR_NAME`, `os` and `shutil`, so an
+    extraction would need no error class and no re-export. It would work fine.
+    It just would not be a module.
     """
     if keep < 1:
         return Retention([], 0)
