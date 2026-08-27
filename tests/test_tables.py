@@ -18,12 +18,14 @@ import pytest
 from twicerun.cli import main
 from twicerun.tables import (
     CLOSE,
+    EVAL,
+    GAP,
     OPEN,
-    TABLES,
     MarkerError,
     UnreadableArtifact,
     distribution,
     drifted,
+    every_table,
     load,
     render,
     rewrite,
@@ -47,8 +49,35 @@ def artifact() -> dict:
 
 
 @pytest.fixture(scope="module")
-def rendered(artifact) -> dict[str, str]:
-    return render(artifact)
+def gap_artifact() -> dict:
+    return {
+        "version": 1,
+        "kind": GAP,
+        "generated": "2026-08-27T09:00:00+00:00",
+        "source": "results/gap-fixture.json",
+        "environment": WHERE,
+        "step": "sparse_customer_keys",
+        "passes": 40,
+        "seconds": 372.0,
+        "rows": [
+            {"source": "the five-run loop", "fired": 87, "comparisons": 160,
+             "clean": 7, "scored": 40, "unusable": 0},
+            {"source": "tie collapse", "fired": 153, "comparisons": 160,
+             "clean": 0, "scored": 40, "unusable": 0},
+            {"source": "thread count", "fired": 91, "comparisons": 144,
+             "clean": 8, "scored": 40, "unusable": 0},
+            {"source": "row multiplication", "fired": 145, "comparisons": 160,
+             "clean": 0, "scored": 40, "unusable": 0},
+        ],
+        "loop_looked": 40,
+        "loop_silent": 7,
+        "amplifier_caught": 7,
+    }
+
+
+@pytest.fixture(scope="module")
+def rendered(artifact, gap_artifact) -> dict[str, str]:
+    return render({EVAL: artifact, GAP: gap_artifact})
 
 
 def a_page(rendered: dict[str, str], *, skip: str = "") -> str:
@@ -61,7 +90,7 @@ def a_page(rendered: dict[str, str], *, skip: str = "") -> str:
 
 
 def test_every_table_renders_and_none_of_them_is_empty(rendered):
-    assert set(rendered) == set(TABLES)
+    assert set(rendered) == set(every_table())
     for name, block in rendered.items():
         assert block.strip(), name
 
@@ -90,7 +119,7 @@ def test_rewriting_replaces_the_bodies_and_leaves_everything_else_alone(rendered
     assert drifted(stale, rendered) == ["containment", "results"]
     restored = rewrite(stale, rendered)
     assert drifted(restored, rendered) == []
-    assert restored.count("prose between") == len(TABLES) - 1
+    assert restored.count("prose between") == len(every_table()) - 1
     assert restored.startswith("# a page")
     assert restored.endswith("prose below\n")
 
@@ -136,7 +165,23 @@ def test_an_artifact_from_a_shape_this_build_does_not_know_is_refused(tmp_path, 
     where = tmp_path / "old.json"
     where.write_text(json.dumps({**artifact, "version": 99}), encoding="utf-8")
     with pytest.raises(UnreadableArtifact, match="version 99"):
-        load(where)
+        load([where])
+
+
+def test_an_artifact_that_does_not_say_what_it_measured_is_refused(tmp_path, artifact):
+    where = tmp_path / "nameless.json"
+    where.write_text(json.dumps({**artifact, "kind": "something"}), encoding="utf-8")
+    with pytest.raises(UnreadableArtifact, match="kind 'something'"):
+        load([where])
+
+
+def test_two_artifacts_of_one_kind_are_refused_rather_than_resolved_by_order(tmp_path, artifact):
+    """The second silently winning is how a table gets rendered from a file nobody meant."""
+    first, second = tmp_path / "a.json", tmp_path / "b.json"
+    for where in (first, second):
+        where.write_text(json.dumps(artifact), encoding="utf-8")
+    with pytest.raises(UnreadableArtifact, match="two eval artifacts given"):
+        load([first, second])
 
 
 def test_the_distribution_prints_the_buckets_that_did_not_come_up(rendered):
@@ -161,28 +206,48 @@ def test_the_tally_drops_the_count_where_it_is_one():
     assert tally({}) == "nothing seen"
 
 
-def test_the_command_writes_the_file_and_says_which_blocks_moved(tmp_path, artifact, rendered,
-                                                                 capsys):
-    where = tmp_path / "eval.json"
-    where.write_text(json.dumps(artifact), encoding="utf-8")
+def written(tmp_path, artifact, gap_artifact) -> list[str]:
+    both = []
+    for name, one in (("eval.json", artifact), ("gap.json", gap_artifact)):
+        where = tmp_path / name
+        where.write_text(json.dumps(one), encoding="utf-8")
+        both.append(str(where))
+    return both
+
+
+def test_the_command_writes_the_file_and_says_which_blocks_moved(
+    tmp_path, artifact, gap_artifact, rendered, capsys
+):
+    both = written(tmp_path, artifact, gap_artifact)
     page = tmp_path / "README.md"
     page.write_text(a_page(rendered).replace("| 0 `generate_inputs` |", "| 0 `wrong` |"), "utf-8")
 
-    assert main(["report", str(where), "--format", "md", "--update", str(page)]) == 0
+    assert main(["report", *both, "--format", "md", "--update", str(page)]) == 0
     assert "results" in capsys.readouterr().out
-    assert main(["report", str(where), "--format", "md", "--update", str(page)]) == 0
+    assert main(["report", *both, "--format", "md", "--update", str(page)]) == 0
     assert "already matches" in capsys.readouterr().out
 
 
 def test_the_command_refuses_a_markdown_file_missing_a_table_rather_than_writing_it(
-    tmp_path, artifact, rendered, capsys
+    tmp_path, artifact, gap_artifact, rendered, capsys
 ):
-    where = tmp_path / "eval.json"
-    where.write_text(json.dumps(artifact), encoding="utf-8")
+    both = written(tmp_path, artifact, gap_artifact)
     page = tmp_path / "README.md"
     short = a_page(rendered, skip="conditions")
     page.write_text(short, encoding="utf-8")
 
-    assert main(["report", str(where), "--update", str(page)]) == 2
+    assert main(["report", *both, "--update", str(page)]) == 2
     assert "conditions" in capsys.readouterr().err
     assert page.read_text(encoding="utf-8") == short, "it wrote to a file it had refused"
+
+
+def test_an_artifact_left_off_the_command_line_refuses_rather_than_leaving_its_table_stale(
+    tmp_path, artifact, gap_artifact, rendered, capsys
+):
+    """The gap table is the headline evidence for amplification. It cannot go quietly stale."""
+    both = written(tmp_path, artifact, gap_artifact)
+    page = tmp_path / "README.md"
+    page.write_text(a_page(rendered), encoding="utf-8")
+
+    assert main(["report", both[0], "--update", str(page)]) == 2
+    assert "amplification-gap" in capsys.readouterr().err

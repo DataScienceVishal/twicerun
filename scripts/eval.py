@@ -59,7 +59,7 @@ from twicerun.manifest import Manifest
 from twicerun.measurement import StepMeasurement, name_classes
 from twicerun.policy import HEADROOM_REQUIRED, REDUCTION_ORDER, DriftBound, Policy, judge
 from twicerun.runner import amplify_runs, load_steps, run_pipeline, scored_runs
-from twicerun.tables import distribution, tally
+from twicerun.tables import ARTIFACT_VERSION, EVAL, distribution, tally
 
 HERE = Path(__file__).resolve().parent.parent
 REFERENCE = HERE / "pipelines" / "reference.py"
@@ -1627,9 +1627,6 @@ def report_all(trials: list[Trial]) -> Figures:
     )
 
 
-ARTIFACT_VERSION = 1
-
-
 def as_artifact(
     figures: Figures,
     where: dict[str, str],
@@ -1651,6 +1648,7 @@ def as_artifact(
     """
     return {
         "version": ARTIFACT_VERSION,
+        "kind": EVAL,
         "generated": datetime.now(UTC).isoformat(timespec="seconds"),
         "trials": len(figures.trials),
         "runs": runs,

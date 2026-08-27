@@ -137,12 +137,10 @@ def _report(args: argparse.Namespace) -> int:
     tables exist, rather than a rendering error.
     """
     try:
-        artifact = load(args.artifact)
+        rendered = render(load(args.artifact))
     except (OSError, UnreadableArtifact) as exc:
         print(f"twicerun: {exc}", file=sys.stderr)
         return 2
-    artifact["source"] = str(args.artifact)
-    rendered = render(artifact)
     if args.update is None:
         # With the markers, so what comes out of the terminal is what goes into
         # the file rather than something a reader has to wrap by hand.
@@ -247,7 +245,10 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument(
         "artifact",
         type=Path,
-        help="a JSON file written by scripts/eval.py --json",
+        nargs="+",
+        help="the JSON files written by scripts/eval.py --json and "
+        "scripts/amplification_gap.py --json. Each declares what it measured and contributes "
+        "its own tables",
     )
     report.add_argument(
         "--format",

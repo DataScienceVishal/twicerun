@@ -19,9 +19,11 @@ from pathlib import Path
 
 import pytest
 
+from twicerun.tables import ARTIFACT_VERSION, EVAL
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from eval import ARTIFACT_VERSION, as_artifact, report_all  # noqa: E402
+from eval import as_artifact, report_all  # noqa: E402
 from trial_fixtures import a_step, a_trial  # noqa: E402
 
 WHERE = {"duckdb": "1.5.5", "threads": "10", "platform": "macOS-26.5.2-arm64-arm-64bit"}
@@ -52,6 +54,7 @@ def test_every_figure_is_stamped_with_what_it_is_specific_to(ten):
     """
     assert ten["environment"] == WHERE
     assert ten["version"] == ARTIFACT_VERSION
+    assert ten["kind"] == EVAL
     assert ten["generated"].startswith("20")
     assert ten["trials"] == 10
     assert ten["runs"] == 5

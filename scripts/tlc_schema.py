@@ -24,6 +24,7 @@ true of the files on disk rather than printing something that reads fine.
 from __future__ import annotations
 
 import os
+import platform
 import sys
 from pathlib import Path
 
@@ -65,6 +66,9 @@ def main() -> int:
     files = partitions()
     con = duckdb.connect()
 
+    # The column-drop below is DuckDB's behaviour rather than the files', so the
+    # version belongs beside it for the same reason every report header carries it.
+    say(f"duckdb {duckdb.__version__} on {platform.platform()}")
     say(f"three partitions from {DATA}\n")
     per_file = {}
     for path, month in zip(files, MONTHS, strict=True):
