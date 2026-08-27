@@ -30,11 +30,14 @@ from pathlib import Path
 
 import duckdb
 
+# The one cross-script import in this repository, and it needs no help to
+# resolve. Every documented way in puts `scripts/` on the path first: running
+# `python scripts/tlc_schema.py` makes the script's own directory sys.path[0],
+# and pytest gets it from `pythonpath = ["scripts"]` in pyproject.toml. A
+# `sys.path.insert` used to sit above this line, undocumented, and it bought
+# nothing except the E402 suppression its own position made necessary.
+from fetch_tlc import MONTHS
 from twicerun.storage import quote
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from fetch_tlc import MONTHS  # noqa: E402
 
 DATA = Path(os.environ.get("TWICERUN_TLC_DIR") or Path(__file__).resolve().parent.parent
             / "data" / "tlc")
