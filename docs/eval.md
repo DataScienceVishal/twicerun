@@ -173,7 +173,8 @@ split per step as well as in total. `apply_price_updates` is the one where the c
 **The amplification gap has to be forced to be visible at all.** Amplification only touches steps the
 main loop found nothing in, which is the whole cost argument for it, so on a trial where the loop
 catches the intermittent step there is no amplified rate to compare against. Waiting for a quiet trial
-throws away nine in ten. So the eval points the shipped amplifiers at that one step every trial,
+throws most of them away, and the first row of the README's gap table is how many that was on the run
+it published. So the eval points the shipped amplifiers at that one step every trial,
 through the same `amplify_runs` the runner calls, and prints the four rates side by side. Forty trials
 of that is an expensive way to get forty comparisons, so the table the README publishes comes from
 `scripts/amplification_gap.py`, which does the same thing without the twin pass and the uncontained pass

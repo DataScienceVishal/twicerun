@@ -112,9 +112,10 @@ beside it, and only that bottom row is what containment is for. Read the others 
 as evidence either way: two steps in this pipeline are intermittent, so a contained pass and an
 uncontained pass differ mostly by which of them happened to fire. Counting
 steps-divergent-per-pass and subtracting was the first way this was measured and it was exactly that
-noise, which is why the quantity has to be per step. Across the four ten-trial runs before the
-artifact existed, `roll_up_keys` never once fired contained, over forty trials with containment on
-and forty with it off.
+noise, which is why the quantity has to be per step. In the committed run that step is `0 of 4` on
+all ten contained trials and fires on all ten uncontained ones, seven of them at four out of four.
+Every earlier ten-trial run agreed with that, and none of their JSON was written, so the generated
+table is the only version of it anyone can check.
 
 That one step is the whole difference. It is a small number and it is the honest one: on a pipeline
 where nothing reads a diverging artifact, containment removes no false step at all, and this
@@ -178,10 +179,16 @@ artifact would make honest anyway.
 
 A pass over the reference pipeline is five executions of eight steps, plus five single-threaded
 executions of each step that fired, plus three to five executions of each step that did not, once
-per amplifier. That is roughly 65 to 95 step executions against 8 for running the pipeline once. The
-spec called it 5x to 15x on that arithmetic and the arithmetic is right.
+per amplifier that can touch it. Two real passes: 40 + 30 + 12 = 82 in the pass these timings come
+from, and 40 + 25 + 27 = 92 in the transcript at the top of the README. Against 8 for running the
+pipeline once that is 10x to 12x, and if nothing fires at all the arithmetic reaches 150. The spec
+estimated 5x to 15x by counting executions, so the count lands at the top of its range rather than
+in the middle.
 
-The wall clock is not. Over 20 passes, one pass took a **median 25 times as long as a single
+That figure said 65 to 95 here for four revisions, and 65 counts amplification as zero, which it
+cannot be: a step that never fires is exactly the step an amplifier is for.
+
+The wall clock is a different story. Over 20 passes, one pass took a **median 25 times as long as a single
 execution of the same pipeline**, the extremes being 21x and 43x. The denominator is run 1's own
 recorded time out of the manifest, because the tool cannot produce it: `--runs 1` exits 2, since one
 run has nothing to compare against. Where that goes, at the median:
@@ -221,8 +228,9 @@ running, so it has no bound at all. **Amplification cost 1.33 times the pass**, 
 of the amplified pass and more than the single-threaded bisect's 15 percent.
 
 That ordering is not what the execution counts predict, and the reason is worth having. The bisect
-re-executed six steps five times each, 30 executions; amplification re-executed two steps three
-times against each of three amplifiers, 18. It still cost more, because which steps land in which
+re-executed six steps five times each, 30 executions. Amplification had two steps to work with, one
+of which declines two of the three amplifiers because it reads no artifact, so 3 executions there
+and 9 on the other: 12 against the bisect's 30. It still cost more, because which steps land in which
 loop is decided by the fire rate and not by what they cost, and on this pipeline the one expensive
 step is `generate_inputs`, which writes 205 MB, never fires, and therefore always lands in
 amplification.

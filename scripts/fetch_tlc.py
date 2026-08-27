@@ -17,7 +17,7 @@ its input.
 Green is the default because it is fifty times smaller and the schema change is
 identical in both. Yellow is there because the parallel float reduction this
 project is about needs more rows than a month of green taxi trips contains, and
-`README.md` publishes the row count where that switches on.
+docs/data.md publishes the row count where that switches on.
 
 Licence, which is the reason no Parquet is committed here. TLC publishes no
 licence for the trip records. Searching the trip record page for the word finds

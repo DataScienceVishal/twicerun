@@ -137,8 +137,8 @@ gone wrong, the answer was a downstream count that did not reconcile. Those fit 
 breakage reaches you as an exact reconciliation failing, a tool that quietly absorbs a small
 difference has hidden the thing you would have used to find the bug.
 
-So correct code producing 630 findings under the default is the intended behaviour rather than an
-embarrassment. The user asked whether the pipeline gave the same answer twice, and it did not.
+So correct code producing around 600 findings under the default is the intended behaviour rather than
+an embarrassment. Baseline 1's cell in the README's table is the version of that number nobody typed. The user asked whether the pipeline gave the same answer twice, and it did not.
 
 That also shapes the report. A build gate needs a verdict; someone tracing a count that did not add
 up needs the two numbers that disagreed, so the report prints the pair rather than a summary of it.

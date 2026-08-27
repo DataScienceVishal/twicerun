@@ -5,7 +5,7 @@
     uv run python scripts/tlc_schema.py
 
 Three facts, and the middle one is the reason this script exists rather than a
-paragraph in the README. Handed a list of Parquet files whose schemas differ,
+paragraph in docs/data.md. Handed a list of Parquet files whose schemas differ,
 DuckDB takes the column set from the first file and drops the rest without a
 word. Put the 2024 partition first, which is the order a backfill walks its
 months in, and `cbd_congestion_fee` disappears. Reverse the list and it is back.

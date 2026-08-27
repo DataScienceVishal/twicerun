@@ -55,8 +55,8 @@ def daily_revenue(ctx: StepContext) -> None:
     Parallel reduction associates the additions in whatever order the threads
     finish in, and float addition is not associative. Two runs at threads=8
     differed on a median 605 of the 1,000 groups over 10 attempts, and on 0 of
-    1,000 at threads=1. That spread is not a bound and the README lists four
-    occasions when a figure here was beaten by a larger sample. The fix is
+    1,000 at threads=1. That spread is not a bound, and the README says how many
+    times a figure published there was later beaten by a longer run. The fix is
     DECIMAL(18,4), whose sum is fixed-point and reassociates exactly.
     """
     ctx.read("orders")

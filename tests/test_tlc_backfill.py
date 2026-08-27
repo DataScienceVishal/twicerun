@@ -10,7 +10,7 @@ What this cannot check is the parallel float reduction in `zone_revenue`. That
 needs several hundred thousand rows before DuckDB divides the work at all, and
 a suite that generated those would take a minute and still only fire sometimes.
 `tests/test_runner.py` covers the loop deterministically with a fake wobbling
-step; the real thing is measured in the README and by `scripts/measure_duckdb.py`.
+step; the real thing is measured in docs/data.md and by `scripts/measure_duckdb.py`.
 """
 
 from __future__ import annotations

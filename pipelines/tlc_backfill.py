@@ -18,7 +18,7 @@ Fetch the partitions first, or the import below raises and names the script:
     uv run twicerun run pipelines/tlc_backfill.py
 
 Two of these four steps carry a bug and two do not, and which is which depends
-on the taxi. The measured figures are in the README's TLC section rather than in
+on the taxi. The measured figures are in docs/data.md rather than in
 these docstrings, because a step's behaviour here is a function of the row count
 and this file runs on either dataset.
 """
@@ -132,7 +132,7 @@ def unify_partitions(ctx: StepContext) -> None:
     raises `Binder Error`, and the shape worth knowing about is neither of those.
     Handed the three files as a list, `read_parquet` takes its schema from the
     first one and drops `cbd_congestion_fee` without a word when the 2024
-    partition leads. Reversing the list brings the column back. The README has
+    partition leads. Reversing the list brings the column back. docs/data.md has
     that measurement, because a revenue column that disappears on file order is
     the failure this schema change actually causes and it is one this tool
     cannot see: it is wrong the same way on every run.
@@ -151,7 +151,7 @@ def zone_revenue(ctx: StepContext) -> None:
     rather than on `hash(i)`: parallel reduction adds the terms in whatever order
     the threads finish in and float addition is not associative. Whether it fires
     depends on the row count, which is why this pipeline runs on either taxi and
-    why the README publishes both.
+    why docs/data.md publishes both.
 
     `trips` is the integer control sitting in the same artifact as the two float
     sums. A count cannot reassociate into a different answer, so if it ever moves

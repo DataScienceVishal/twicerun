@@ -147,8 +147,8 @@ def amplified_threads(default: int) -> int:
     threads=2 and on 8 of 8 at threads=4, so doubling a default of 1 or 2 lands
     short of where the mechanism switches on. Above 4 that measurement is flat,
     8 of 8 at 4, 10, 20 and 40 alike, which is why this amplifier finds nothing
-    on a laptop whose default is already 10 and why the README says so rather
-    than implying all three amplifiers earn their place everywhere.
+    on a laptop whose default is already 10 and why docs/amplification.md says so
+    rather than implying all three amplifiers earn their place everywhere.
 
     The ceiling is where the doubling stops being worth its memory, and it is
     also what makes the refusal below reachable: a machine already running 64

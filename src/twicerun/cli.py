@@ -127,8 +127,8 @@ def _newest(given: list[Path]) -> Path:
     """The most recently written of what the shell handed over.
 
     The README documents `judge .twicerun/run-*`, and that glob matches one
-    directory only while retention is 1. Two paragraphs later the README
-    suggests --keep 0. The second directory then turned the documented command
+    directory only while retention is 1, which is the default. `--keep 0` is a
+    documented flag and a second directory then turned the documented command
     into a bare argparse usage message that never mentioned run directories at
     all.
     """
