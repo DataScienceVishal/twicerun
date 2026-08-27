@@ -46,9 +46,13 @@ AMPLIFICATION_FAILED = "AMPLIFICATION_FAILED"
 # rises where something was found.
 PROBE_RUNS = 3
 
-# Rows per distinct value that tie collapse aims for. The surrogate-key bug was
-# measured at 2 rows per tie group and at 500: standalone, 500 fired on every
-# attempt while 2 fired on roughly a third of them.
+# Rows per distinct value that tie collapse aims for. Two densities, two
+# sessions, both worth keeping apart. Standalone, 500 rows per tie group fired
+# on every attempt and 2 rows fired on roughly two thirds of eighteen, the
+# session `sparse_customer_keys` in reference.py records. Inside this tool the
+# gap is much narrower, 11 of 12 comparisons against 10 of 12, which is the
+# session `tie_collapse` below records. The constant is set from the first and
+# the second is why the amplifier's advantage is a rate rather than a switch.
 TARGET_ROWS_PER_VALUE = 500
 
 # One duplicate is the smallest change that manufactures a repeated key where

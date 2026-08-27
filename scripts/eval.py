@@ -10,9 +10,9 @@ before any of this project existed, including three that declare a part of it
 unnecessary. They print with whatever they came out as, and a triggered
 condition is a published result rather than a failed run, so this exits 0
 either way. The one non-zero exit is 2, for an `--into` that already exists.
-Which of them trigger moves between runs of the same code: the
-README publishes four ten-trial runs and one of the four breached the spec's
-sensitivity threshold.
+Which of them trigger moves between runs of the same code: six ten-trial runs
+have been taken, the five before the committed one are in docs/eval.md, and two
+of the six breached the spec's sensitivity threshold on the same step.
 
 A trial is three passes: the broken pipeline at the defaults, its matched twin at
 the defaults, and the broken pipeline again with containment off. The first two
@@ -24,12 +24,12 @@ rescores the same measurements with the amplifiers taken away, through the
 shipped exit-code function. Only baseline 3 costs an extra pipeline pass, and
 the run-matched row costs about 20 seconds a trial in comparisons.
 
-Ten trials took 532 seconds on a ten-core laptop, a median of 53 a trial. Peak
-disk measured at 1,292 MB, which is one trial's three run directories alive at
-once. Each trial's are removed before the next one starts, so that is a peak
-rather than a total. The first estimate here was 800 MB and came from arithmetic
-rather than from watching it, which is the same mistake the cost section of the
-README already records once.
+The committed run took 502 seconds on a ten-core laptop, a median of 49 a trial,
+and the five before it ran from 356 to 536. Peak disk measured at 1,292 MB,
+which is one trial's three run directories alive at once. Each trial's are
+removed before the next one starts, so that is a peak rather than a total. The
+first estimate here was 800 MB and came from arithmetic rather than from watching
+it, which is the same mistake docs/runs.md records once about wall clock.
 
 It is a long file and stays one file for one reason: the command above is a
 published interface and `python scripts/eval.py` works while that path is a file

@@ -6,8 +6,8 @@ and both halves of the answer, what failed to pair and what paired but moved,
 come off it together.
 
 The piece worth reading is `ordered_int_sql`. ULP distance needs the IEEE-754
-bit pattern, and pulling six hundred thousand rows into Python to get it is not
-a comparison that finishes. DuckDB will cast a DOUBLE to BIT, which gives the
+bit pattern, and pulling both sides of a 500,000-row artifact into Python to get
+it is not a comparison that finishes. DuckDB will cast a DOUBLE to BIT, which gives the
 raw layout, and BIT to BIGINT, which gives the two's-complement reading of those
 bits. That is half the job: the layout is sign-magnitude, so the negative half
 runs backwards, and reflecting it about the minimum turns the whole range into
@@ -204,7 +204,9 @@ def drift_sql(columns: ColumnPlan) -> str:
 
     Restricted to pairs that moved before any of the magnitude arithmetic runs.
     On the reference pipeline's float average that takes the ULP transform from
-    two million rows to about six hundred.
+    the artifact's 1,000 paired rows down to the six hundred or so that moved.
+    The step reads two million rows to produce those 1,000, and this query never
+    sees them.
     """
     values = columns.values
     if not values:

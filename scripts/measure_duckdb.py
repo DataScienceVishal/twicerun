@@ -4,10 +4,11 @@
     uv run python scripts/measure_duckdb.py
 
 The counts move between runs, because the thing being measured is itself
-non-deterministic. What has to hold every time: the parallel figures are large,
-the threads=1 figures are zero, and the three count() runs agree with each
-other. Those three are asserted at the end and the script exits non-zero if any
-of them breaks.
+non-deterministic. What has to hold every time is checked at the end, as ten
+invariants: the parallel figures large, the threads=1 figures zero, the three
+count() runs agreeing with each other, the unique tiebreak clean, and the MERGE
+bug present at threads=8, absent at threads=1 and gone once its source is
+deduplicated. The script prints which of the ten broke and exits non-zero.
 
 None of that licenses calling anything here fixed, and the words this repository
 refuses to print about a step are refused here too. Three runs agreeing is three
@@ -260,7 +261,10 @@ def main() -> int:
         for line in broken:
             say(f"  {line}")
         return 1
-    say("invariants hold: parallel large, serial zero, count() agreed with itself, tiebreak clean")
+    say(
+        "all 10 invariants hold: parallel large, serial zero, count() agreed with itself, "
+        "tiebreak clean, MERGE fires at threads=8 and not at threads=1 or on a deduplicated source"
+    )
     return 0
 
 

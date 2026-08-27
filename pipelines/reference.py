@@ -126,8 +126,10 @@ def apply_price_updates(ctx: StepContext) -> None:
 
     In the pipeline it fires 0 to 4 times out of 4 over 20 invocations, and one
     of those 20 was a flat 0. So the five-run loop can report nothing at all on
-    a step that is definitely broken. Magnitude when it does fire runs from
-    9,248 to 35,104 rows of 125,000.
+    a step that is definitely broken. Magnitude when it does fire is a median
+    17,376 rows of 125,000 over 20 contained passes. This docstring published a
+    range here for three revisions and the paragraph below is every time the
+    range was beaten, so it is a median with an n now.
 
     The floor has now been wrong twice. The first five invocations all gave 4 of
     4 and it went in as "every time"; the next eight put the floor at 1; twenty

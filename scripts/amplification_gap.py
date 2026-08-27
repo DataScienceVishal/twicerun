@@ -5,8 +5,10 @@ The README's amplification table cannot be produced by `twicerun run`, and that
 is not an oversight in the runner. Amplification deliberately only touches steps
 the main loop found nothing in, so on most passes the intermittent step fires,
 never reaches an amplifier, and contributes nothing to the second half of the
-comparison. Waiting for the passes where it does not fire means throwing away
-five passes in six.
+comparison. Waiting for the passes where it does not fire means throwing most of
+them away, and the first row of the table this writes is how many that is on the
+run in front of you. No fraction is quoted here, because four places in this
+repository quoted four different ones off four different samples.
 
 So this points the amplifiers at one step every pass, whether or not the loop
 already caught it. That is a measurement script and not a mode of the tool: a

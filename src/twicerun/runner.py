@@ -11,7 +11,12 @@ have.
 
 Every run gets its own DuckDB connection rather than its own process. That was
 measured rather than assumed: the float divergence fires at full strength across
-fresh connections reading the same Parquet file, 493 to 696 groups of 1,000.
+fresh connections reading the same Parquet file, a median 737 of the 1,000
+groups over 10 attempts at threads=10 on 2026-08-27. This line published
+493 to 696 with no sample size until those ten attempts came out at 626 to 873,
+so the published ceiling was beaten by 177 groups the first time anyone counted
+again. A spread is not a bound. `float_group_sums_across_parquet` in
+scripts/measure_duckdb.py is the measurement, and it takes two seconds.
 """
 
 from __future__ import annotations
@@ -162,10 +167,12 @@ def prune_run_dirs(parent: Path, keep: int, current: Path | None = None) -> Rete
     Without pruning, following the README a dozen times leaves four gigabytes
     behind and nothing ever reclaims it.
 
-    The default keeps one directory, which is the current run. Nothing in the
-    tool reads a previous run yet, so keeping more would be storing 376 MB
-    against a feature that does not exist. Slice 7 regenerates the results table
-    from a committed run artifact and may want more, and --keep is there for it.
+    The default keeps one directory, which is the current run. `judge` reads a
+    previous run, through `manifest.load`, and that is what --keep exists for:
+    a run directory pruned out from under a `judge` invocation is the one case
+    where keeping two matters. One is the default because nothing in a normal
+    pass needs two, and the report generator does not need any, since it renders
+    from the JSON under results/ rather than from a run directory.
 
     Two things here were wrong until a flaky test in slice 2 caught them, and
     both come from `new_run_dir` reusing a name this function has freed. Names
