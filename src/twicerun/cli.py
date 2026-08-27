@@ -151,8 +151,12 @@ def _report(args: argparse.Namespace) -> int:
     markdown file whose blocks and the artifact's tables disagree about which
     tables exist, rather than a rendering error.
     """
+    # Against the markdown file's own directory when there is one, so the path
+    # that lands in the committed provenance block is the one a reader of that
+    # file can follow rather than the one this shell happened to be sitting in.
+    beside = args.update.parent if args.update is not None else None
     try:
-        rendered = render(load(args.artifact))
+        rendered = render(load(args.artifact, relative_to=beside))
     except (OSError, UnreadableArtifact) as exc:
         print(f"twicerun: {exc}", file=sys.stderr)
         return 2

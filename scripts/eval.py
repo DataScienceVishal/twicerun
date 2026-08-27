@@ -299,11 +299,11 @@ class StepScore:
         """
         parts = []
         if self.classes:
-            parts.append(tally(self.classes))
+            parts.append(tally(self.classes, self.trials))
         if self.causes:
-            parts.append(f"cause {tally(self.causes)}")
+            parts.append(f"cause {tally(self.causes, self.trials)}")
         if self.single_threaded:
-            parts.append(f"threads=1 {tally(self.single_threaded)}")
+            parts.append(f"threads=1 {tally(self.single_threaded, self.trials)}")
         parts += magnitudes(self.figures())
         return ", ".join(parts)
 
@@ -973,7 +973,7 @@ def report_baseline_three(
         f"of the {downstream.trials} trials"
     )
     say(
-        f"  that compared it, and is given cause {tally(downstream.causes) or 'none'}, "
+        f"  that compared it, and is given cause {tally(downstream.causes, downstream.trials)}, "
         f"which is a confident wrong diagnosis:"
     )
     say("  it computes an integer minimum, and an integer minimum cannot reassociate into a")
@@ -991,7 +991,7 @@ def report_baseline_three(
     width = len(f"{APPEND} extra rows,")
     say("")
     for label, uncontained, contained in (
-        (f"{APPEND} extra rows,", tally(overstated), tally(true)),
+        (f"{APPEND} extra rows,", tally(overstated, len(trials)), tally(true, len(trials))),
         ("fire rate,", without.distribution(), with_it.distribution()),
     ):
         say(f"  {label:>{width}} {'uncontained':>11}  {uncontained}")

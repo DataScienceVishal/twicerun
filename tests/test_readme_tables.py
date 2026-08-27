@@ -30,7 +30,10 @@ REGENERATE = (
 
 @pytest.fixture(scope="module")
 def artifacts() -> dict[str, dict]:
-    return load(sorted(RESULTS.glob("*.json")))
+    # Relative to the repository root, which is what `--update README.md`
+    # renders into the file, rather than to whatever directory pytest was
+    # started from.
+    return load(sorted(RESULTS.glob("*.json")), relative_to=ROOT)
 
 
 @pytest.fixture(scope="module")

@@ -385,10 +385,18 @@ def test_a_rate_out_of_a_smaller_denominator_keeps_its_own_denominator():
     assert "4 of 4 x9" in spelled
 
 
-def test_the_tally_drops_the_count_where_it_is_one():
-    assert tally({"PARALLEL_ORDER": 9, "PERSISTS_SINGLE_THREADED": 1}) == (
-        "PARALLEL_ORDER x9, PERSISTS_SINGLE_THREADED"
-    )
+def test_a_bare_label_means_every_trial_in_the_terminal_as_well_as_in_a_cell():
+    """The two conventions were opposites, on output a reader sees side by side.
+
+    `tally` dropped the count where it was one and `_codes` drops it where the
+    label held on every trial, so a bare `VALUE_DRIFT` out of the eval meant one
+    trial and a bare `VALUE_DRIFT` out of the README's table meant ten. Without a
+    total there is nothing for a bare label to mean, so every count prints.
+    """
+    counted = {"PARALLEL_ORDER": 9, "PERSISTS_SINGLE_THREADED": 1}
+    assert tally(counted, 10) == "PARALLEL_ORDER x9, PERSISTS_SINGLE_THREADED x1"
+    assert tally({"PARALLEL_ORDER": 10}, 10) == "PARALLEL_ORDER"
+    assert tally(counted) == "PARALLEL_ORDER x9, PERSISTS_SINGLE_THREADED x1"
     assert tally({}) == "nothing seen"
 
 
@@ -412,6 +420,27 @@ def test_the_command_writes_the_file_and_says_which_blocks_moved(
     assert "results" in capsys.readouterr().out
     assert main(["report", *both, "--format", "md", "--update", str(page)]) == 0
     assert "already matches" in capsys.readouterr().out
+
+
+def test_the_path_written_into_the_file_is_relative_to_the_file(
+    tmp_path, artifact, gap_artifact, rendered, monkeypatch
+):
+    """Run from anywhere, and the provenance block still names a path a reader can follow.
+
+    The stamp is rendered into a committed file, and the artifact's path used to
+    be resolved against the working directory. Running the documented command
+    from anywhere but the repository root therefore wrote an absolute path, and
+    whoever ran it, into the README.
+    """
+    both = written(tmp_path, artifact, gap_artifact)
+    page = tmp_path / "README.md"
+    page.write_text(a_page(rendered), encoding="utf-8")
+    monkeypatch.chdir(tmp_path.parent)
+
+    assert main(["report", *both, "--update", str(page)]) == 0
+    updated = page.read_text(encoding="utf-8")
+    assert "from `eval.json`" in updated
+    assert str(tmp_path) not in updated
 
 
 def test_the_command_refuses_a_markdown_file_missing_a_table_rather_than_writing_it(

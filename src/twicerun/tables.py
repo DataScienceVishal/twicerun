@@ -80,8 +80,18 @@ def distribution(rates: dict[str, int], comparisons: int) -> str:
     return ", ".join(spelled + odd)
 
 
-def tally(counted: dict[str, int]) -> str:
-    """Labels with their counts, commonest first, and the count dropped where it is one.
+def tally(counted: dict[str, int], of: int | None = None) -> str:
+    """Labels with their counts, commonest first, on the same rule `_codes` uses for a cell.
+
+    A bare label means the label held on every one of `of` trials, and anything
+    else carries its count. Without `of` every count prints, because there is
+    nothing for a bare label to mean.
+
+    The rule used to be "drop the count where it is one", which is the opposite
+    convention to the table's, so `VALUE_DRIFT` printed by the eval meant one
+    trial and `VALUE_DRIFT` rendered into the README meant all ten. The
+    committed artifact happens never to land a bucket at one, so the shipped
+    file does not show it.
 
     Ties break on the label rather than on insertion order. `Counter.most_common`
     breaks them on which trial happened to come first, which is fine on a screen
@@ -91,15 +101,23 @@ def tally(counted: dict[str, int]) -> str:
     if not counted:
         return "nothing seen"
     ordered = sorted(counted.items(), key=lambda pair: (-pair[1], pair[0]))
-    return ", ".join(f"{label} x{n}" if n > 1 else label for label, n in ordered)
+    return ", ".join(label if n == of else f"{label} x{n}" for label, n in ordered)
 
 
-def load(paths: Iterable[Path]) -> dict[str, dict]:
+def load(paths: Iterable[Path], relative_to: Path | None = None) -> dict[str, dict]:
     """Read the committed artifacts, keyed by what each one measures.
 
     Two of the same kind is refused rather than resolved by order. Handing this
     two eval runs and having the second silently win is how a table ends up
     rendered from a file nobody meant to publish.
+
+    `relative_to` is the directory the artifact's path is rendered against, and
+    `--update` passes the markdown file's own parent. The default is the working
+    directory, which is right for printing to a terminal and wrong for writing
+    into a committed file: `cd /tmp && twicerun report /abs/path/results/x.json
+    --update /abs/path/README.md` put an absolute path, and whoever ran it, into
+    the provenance block. The documented command is run from the repository root
+    so nobody following the README hit it.
     """
     loaded: dict[str, dict] = {}
     for where in paths:
@@ -122,17 +140,16 @@ def load(paths: Iterable[Path]) -> dict[str, dict]:
             raise UnreadableArtifact(
                 f"two {kind} artifacts given, {loaded[kind]['source']} and {where}"
             )
-        # Relative to where the command was run, because this string is
-        # rendered into a committed file. An absolute path would put whoever
-        # ran it into the README and would differ between the person
+        # A path, not an absolute path, because this string is rendered into a
+        # committed file: it would otherwise differ between the person
         # regenerating the tables and the test checking them.
-        artifact["source"] = str(_relative(where))
+        artifact["source"] = str(_relative(where, relative_to))
         loaded[kind] = artifact
     return loaded
 
 
-def _relative(where: Path) -> Path:
-    here = Path.cwd().resolve()
+def _relative(where: Path, against: Path | None = None) -> Path:
+    here = (against or Path.cwd()).resolve()
     resolved = where.resolve()
     return resolved.relative_to(here) if resolved.is_relative_to(here) else resolved
 

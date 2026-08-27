@@ -29,6 +29,7 @@ path, and it is also what twicerun itself does.
 
 from __future__ import annotations
 
+import argparse
 import platform
 import sys
 import tempfile
@@ -173,7 +174,20 @@ def merge_answers(threads: int, targets: int, runs: int, dedupe: bool = False) -
     return len(seen)
 
 
+def _no_arguments() -> None:
+    """Parse the empty command line, which exists so that `--help` answers.
+
+    This script takes no flags, and taking none used to mean ignoring argv
+    entirely: `--help` ran the whole measurement, which is a stranger's first
+    move on a script they have not read.
+    """
+    argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    ).parse_args()
+
+
 def main() -> int:
+    _no_arguments()
     say(f"duckdb {duckdb.__version__} on {platform.platform()}")
     say(f"python {platform.python_version()}, default threads {DEFAULT_THREADS}\n")
 

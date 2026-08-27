@@ -23,6 +23,7 @@ true of the files on disk rather than printing something that reads fine.
 
 from __future__ import annotations
 
+import argparse
 import os
 import platform
 import sys
@@ -65,7 +66,20 @@ def file_list(paths: list[Path]) -> str:
     return "[" + ", ".join(quote(p) for p in paths) + "]"
 
 
+def _no_arguments() -> None:
+    """Parse the empty command line, so that `--help` answers before the data is looked for.
+
+    Taking no flags used to mean ignoring argv, so `--help` fell through to the
+    partition check and exited 1 with "fetch them first", which reads as the
+    script being broken rather than as the help being absent.
+    """
+    argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    ).parse_args()
+
+
 def main() -> int:
+    _no_arguments()
     files = partitions()
     con = duckdb.connect()
 
