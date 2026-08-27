@@ -12,6 +12,8 @@ So the naive version of this tool, run it twice and diff, reports hundreds of fi
 uv run python scripts/measure_duckdb.py   # re-derives that measurement in raw DuckDB, about two seconds
 ```
 
+What the tool does with it, on a pipeline built to be broken in four known ways:
+
 ```
 $ uv run twicerun run pipelines/reference.py
 pipeline   pipelines/reference.py
