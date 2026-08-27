@@ -24,12 +24,13 @@ rescores the same measurements with the amplifiers taken away, through the
 shipped exit-code function. Only baseline 3 costs an extra pipeline pass, and
 the run-matched row costs about 20 seconds a trial in comparisons.
 
-The committed run took 502 seconds on a ten-core laptop, a median of 49 a trial,
-and the five before it ran from 356 to 536. Peak disk measured at 1,292 MB,
-which is one trial's three run directories alive at once. Each trial's are
-removed before the next one starts, so that is a peak rather than a total. The
-first estimate here was 800 MB and came from arithmetic rather than from watching
-it, which is the same mistake docs/runs.md records once about wall clock.
+The committed run took 502 seconds on a ten-core laptop, a median of 49 a
+trial, and the five before it ran from 356 to 536. Peak disk is roughly 1,300
+MB, 1,292 on one pass and 1,302 on another, which is one trial's three run
+directories alive at once. Each trial's are removed before the next one starts,
+so that is a peak rather than a total. The first estimate here was 800 MB and
+came from arithmetic rather than from watching it, which is the same mistake
+docs/runs.md records once about wall clock.
 
 It is a long file and stays one file for one reason: the command above is a
 published interface and `python scripts/eval.py` works while that path is a file
@@ -1694,7 +1695,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--trials", type=int, default=10)
     parser.add_argument("--runs", type=int, default=5)
-    parser.add_argument("--into", type=Path, default=WORKSPACE)
+    parser.add_argument(
+        "--into",
+        type=Path,
+        default=WORKSPACE,
+        help="where the trials' run directories go. Refused if it already exists, since "
+        "this directory is deleted on the way out",
+    )
     parser.add_argument("--json", type=Path, help="write the figures out as well as printing them")
     args = parser.parse_args(argv)
     if not claim_workspace(args.into):

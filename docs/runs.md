@@ -233,8 +233,9 @@ re-executed six steps five times each, 30 executions. Amplification had two step
 of which declines two of the three amplifiers because it reads no artifact, so 3 executions there
 and 9 on the other: 12 against the bisect's 30. It still cost more, because which steps land in
 which loop is decided by the fire rate and not by what they cost, and on this pipeline the one
-expensive step is `generate_inputs`, which writes 205 MB, never fires, and therefore always lands in
-amplification.
+expensive step is `generate_inputs`, which writes 31 MB an execution, never fires, and therefore
+always lands in amplification: 153 MB across the five runs, and 245 MB once the thread-count
+amplifier has re-run it three times.
 
 The shape of the cost is the same surprise as the pass as a whole. Executing the amplified steps is
 a **median 6 percent of the amplified pass**, so most of the quarter is materialising the
@@ -256,6 +257,8 @@ and the runs over them. The README said 260 MB before that sample existed, which
 decomposition rather than a measurement. `--no-amplify` takes it back to 272 MB. Retention keeps one
 directory **per concurrent invocation**, so run it serially and the footprint stays there however
 many times you run it. `--keep 0` turns pruning off, and `rm -rf .twicerun` reclaims the lot.
+`--run-dir` puts the whole thing somewhere else, which is the answer to running two passes at once
+without them sharing a directory.
 
 Two things follow from how retention works, both deliberate and neither obvious. Pruning happens at
 the end of a successful run, not the start, so a run that fails cannot delete the run you would have
@@ -269,6 +272,11 @@ is the honest thing for a per-invocation view to say. But the last one to finish
 markers left, prunes the other two, and the count comes back to `--keep` by itself. So the header's
 line is true when it prints and stops being true a few seconds later, and the disk does not stay at
 three times a pass.
+
+Nothing prunes a failed run at all, which is what the rule above costs. Three `--key` typos in a row
+leave three directories at 207 MB each, 619 MB in all: each of them executes the pipeline and then
+exits 2 before comparing anything, so none of them reaches the pruning at the end. That is the
+likeliest way anyone meets this, and it took four of them in one session before anyone noticed.
 
 ## Two checks that looked like they passed
 

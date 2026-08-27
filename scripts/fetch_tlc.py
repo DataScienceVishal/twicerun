@@ -145,7 +145,13 @@ def main(argv: list[str] | None = None) -> int:
         f"disclaimer that it did not create the data, so nothing fetched here is committed.",
     )
     parser.add_argument("--taxi", choices=sorted(DIGESTS), default="green")
-    parser.add_argument("--into", type=Path, default=DEFAULT_DIR)
+    parser.add_argument(
+        "--into",
+        type=Path,
+        default=DEFAULT_DIR,
+        help="where the Parquet lands, and where --check looks for it. The pipelines read "
+        "the default",
+    )
     parser.add_argument(
         "--check",
         action="store_true",
