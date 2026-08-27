@@ -47,6 +47,7 @@ import time
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field, replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
@@ -56,7 +57,7 @@ from twicerun.cli import exit_code
 from twicerun.compare import compare as bit_exact
 from twicerun.manifest import Manifest
 from twicerun.measurement import StepMeasurement, name_classes
-from twicerun.policy import HEADROOM_REQUIRED, REDUCTION_ORDER, Policy, judge
+from twicerun.policy import HEADROOM_REQUIRED, REDUCTION_ORDER, DriftBound, Policy, judge
 from twicerun.runner import amplify_runs, load_steps, run_pipeline, scored_runs
 
 HERE = Path(__file__).resolve().parent.parent
@@ -207,6 +208,7 @@ class StepScore:
     """
 
     name: str
+    index: int | None = None
     rates: Counter = field(default_factory=Counter)
     single_threaded: Counter = field(default_factory=Counter)
     statuses: Counter = field(default_factory=Counter)
@@ -224,6 +226,7 @@ class StepScore:
     denominators: Counter = field(default_factory=Counter)
 
     def observe(self, step: StepMeasurement) -> None:
+        self.index = step.index
         if step.artifacts_compared == 0:
             # The guard the main loop, the bisect and the amplifiers all carry,
             # arriving in the fourth loop. `any([])` is False, so a step that
@@ -331,6 +334,46 @@ class StepScore:
                 f"{statistics.median(self.relative):.1e} relative, n={len(self.relative)}"
             )
         return ", ".join(parts)
+
+    def figures(self) -> dict:
+        """The same counts `distribution()` and `detail()` render, before they become prose.
+
+        Slice 7 turned the README's tables into something generated from a
+        committed copy of this, so a figure in that file cannot be a figure
+        somebody retyped. The generator needs the counts and not the sentences:
+        parsing `median 491,520 of the 500,000 reference rows found no partner`
+        back apart to put two numbers in two cells would be the retyping problem
+        again with an extra step in it.
+        """
+        return {
+            "name": self.name,
+            "index": self.index,
+            "trials": self.trials,
+            "fired_in": self.fired_in,
+            "comparisons": self.comparisons,
+            "silent_trials": self.silent_trials,
+            "rates": dict(self.rates),
+            "single_threaded": dict(self.single_threaded),
+            "statuses": dict(self.statuses),
+            "classes": dict(self.classes),
+            "causes": dict(self.causes),
+            "unmatched_median": median_or_none(self.unmatched),
+            "extra_median": median_or_none(self.extra),
+            "of_rows_median": median_or_none(self.of_rows),
+            "ulps_median": median_or_none(self.ulps),
+            "relative_median": median_or_none(self.relative),
+            "magnitudes_n": len(self.relative),
+        }
+
+
+def median_or_none(seen: list[int] | list[float]) -> float | None:
+    """None where nothing was measured, because a median of nothing is not zero.
+
+    Every table this feeds distinguishes the two. A step that never drifted and
+    a step whose drift was zero print differently, and the second one does not
+    happen.
+    """
+    return statistics.median(seen) if seen else None
 
 
 def only(scored: dict[str, StepScore], name: str) -> StepScore:
@@ -717,7 +760,7 @@ def report_specificity(scored: dict[str, StepScore], trials: int) -> None:
         say("  leaves out the correct-code step that fires in every trial above.")
 
 
-def report_twin_comparisons(trials: list[Trial]) -> dict[str, int]:
+def report_twin_comparisons(trials: list[Trial]) -> tuple[dict[str, int], list[dict]]:
     """How many comparisons the twins actually survived, counted rather than assumed.
 
     The spec predicted 4 main-loop plus 6 amplifier comparisons per twin per
@@ -747,7 +790,40 @@ def report_twin_comparisons(trials: list[Trial]) -> dict[str, int]:
     )
     say(f"  {loop} main-loop comparisons and {amplified} amplified ones on correct code.")
     say(f"  {declined} amplifier attempts declined and are not counted as clean.")
-    return {"main_loop": loop, "amplified": amplified, "declined": declined}
+    return {"main_loop": loop, "amplified": amplified, "declined": declined}, twin_coverage(trials)
+
+
+def twin_coverage(trials: list[Trial]) -> list[dict]:
+    """Per amplifier: how many twin step-passes it took, and what it found on them.
+
+    The totals above collapse the three amplifiers into one number, and the
+    first column of this is the honest part. Tie collapse declines most of its
+    chances on the twins because two of their columns are already past the
+    density it targets, so a twin it never touched is not evidence that it is
+    safe on that twin. Folding those into the zero made the table read twice as
+    strong as it is.
+    """
+    every = [a for trial in trials for step in trial.twins for a in step.amplifications]
+    # Every twin step-pass, including any that fired and so never reached an
+    # amplifier at all. Counting only the attempts would put the denominator at
+    # the mercy of the numerator.
+    step_passes = sum(len(trial.twins) for trial in trials)
+    rows = []
+    for amplifier, _ in AMPLIFIERS:
+        offered = [a for a in every if a.amplifier == amplifier]
+        usable = [a for a in offered if a.measured]
+        rows.append(
+            {
+                "amplifier": amplifier,
+                "step_passes": step_passes,
+                "offered": len(offered),
+                "ran_on": len(usable),
+                "comparisons": sum(a.comparisons for a in usable),
+                "fired": sum(a.fired for a in usable),
+                "raised": sum(1 for a in offered if a.error),
+            }
+        )
+    return rows
 
 
 def report_baseline_one(trials: list[Trial], scored: dict[str, StepScore]) -> dict[str, float]:
@@ -890,7 +966,9 @@ def report_baseline_two() -> dict[str, int]:
     return {"pairs_separated": separated, "false_positives": len(false_positives)}
 
 
-def report_baseline_three(trials: list[Trial], scored: dict[str, StepScore]) -> dict[str, float]:
+def report_baseline_three(
+    trials: list[Trial], scored: dict[str, StepScore]
+) -> tuple[dict[str, float], dict[str, StepScore]]:
     """Two quantities, because containment moves two different things.
 
     The first is the step that gets falsely reported divergent, which is the
@@ -964,7 +1042,7 @@ def report_baseline_three(trials: list[Trial], scored: dict[str, StepScore]) -> 
         "downstream_trials": downstream.trials,
         "overstated": max((int(k.replace(",", "")) for k in overstated), default=0),
         "contained_magnitude": max((int(k.replace(",", "")) for k in true), default=0),
-    }
+    }, ablated
 
 
 def _append_magnitudes(passes: Iterable[list[StepMeasurement]]) -> Counter:
@@ -984,7 +1062,9 @@ def _append_magnitudes(passes: Iterable[list[StepMeasurement]]) -> Counter:
     return seen
 
 
-def report_baseline_four(trials: list[Trial], scored: dict[str, StepScore]) -> dict[str, int]:
+def report_baseline_four(
+    trials: list[Trial], scored: dict[str, StepScore]
+) -> tuple[dict[str, int], list[dict]]:
     say("\nbaseline 4: no amplification, scored through the tool's own exit-code function")
     say("  The main loop is identical code either way, so this is the flag rather than a")
     say("  model of it: the same measurements with the amplifiers taken away.")
@@ -1063,6 +1143,17 @@ def report_baseline_four(trials: list[Trial], scored: dict[str, StepScore]) -> d
     amplified_gap = max(
         (fired / of for _, fired, of, *_ in rows[1:] if of), default=0.0
     )
+    forced = [
+        {
+            "source": name,
+            "fired": fired,
+            "comparisons": of,
+            "clean": clean,
+            "compared_nothing": nothing,
+            "declined": declined,
+        }
+        for name, fired, of, clean, nothing, declined in rows
+    ]
     return {
         "false_negative_trials": len(went_green),
         "stable_trials": stable,
@@ -1075,7 +1166,7 @@ def report_baseline_four(trials: list[Trial], scored: dict[str, StepScore]) -> d
         # of them at zero is an absence of measurement and not a zero gap.
         "loop_comparisons": loop_of,
         "amplifier_comparisons": sum(of for _, _, of, *_ in rows[1:]),
-    }
+    }, forced
 
 
 def _rate(steps: list[StepMeasurement], name: str) -> int:
@@ -1093,10 +1184,13 @@ def _status(steps: list[StepMeasurement], name: str) -> str | None:
     return None if step is None else step.status
 
 
-def report_bounds(trials: list[Trial], policy: Policy) -> dict[str, float]:
+def report_bounds(
+    trials: list[Trial], policy: Policy
+) -> tuple[dict[str, float], list[dict]]:
     say(f"\nthe pre-registered {HEADROOM_REQUIRED:,.0f}x headroom check, at both choices of n")
     loose_clear = tight_clear = passes = 0
     loose, tight = [], []
+    per_step: dict[str, tuple[int, list[DriftBound]]] = {}
     for trial in trials:
         for step in trial.reference:
             bound = judge(step, policy).bound
@@ -1107,9 +1201,10 @@ def report_bounds(trials: list[Trial], policy: Policy) -> dict[str, float]:
             tight.append(bound.tight_ratio)
             loose_clear += bound.ratio >= HEADROOM_REQUIRED
             tight_clear += bound.tight_ratio >= HEADROOM_REQUIRED
+            per_step.setdefault(step.name, (step.index, []))[1].append(bound)
     if not passes:
         say("  no float step drifted in any trial, so there was nothing to check")
-        return {}
+        return {}, []
     say(
         f"  n = rows read by the step      cleared on {loose_clear} of {passes} float "
         f"step-passes, median {statistics.median(loose):,.0f}x"
@@ -1139,10 +1234,36 @@ def report_bounds(trials: list[Trial], policy: Policy) -> dict[str, float]:
         "loose_median": statistics.median(loose),
         "tight_median": statistics.median(tight),
         "loose_over_tight": slack,
+    }, [drift_row(name, index, seen) for name, (index, seen) in per_step.items()]
+
+
+def drift_row(name: str, index: int, seen: list[DriftBound]) -> dict:
+    """One float step's drift against both readings of the bound, over every trial it drifted in.
+
+    The two bounds are properties of the term count rather than of the run, so
+    they come back as single numbers. The drift is a maximum over a thousand
+    groups and moves every trial, so it comes back as a median with the n it was
+    taken over and no bracket. That split is the method the README arrived at
+    after a bracket on a maximum had been beaten five times.
+    """
+    return {
+        "step": name,
+        "index": index,
+        "terms": statistics.median(b.terms for b in seen),
+        "output_rows": statistics.median(b.output_rows for b in seen),
+        "tight_terms": statistics.median(b.tight_terms for b in seen),
+        "bound_loose": statistics.median(b.bound for b in seen),
+        "bound_tight": statistics.median(b.tight_bound for b in seen),
+        "observed_median": statistics.median(b.observed for b in seen),
+        "loose_ratio_median": statistics.median(b.ratio for b in seen),
+        "tight_ratio_median": statistics.median(b.tight_ratio for b in seen),
+        "loose_cleared": sum(1 for b in seen if b.ratio >= HEADROOM_REQUIRED),
+        "tight_cleared": sum(1 for b in seen if b.tight_ratio >= HEADROOM_REQUIRED),
+        "step_passes": len(seen),
     }
 
 
-def report_policy_cost(trials: list[Trial]) -> dict[str, int]:
+def report_policy_cost(trials: list[Trial]) -> tuple[dict[str, int], dict[str, dict]]:
     """What `--policy reduction-order` costs on the four broken steps.
 
     Everything else here runs strict, which is the default and the only policy
@@ -1155,15 +1276,14 @@ def report_policy_cost(trials: list[Trial]) -> dict[str, int]:
     lenient = Policy(name=REDUCTION_ORDER)
     lost = []
     passes = 0
-    for name in BROKEN:
-        gated = seen = 0
-        for trial in trials:
-            step = next((s for s in trial.reference if s.name == name), None)
-            if step is None or step.artifacts_compared == 0:
-                continue
-            seen += 1
-            gated += judge(step, lenient).fired > 0
-        if not seen:
+    # Every step, not only the four the spec calls broken. The terminal keeps
+    # the four, because the cost of the flag is a fact about broken steps and
+    # the rest of that list is noise on a screen. The README's results table has
+    # a column for it on all eight, so the whole map goes back to the caller.
+    downgraded: dict[str, dict] = {}
+    for name, gated, seen, rates in gate_under(trials, lenient):
+        downgraded[name] = {"gated_in": gated, "of": seen, "rates": rates}
+        if name not in BROKEN or not seen:
             continue
         passes += 1
         hang(f"{name:<22}", f"gates on {gated} of {seen} trials")
@@ -1171,13 +1291,36 @@ def report_policy_cost(trials: list[Trial]) -> dict[str, int]:
             lost.append(name)
     if not passes:
         say("  Nothing compared, so there is no cost to report here.")
-        return {"gating_steps": 0, "gating_of": 0}
+        return {"gating_steps": 0, "gating_of": 0}, downgraded
     say(f"  {passes - len(lost)} of the {passes} broken steps still gate a release under it.")
     if lost:
         say(f"  {', '.join(lost)} stops gating: float-only drift, inside the derived bound, and")
         say("  gone at threads=1, which is the conjunction the policy downgrades on. That is")
         say("  the trade the flag makes and it is not in any table above.")
-    return {"gating_steps": passes - len(lost), "gating_of": passes}
+    return {"gating_steps": passes - len(lost), "gating_of": passes}, downgraded
+
+
+def gate_under(trials: list[Trial], policy: Policy) -> Iterable[tuple[str, int, int, dict]]:
+    """Per step: how many trials still gate a release under `policy`, and at what rate.
+
+    The rate is a distribution keyed the same way `StepScore.rates` is, so the
+    two can sit in adjacent cells of one table without either being reformatted
+    into the other's shape. A step is counted only in the trials where it
+    compared something, which is the guard four other loops in this file carry.
+    """
+    ordered = dict.fromkeys(step.name for trial in trials for step in trial.reference)
+    for name in ordered:
+        gated = seen = 0
+        rates: Counter = Counter()
+        for trial in trials:
+            step = next((s for s in trial.reference if s.name == name), None)
+            if step is None or step.artifacts_compared == 0:
+                continue
+            seen += 1
+            verdict = judge(step, policy)
+            gated += verdict.fired > 0
+            rates[f"{verdict.fired} of {step.measured_comparisons}"] += 1
+        yield name, gated, seen, dict(rates)
 
 
 def report_attribution(trials: list[Trial]) -> dict[str, int]:
@@ -1425,6 +1568,146 @@ def _render(counted: Counter) -> str:
     return ", ".join(f"{k} x{n}" if n > 1 else f"{k}" for k, n in counted.most_common())
 
 
+@dataclass(frozen=True)
+class Figures:
+    """One eval run, after every section has printed and before anything is written out.
+
+    Two audiences share this object and they read different halves of it. The
+    eight pre-registered conditions consult the scalars, which are the same
+    plain dicts they have always been consulted through. The README's tables are
+    generated from the per-step blocks beside them, which no condition looks at,
+    so a table gaining a column cannot move a threshold.
+
+    It also exists because the conditions test used to be a hand-copied replica
+    of `main()`'s call sequence, and the copy went stale the first time a
+    reporter had something more to hand back.
+    """
+
+    trials: list[Trial]
+    steps: dict[str, StepScore]
+    twins: dict[str, StepScore]
+    uncontained: dict[str, StepScore]
+    twin_comparisons: dict[str, int]
+    twin_coverage: list[dict]
+    naive: dict[str, float]
+    static: dict[str, int]
+    ablation: dict[str, float]
+    amplification: dict[str, int]
+    forced: list[dict]
+    bounds: dict[str, float]
+    drift: list[dict]
+    policy_cost: dict[str, int]
+    reduction_order: dict[str, dict]
+    attribution: dict[str, int]
+
+    def conditions(self, seconds: float) -> list[tuple[str, str, str]]:
+        return report_conditions(
+            self.trials,
+            self.steps,
+            self.twins,
+            self.naive,
+            self.ablation,
+            self.amplification,
+            self.bounds,
+            seconds,
+        )
+
+
+def report_all(trials: list[Trial]) -> Figures:
+    """Print every section, in the order the spec lists them, and keep what they measured."""
+    broken: dict[str, StepScore] = {}
+    twins: dict[str, StepScore] = {}
+    for trial in trials:
+        score(trial.reference, broken)
+        score(trial.twins, twins)
+    report_sensitivity(broken, len(trials))
+    report_specificity(twins, len(trials))
+    twin_comparisons, twin_coverage = report_twin_comparisons(trials)
+    naive = report_baseline_one(trials, broken)
+    static = report_baseline_two()
+    ablation, uncontained = report_baseline_three(trials, broken)
+    amplification, forced = report_baseline_four(trials, broken)
+    bounds, drift = report_bounds(trials, Policy())
+    policy_cost, reduction_order = report_policy_cost(trials)
+    attribution = report_attribution(trials)
+    return Figures(
+        trials=trials,
+        steps=broken,
+        twins=twins,
+        uncontained=uncontained,
+        twin_comparisons=twin_comparisons,
+        twin_coverage=twin_coverage,
+        naive=naive,
+        static=static,
+        ablation=ablation,
+        amplification=amplification,
+        forced=forced,
+        bounds=bounds,
+        drift=drift,
+        policy_cost=policy_cost,
+        reduction_order=reduction_order,
+        attribution=attribution,
+    )
+
+
+ARTIFACT_VERSION = 1
+
+
+def as_artifact(
+    figures: Figures,
+    where: dict[str, str],
+    runs: int,
+    seconds: float,
+    checked: list[tuple[str, str, str]],
+) -> dict:
+    """The whole run as one JSON document, which is what the README's tables are made of.
+
+    Slice 7's argument is that a number nobody retypes is a number that cannot
+    drift, and six corrections in this repository were all retyped figures. So
+    the file has to carry everything a table needs and label what the figures
+    are specific to: DuckDB pins the parallel behaviour, the thread count picks
+    how the work is divided, and the platform decides both.
+
+    `version` is here because `twicerun report` reads this back and a committed
+    artifact outlives the shape it was written in. It refuses a number it does
+    not know rather than generating a table out of a file it is guessing at.
+    """
+    return {
+        "version": ARTIFACT_VERSION,
+        "generated": datetime.now(UTC).isoformat(timespec="seconds"),
+        "trials": len(figures.trials),
+        "runs": runs,
+        "seconds": seconds,
+        "seconds_per_trial": statistics.median(t.seconds for t in figures.trials),
+        "environment": where,
+        "steps": [
+            {
+                **step.figures(),
+                "what": WHAT_EACH_STEP_IS.get(name, ""),
+                "reduction_order": figures.reduction_order.get(name, {}),
+                "uncontained": only(figures.uncontained, name).figures(),
+            }
+            for name, step in figures.steps.items()
+        ],
+        "twins": [step.figures() for step in figures.twins.values()],
+        "twin_comparisons": figures.twin_comparisons,
+        "twin_coverage": figures.twin_coverage,
+        "baseline_1": figures.naive,
+        "baseline_2": figures.static,
+        "baseline_3": figures.ablation,
+        "baseline_4": figures.amplification,
+        "forced_amplifiers": figures.forced,
+        "amplification_gap": [
+            {name: asdict(a) for name, a in trial.forced.items()} for trial in figures.trials
+        ],
+        "bounds": figures.bounds,
+        "drift": figures.drift,
+        "policy_cost": figures.policy_cost,
+        "attribution": figures.attribution,
+        "conditions": [{"condition": c, "verdict": v, "evidence": e} for c, v, e in checked],
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="eval.py",
@@ -1455,76 +1738,15 @@ def main(argv: list[str] | None = None) -> int:
         )
     shutil.rmtree(args.into)
 
-    broken_scores: dict[str, StepScore] = {}
-    twin_scores: dict[str, StepScore] = {}
-    for trial in trials:
-        score(trial.reference, broken_scores)
-        score(trial.twins, twin_scores)
-    report_sensitivity(broken_scores, len(trials))
-    report_specificity(twin_scores, len(trials))
-    twin_comparisons = report_twin_comparisons(trials)
-    naive = report_baseline_one(trials, broken_scores)
-    static = report_baseline_two()
-    ablation = report_baseline_three(trials, broken_scores)
-    amplification = report_baseline_four(trials, broken_scores)
-    bounds = report_bounds(trials, Policy())
-    policy_cost = report_policy_cost(trials)
-    attribution = report_attribution(trials)
-
+    figures = report_all(trials)
     seconds = time.perf_counter() - began
-    checked = report_conditions(
-        trials, broken_scores, twin_scores, naive, ablation, amplification, bounds, seconds
-    )
+    checked = figures.conditions(seconds)
     say(f"\n{args.trials} trials in {seconds:.0f}s, "
         f"median {statistics.median(t.seconds for t in trials):.0f}s each.")
 
     if args.json:
         args.json.write_text(
-            json.dumps(
-                {
-                    "trials": args.trials,
-                    "runs": args.runs,
-                    "seconds": seconds,
-                    "environment": where,
-                    "sensitivity": {
-                        name: dict(step.rates) for name, step in broken_scores.items()
-                    },
-                    # Every table here needs its denominator, and the silent
-                    # counts are the difference between a rate out of ten trials
-                    # and a rate out of the ones that compared anything.
-                    "silent_trials": {
-                        name: step.silent_trials
-                        for name, step in (*broken_scores.items(), *twin_scores.items())
-                    },
-                    "statuses": {
-                        name: dict(step.statuses) for name, step in broken_scores.items()
-                    },
-                    "specificity": {
-                        name: {
-                            "fired_in": step.fired_in,
-                            "trials": step.trials,
-                            "silent_trials": step.silent_trials,
-                        }
-                        for name, step in twin_scores.items()
-                    },
-                    "twin_comparisons": twin_comparisons,
-                    "baseline_1": naive,
-                    "baseline_2": static,
-                    "baseline_3": ablation,
-                    "baseline_4": amplification,
-                    "amplification_gap": [
-                        {name: asdict(a) for name, a in trial.forced.items()}
-                        for trial in trials
-                    ],
-                    "bounds": bounds,
-                    "policy_cost": policy_cost,
-                    "attribution": attribution,
-                    "conditions": [
-                        {"condition": c, "verdict": v, "evidence": e} for c, v, e in checked
-                    ],
-                },
-                indent=2,
-            ),
+            json.dumps(as_artifact(figures, where, args.runs, seconds, checked), indent=2),
             encoding="utf-8",
         )
         say(f"figures written to {args.json}")

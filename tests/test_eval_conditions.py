@@ -24,150 +24,23 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from twicerun.amplify import STABLE_ON_THIS_INPUT, Amplification
-from twicerun.measurement import StepMeasurement
-from twicerun.oracle import ArtifactFindings
-from twicerun.policy import Policy
+from twicerun.amplify import STABLE_ON_THIS_INPUT
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from eval import (  # noqa: E402
-    BENIGN,
-    INTERMITTENT,
-    PAIRS,
-    WIDTH,
-    NaiveScore,
-    Trial,
-    report_attribution,
-    report_baseline_four,
-    report_baseline_one,
-    report_baseline_three,
-    report_baseline_two,
-    report_bounds,
-    report_conditions,
-    report_sensitivity,
-    report_specificity,
-    report_twin_comparisons,
-    score,
-)
-
-# The reference pipeline's eight steps and what each one does on a healthy
-# laptop, so a fixture that departs from this is departing from something.
-FIRES = {
-    "generate_inputs": 0,
-    "daily_revenue": 4,
-    "customer_keys": 4,
-    "apply_price_updates": 4,
-    "append_audit_log": 4,
-    "mean_basket": 4,
-    "sparse_customer_keys": 2,
-    "roll_up_keys": 0,
-}
-
-
-def a_step(index: int, name: str, *, fired: int = 0, artifacts: int = 1) -> StepMeasurement:
-    """Four comparisons of `artifacts` artifacts each, of which `fired` disagreed.
-
-    `artifacts=0` is the case the whole file is about: four rounds that compared
-    nothing, which is what a step that wrote no Parquet leaves behind.
-    """
-    step = StepMeasurement(index=index, name=name, comparisons=4, terms=1000)
-    for round_ in range(4):
-        step.observe(
-            [
-                ArtifactFindings(
-                    name=f"{name}_rows",
-                    key=("id",),
-                    reference_rows=1000,
-                    candidate_rows=1000,
-                    row_missing=9 if round_ < fired else 0,
-                )
-                for _ in range(artifacts)
-            ]
-        )
-    return step
-
-
-def a_trial(*, artifacts: int = 1, downstream_uncontained: int = 3, fires: dict | None = None):
-    fires = FIRES if fires is None else {**FIRES, **fires}
-    reference = [
-        a_step(i, name, fired=fires[name], artifacts=artifacts)
-        for i, name in enumerate(fires)
-    ]
-    uncontained = [
-        a_step(
-            i,
-            name,
-            fired=downstream_uncontained if name == "roll_up_keys" else fires[name],
-            artifacts=artifacts,
-        )
-        for i, name in enumerate(fires)
-    ]
-    twins = []
-    for i, (_, twin) in enumerate(PAIRS):
-        step = a_step(i, twin, fired=0, artifacts=artifacts)
-        step.amplifications = [
-            Amplification(
-                amplifier="tie collapse",
-                note="one key group collapsed",
-                comparisons=2,
-                fired=0,
-                artifacts_compared=2 if artifacts else 0,
-            )
-        ]
-        twins.append(step)
-    return Trial(
-        reference=reference,
-        twins=twins,
-        uncontained=uncontained,
-        naive={
-            BENIGN: NaiveScore(632, 633, 2000, artifacts),
-            INTERMITTENT: NaiveScore(0, 0, 2000, artifacts),
-        },
-        # The cheap comparison agreeing with the oracle cell for cell, which is
-        # what it does on the real pipeline.
-        matched={name: (fired if artifacts else 0, 4 if artifacts else 0)
-                 for name, fired in fires.items()},
-        matched_twins={twin: (0, 4 if artifacts else 0) for _, twin in PAIRS},
-        forced={
-            name: Amplification(
-                amplifier=name,
-                note="one key group collapsed",
-                comparisons=4 if artifacts else 0,
-                fired=fired if artifacts else 0,
-                artifacts_compared=4 if artifacts else 0,
-            )
-            for name, fired in (
-                ("tie collapse", 4),
-                ("thread count", 3),
-                ("row multiplication", 4),
-            )
-        },
-        exit_with_amplifiers=1,
-        exit_without=1,
-        seconds=36.0,
-    )
+from eval import PAIRS, WIDTH, Trial, report_all  # noqa: E402
+from trial_fixtures import a_step, a_trial  # noqa: E402
 
 
 def verdicts(trials: list[Trial], seconds: float = 300.0) -> dict[str, str]:
-    """Every report main() runs, in the order it runs them, keyed by condition."""
-    broken: dict = {}
-    twins: dict = {}
-    for trial in trials:
-        score(trial.reference, broken)
-        score(trial.twins, twins)
-    report_sensitivity(broken, len(trials))
-    report_specificity(twins, len(trials))
-    report_twin_comparisons(trials)
-    naive = report_baseline_one(trials, broken)
-    report_baseline_two()
-    ablation = report_baseline_three(trials, broken)
-    amplification = report_baseline_four(trials, broken)
-    bounds = report_bounds(trials, Policy())
-    report_attribution(trials)
-    checked = report_conditions(
-        trials, broken, twins, naive, ablation, amplification, bounds, seconds
-    )
+    """Every report main() runs, through the same call main() makes.
+
+    This used to list the reporters itself, in main()'s order, and that copy
+    went stale the moment a reporter had a second thing to hand back for slice
+    7's tables. Five of the guards in this file broke on a signature change that
+    could not affect any of them, which is a test measuring the wrong thing.
+    """
+    checked = report_all(trials).conditions(seconds)
     return {condition: verdict for condition, verdict, _ in checked}
 
 
