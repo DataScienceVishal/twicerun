@@ -169,8 +169,25 @@ def _thousands(value: float) -> str:
     return f"{value:,.0f}"
 
 
-def _moved(step: dict) -> str:
-    """Class, cause and how far the step moved, in the order a reader asks for them.
+def magnitudes(step: dict) -> list[str]:
+    """How far the step moved: the rows that found no partner, then the float drift.
+
+    The third helper the eval imports back, for the reason it imports the other
+    two. The two copies of this decided which side of an unmatched pair to print
+    differently, and they disagreed on the mix that an append with no unique key
+    produces once one row also goes missing. The terminal asked whether any
+    trial had a reference-side count and then printed the median, which on six
+    pure appends and four mixed trials is `median 0 of the 3,953 reference rows
+    found no partner` with the extra-rows clause suppressed behind it. That is
+    the shape a test in `test_eval.py` calls the one this project exists to stop
+    publishing, and the table next door printed 3,953 extra rows off the same
+    counts.
+
+    So the question is asked about the number that will be printed. Which side
+    is non-zero is a fact about one artifact and the median is a fact about ten,
+    and only the second one goes in a cell. The two medians cannot both be zero:
+    `StepScore.observe` records a trial only when one side of it moved, so more
+    than half the trials would have to be zero on both.
 
     The row counts print against the hard maximum they came out of, because a
     step comparing 500,000 rows cannot lose more than 500,000 of them and a
@@ -178,10 +195,6 @@ def _moved(step: dict) -> str:
     thousand groups, so they print as a median with an n and no bracket at all.
     """
     parts = []
-    if step["classes"]:
-        parts.append(_codes(step["classes"], step["trials"]))
-    if step["causes"]:
-        parts.append(f"cause {_codes(step['causes'], step['trials'])}")
     if step["unmatched_median"]:
         parts.append(
             f"median {_thousands(step['unmatched_median'])} of the "
@@ -197,6 +210,17 @@ def _moved(step: dict) -> str:
             f"median {step['ulps_median']:g} ulp and {step['relative_median']:.1e} relative, "
             f"n={step['magnitudes_n']}"
         )
+    return parts
+
+
+def _moved(step: dict) -> str:
+    """Class, cause and how far the step moved, in the order a reader asks for them."""
+    parts = []
+    if step["classes"]:
+        parts.append(_codes(step["classes"], step["trials"]))
+    if step["causes"]:
+        parts.append(f"cause {_codes(step['causes'], step['trials'])}")
+    parts += magnitudes(step)
     return ", ".join(parts) or step["what"]
 
 

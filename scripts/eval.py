@@ -60,7 +60,7 @@ from twicerun.measurement import StepMeasurement, name_classes
 from twicerun.policy import HEADROOM_REQUIRED, REDUCTION_ORDER, DriftBound, Policy, judge
 from twicerun.report import WIDTH
 from twicerun.runner import amplify_runs, load_steps, run_pipeline, scored_amplification
-from twicerun.tables import ARTIFACT_VERSION, EVAL, distribution, tally
+from twicerun.tables import ARTIFACT_VERSION, EVAL, distribution, magnitudes, tally
 
 HERE = Path(__file__).resolve().parent.parent
 REFERENCE = HERE / "pipelines" / "reference.py"
@@ -281,10 +281,12 @@ class StepScore:
     def detail(self) -> str:
         """Class, cause, the threads=1 rate, and how far the step moved.
 
-        The row counts print against the hard maximum they came out of, because
-        a step comparing 500,000 rows cannot lose more than 500,000 of them and
-        a ceiling cannot be beaten. The ulp and relative figures print as a
-        median with an n and nothing else.
+        The magnitudes come from `twicerun.tables`, for the reason
+        `distribution` above does. This half had its own copy and the two
+        disagreed about which side of an unmatched pair to print: the docstring
+        on `magnitudes` has the shape they disagreed on. The labels stay local,
+        because the terminal wants `VALUE_DRIFT x8` where the table wants it in
+        backticks, and that difference is deliberate.
         """
         parts = []
         if self.classes:
@@ -293,21 +295,7 @@ class StepScore:
             parts.append(f"cause {tally(self.causes)}")
         if self.single_threaded:
             parts.append(f"threads=1 {tally(self.single_threaded)}")
-        if any(self.unmatched):
-            parts.append(
-                f"median {statistics.median(self.unmatched):,.0f} of the "
-                f"{statistics.median(self.of_rows):,.0f} reference rows found no partner"
-            )
-        if any(self.extra) and not any(self.unmatched):
-            parts.append(
-                f"median {statistics.median(self.extra):,.0f} extra rows against "
-                f"{statistics.median(self.of_rows):,.0f} reference rows"
-            )
-        if self.relative:
-            parts.append(
-                f"median {statistics.median(self.ulps):g} ulp and "
-                f"{statistics.median(self.relative):.1e} relative, n={len(self.relative)}"
-            )
+        parts += magnitudes(self.figures())
         return ", ".join(parts)
 
     def figures(self) -> dict:

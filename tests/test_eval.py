@@ -38,6 +38,7 @@ from twicerun.cause import Bisect
 from twicerun.measurement import StepMeasurement
 from twicerun.oracle import ArtifactFindings
 from twicerun.runner import run_pipeline
+from twicerun.tables import _moved
 
 # The file itself, not the module, because three tests below parse it rather
 # than call it. Every printed word in the eval is checked against four
@@ -169,6 +170,50 @@ def test_the_append_magnitude_is_not_reported_as_zero():
     scored = StepScore("appends")
     scored.observe(step)
     assert "3,953 extra rows against 3,953 reference rows" in scored.detail()
+
+
+def an_append(*, missing: int) -> StepMeasurement:
+    """One comparison of the append step, with `missing` rows also gone from the reference side."""
+    step = StepMeasurement(index=4, name="appends", comparisons=4)
+    step.observe(
+        [
+            ArtifactFindings(
+                name="log",
+                key=("id",),
+                reference_rows=3953,
+                candidate_rows=7906,
+                row_missing=missing,
+                row_extra=3953,
+            )
+        ]
+    )
+    return step
+
+
+def test_the_terminal_and_the_table_pick_the_same_side_of_an_unmatched_pair():
+    """Six pure appends and four that also lost a row, which is where the two copies parted.
+
+    The reference-side median over that mix is 0 and the later side's is 3,953.
+    The terminal asked whether any trial had a reference-side count, which is
+    true here, and then printed the median, so it published `median 0 of the
+    3,953 reference rows found no partner` and suppressed the clause that
+    carried the real number. The docstring on the test above calls that shape
+    the one this project exists to stop publishing.
+    """
+    scored = StepScore("appends")
+    for _ in range(6):
+        scored.observe(an_append(missing=0))
+    for _ in range(4):
+        scored.observe(an_append(missing=17))
+
+    assert scored.unmatched == [0] * 6 + [17] * 4, "the mix the two disagreed on"
+    printed = scored.detail()
+    assert "median 0 of the" not in printed
+    assert "median 3,953 extra rows against 3,953 reference rows" in printed
+    # One implementation, so the table's cell has to come out the same. The
+    # labels differ on purpose: markdown wants them in backticks.
+    cell = _moved({**scored.figures(), "what": "unused", "trials": 10})
+    assert printed.split(", median")[1] == cell.split(", median")[1]
 
 
 def test_dropping_the_amplifiers_is_what_the_flag_does_and_nothing_more():
