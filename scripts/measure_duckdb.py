@@ -5,8 +5,14 @@
 
 The counts move between runs, because the thing being measured is itself
 non-deterministic. What has to hold every time: the parallel figures are large,
-the threads=1 figures are zero, and count() never moves. Those three are
-asserted at the end and the script exits non-zero if any of them breaks.
+the threads=1 figures are zero, and the three count() runs agree with each
+other. Those three are asserted at the end and the script exits non-zero if any
+of them breaks.
+
+None of that licenses calling anything here fixed, and the words this repository
+refuses to print about a step are refused here too. Three runs agreeing is three
+runs agreeing. `tests/test_printed_words.py` holds every script the README
+publishes the output of to the same four words the tool's report is held to.
 
 Printing is unbuffered on purpose. The first attempt at the spec's version of
 this script printed nothing for ten minutes, and there was no way to tell a slow
@@ -101,8 +107,8 @@ def global_sum_spread(threads: int, trials: int = 5) -> int:
     return len(seen)
 
 
-def count_stability(threads: int, trials: int = 3) -> int:
-    """The control. Integer arithmetic cannot reassociate wrongly, so this is always 1."""
+def distinct_counts(threads: int, trials: int = 3) -> int:
+    """The control. Integer addition reassociates exactly, so three runs give one answer here."""
     with session(threads) as con:
         con.execute("CREATE TABLE t AS SELECT (i % 1000) AS g FROM range(2_000_000) AS s(i)")
         q = "SELECT g, count(*) FROM t GROUP BY g ORDER BY g"
@@ -183,9 +189,9 @@ def main() -> int:
     say(f"  threads={DEFAULT_THREADS}  via Parquet, fresh connection per query: {across}/1000")
     say(f"  threads={FIXED_THREADS}   distinct global sum() values over 5 runs: "
         f"{global_sum_spread(FIXED_THREADS)}")
-    stable = count_stability(FIXED_THREADS)
-    say(f"  threads={FIXED_THREADS}   distinct count() results over 3 runs: {stable} "
-        f"(1 means stable)\n")
+    counts = distinct_counts(FIXED_THREADS)
+    say(f"  threads={FIXED_THREADS}   distinct count() results over 3 runs: {counts} "
+        f"(1 means the three agreed)\n")
 
     say("Surrogate keys, row_number() OVER (ORDER BY <non-unique>), 500,000 rows")
     dense = surrogate_keys(FIXED_THREADS, 500_000, 1_000)
@@ -231,8 +237,8 @@ def main() -> int:
         )
     if serial_groups != 0:
         broken.append(f"float group sums diverged at threads=1 ({serial_groups}/1000)")
-    if stable != 1:
-        broken.append(f"count() was not stable ({stable} distinct results)")
+    if counts != 1:
+        broken.append(f"count() gave {counts} distinct results over 3 runs")
     if dense == 0:
         broken.append("row_number() at 500 rows per tie group did not diverge")
     if dense_serial != 0:
@@ -254,7 +260,7 @@ def main() -> int:
         for line in broken:
             say(f"  {line}")
         return 1
-    say("invariants hold: parallel large, serial zero, count() stable, tiebreak clean")
+    say("invariants hold: parallel large, serial zero, count() agreed with itself, tiebreak clean")
     return 0
 
 

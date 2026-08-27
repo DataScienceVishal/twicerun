@@ -33,6 +33,7 @@ from eval import (
     static_flags,
     without_amplifiers,
 )
+from test_printed_words import printed_prose
 from twicerun.amplify import DIVERGENT, STABLE_ON_THIS_INPUT, Amplification
 from twicerun.cause import Bisect
 from twicerun.measurement import StepMeasurement
@@ -40,10 +41,11 @@ from twicerun.oracle import ArtifactFindings
 from twicerun.runner import run_pipeline
 from twicerun.tables import _moved
 
-# The file itself, not the module, because three tests below parse it rather
-# than call it. Every printed word in the eval is checked against four
-# forbidden ones, and prose a helper composes at runtime is not a literal
-# anywhere, so the source is the only place the whole set is visible.
+# The file itself, not the module, because two tests below parse it rather than
+# call it. The eval's printed prose is held to the four forbidden words in
+# `test_printed_words.py`, alongside every other script the README publishes;
+# what stays here is the half specific to this file, that no status reaches the
+# terminal as typed text.
 EVAL = Path(__file__).resolve().parent.parent / "scripts" / "eval.py"
 
 # Fifty rows, every one of them a different id on the second run, so both sides
@@ -347,58 +349,14 @@ def test_the_eval_makes_the_directory_it_is_going_to_delete(tmp_path):
     assert not claim_workspace(mine), "the second call is the refusal"
 
 
-def printed_prose() -> str:
-    """Every string literal in the eval that is prose rather than an identifier.
-
-    Inclusive rather than call by call, which is the correction. The first
-    version of this collected constants inside `say(...)` and nothing else, so
-    it reached none of the eight condition texts, none of the eight evidence
-    lines, the specificity table or baseline 3's per-step lines, which all go
-    through `hang`, and nothing a helper composes and returns. Three mutations
-    putting a forbidden word where the eval really prints it left every test in
-    this file green.
-
-    Dict keys and subscript keys come back out, because they are identifiers
-    rather than words and one of them is `stable_trials`, which goes to the JSON
-    file and is never printed. A test that fails on a dict key is a test that
-    gets deleted. Docstrings come out because nothing prints them, and the
-    runtime half of this check is in `test_eval_conditions.py`, which reads the
-    terminal output itself.
-    """
-    tree = ast.parse(EVAL.read_text(encoding="utf-8"))
-    not_prose = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Dict):
-            not_prose.update(k for k in node.keys if isinstance(k, ast.Constant))
-        elif isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
-            not_prose.add(node.slice)
-        elif isinstance(node, ast.Module | ast.FunctionDef | ast.ClassDef):
-            first = node.body[0]
-            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
-                not_prose.add(first.value)
-    return "\n".join(
-        node.value
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and node not in not_prose
-    )
-
-
-@pytest.mark.parametrize("word", ["deterministic", "stable", "reproducible", "passed"])
-def test_the_eval_never_claims_a_step_is_deterministic(word):
-    """The same four words `test_cli.py` holds the report to, on the other thing this repo prints.
-
-    `stable` is in the list here where the CLI report has to strip a token out
-    of its output first, because the eval spells no status as text at all: it
-    interpolates the constant. The test below is what keeps that true.
-    """
-    assert word not in printed_prose().lower()
-
-
 @pytest.mark.parametrize("status", [DIVERGENT, STABLE_ON_THIS_INPUT])
 def test_no_status_reaches_the_terminal_as_typed_text(status):
-    """Which is what makes the word check above a check rather than a spelling accident.
+    """Which is what makes the word check in `test_printed_words.py` a check.
+
+    That file strips `STABLE_ON_THIS_INPUT` out before looking for `stable`, so
+    the eval could satisfy it by typing the status as a literal and the word
+    would go unnoticed. It does not: it interpolates the constant, and this is
+    what keeps that true.
 
     This used to count occurrences of the identifier in the source and assert
     there were at least three, which is satisfied by any three lines that
@@ -406,7 +364,7 @@ def test_no_status_reaches_the_terminal_as_typed_text(status):
     conditions print it left the old assertion green, so what it measured was
     that the file imports the constant, not that it never types the text.
     """
-    assert status not in printed_prose()
+    assert status not in printed_prose(EVAL)
 
 
 def test_the_statuses_are_referenced_by_name_somewhere_in_the_eval():

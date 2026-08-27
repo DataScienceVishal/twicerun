@@ -743,7 +743,9 @@ To re-derive every DuckDB number quoted here on your own machine, which takes ab
 uv run python scripts/measure_duckdb.py
 ```
 
-Its counts will not match these, for the same reason the transcript above will not. What holds is the shape: parallel figures large, `threads=1` figures zero, `count()` stable, the single-word tiebreak fix clean, and the `MERGE` bug present at threads=8 and absent at threads=1. The script checks ten such invariants and exits non-zero if any of them breaks, so it fails loudly rather than printing numbers that mean something different from what they say.
+Its counts will not match these, for the same reason the transcript above will not. What holds is the shape: parallel figures large, `threads=1` figures zero, the three `count()` runs agreeing with each other, the single-word tiebreak fix clean, and the `MERGE` bug present at threads=8 and absent at threads=1. The script checks ten such invariants and exits non-zero if any of them breaks, so it fails loudly rather than printing numbers that mean something different from what they say.
+
+Three `count()` runs agreeing is three runs agreeing, which is why that line no longer reads `count() stable`. It did, in the script's output and twice in this file, and three observations cannot license the word for the same reason five cannot license it about a pipeline step. See the word list below.
 
 ## What this costs to run
 
@@ -862,7 +864,9 @@ With `m` comparisons and a per-comparison divergence probability `p`, a step is 
 
 Those zero results are the argument for amplification, and it has a number in the gap table above. More runs lower the miss rate for a given `p` and do not change `p`. Stressing the input changes `p`, and on that step it roughly doubles it.
 
-No practical number of runs proves determinism, which is why the tool never prints the word. There is a test asserting the report contains neither "deterministic" nor "stable".
+No practical number of runs proves determinism, which is why nothing here prints the word. "deterministic", "stable", "reproducible" and "passed" are refused in the tool's report, in the eval's output, and in every other script whose output this file publishes. `tests/test_printed_words.py` reads the string literals out of all of them and `tests/test_cli.py` runs the report and greps it.
+
+That covered the tool and the eval and not the other four scripts, which is how `scripts/measure_duckdb.py` came to print `count() stable` off three observations, with this file repeating it as an invariant. Holding the tool to a rule the scripts beside it are exempt from is not a rule, so the guard was widened rather than the claim narrowed.
 
 ## Six times a number in this README was beaten by a larger sample
 
