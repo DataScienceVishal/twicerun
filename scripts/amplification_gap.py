@@ -43,7 +43,7 @@ from pathlib import Path
 import duckdb
 
 from twicerun.amplify import AMPLIFIERS, Amplification
-from twicerun.runner import amplify_runs, load_steps, run_pipeline, scored_runs
+from twicerun.runner import amplify_runs, load_steps, run_pipeline, scored_amplification
 from twicerun.tables import ARTIFACT_VERSION, GAP
 
 LOOP = "the five-run loop"
@@ -60,11 +60,11 @@ def one_pass(into: Path) -> dict[str, Amplification]:
     Every row of the table comes back in the shipped `Amplification`, including
     the loop's, which is the row where nothing was substituted. That is not
     tidiness: `measured` is the guard both halves need and neither had. The loop
-    row took its denominator from `comparisons`, which is runs minus one whether
-    or not the step wrote anything, and the amplifier rows took
-    `scored_runs(...)[0]` and threw away the second element, which is the only
-    thing that tells a re-execution that wrote nothing apart from one that
-    agreed with itself.
+    row is built here because it is the one row with no amplifier behind it, and
+    it took its denominator from `comparisons`, which is runs minus one whether
+    or not the step wrote anything. The amplifier rows go through
+    `scored_amplification`, which is where the other half of that correction
+    lives.
     """
     report, manifest = run_pipeline(REFERENCE, runs=5, parent=into, amplify=False, keep=1)
     loop = next(s for s in report.steps if s.index == INTERMITTENT)
@@ -86,15 +86,7 @@ def one_pass(into: Path) -> dict[str, Amplification]:
         manifest.environment.threads,
         {},
     ):
-        fired, compared = scored_runs(entry.runs, {})
-        rates[entry.amplifier] = Amplification(
-            amplifier=entry.amplifier,
-            note=entry.note,
-            comparisons=max(len(entry.runs) - 1, 0),
-            fired=fired,
-            artifacts_compared=compared,
-            error=entry.error,
-        )
+        rates[entry.amplifier] = scored_amplification(entry, {})
     shutil.rmtree(into)
     return rates
 

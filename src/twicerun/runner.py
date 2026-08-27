@@ -616,6 +616,31 @@ def scored_runs(
     return fired, compared
 
 
+def scored_amplification(
+    entry: AmplifiedRuns, keys: Mapping[str, Sequence[str]]
+) -> Amplification:
+    """One amplifier's re-executions, scored into the rate a report or a table reads.
+
+    Three callers build this from the same two numbers: the run command through
+    `attach_amplification` below, and the two eval scripts, which point the
+    amplifiers at one step directly to get both rates on the same step in the
+    same pass. It was written out three times, and the same mistake had to be
+    corrected in each copy: taking `scored_runs(...)[0]` and rebuilding the
+    denominator from the run count throws away the artifact count, which is the
+    only thing that tells a re-execution which wrote nothing apart from one that
+    agreed with itself.
+    """
+    fired, compared = scored_runs(entry.runs, keys)
+    return Amplification(
+        amplifier=entry.amplifier,
+        note=entry.note,
+        comparisons=max(len(entry.runs) - 1, 0),
+        fired=fired,
+        artifacts_compared=compared,
+        error=entry.error,
+    )
+
+
 def attach_amplification(
     manifest: Manifest, measured: list[StepMeasurement], keys: Mapping[str, Sequence[str]]
 ) -> None:
@@ -630,17 +655,7 @@ def attach_amplification(
         step = on.get(entry.step_index)
         if step is None:
             continue
-        fired, compared = scored_runs(entry.runs, keys)
-        step.amplifications.append(
-            Amplification(
-                amplifier=entry.amplifier,
-                note=entry.note,
-                comparisons=max(len(entry.runs) - 1, 0),
-                fired=fired,
-                artifacts_compared=compared,
-                error=entry.error,
-            )
-        )
+        step.amplifications.append(scored_amplification(entry, keys))
 
 
 def _step_record(record: RunRecord, index: int) -> StepRecord:

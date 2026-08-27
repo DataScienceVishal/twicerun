@@ -59,7 +59,7 @@ from twicerun.manifest import Manifest
 from twicerun.measurement import StepMeasurement, name_classes
 from twicerun.policy import HEADROOM_REQUIRED, REDUCTION_ORDER, DriftBound, Policy, judge
 from twicerun.report import WIDTH
-from twicerun.runner import amplify_runs, load_steps, run_pipeline, scored_runs
+from twicerun.runner import amplify_runs, load_steps, run_pipeline, scored_amplification
 from twicerun.tables import ARTIFACT_VERSION, EVAL, distribution, tally
 
 HERE = Path(__file__).resolve().parent.parent
@@ -536,12 +536,8 @@ def forced_amplification(
     measures over 40 passes, folded into a trial that has already paid for the
     pipeline run underneath it.
 
-    The rate comes back in the same `Amplification` the runner builds from the
-    same two numbers, so `measured` means here what it means in a report. This
-    used to take `scored_runs(...)[0]` and rebuild the denominator from the run
-    count, which threw away the second element and with it the only thing that
-    tells a re-execution which wrote nothing apart from one that agreed with
-    itself.
+    The rate is built by `scored_amplification`, which is the function the runner
+    calls for the same job, so `measured` means here what it means in a report.
     """
     rates: dict[str, Amplification] = {}
     for entry in amplify_runs(
@@ -553,15 +549,7 @@ def forced_amplification(
         manifest.environment.threads,
         {},
     ):
-        fired, compared = scored_runs(entry.runs, {})
-        rates[entry.amplifier] = Amplification(
-            amplifier=entry.amplifier,
-            note=entry.note,
-            comparisons=max(len(entry.runs) - 1, 0),
-            fired=fired,
-            artifacts_compared=compared,
-            error=entry.error,
-        )
+        rates[entry.amplifier] = scored_amplification(entry, {})
     return rates
 
 
