@@ -743,7 +743,7 @@ Its counts will not match these, for the same reason the transcript above will n
 
 ## What this costs to run
 
-Measured, because the spec estimated it by counting step executions and the estimate was three times out.
+Measured on 2026-08-26, because the spec estimated it by counting step executions and the estimate was three times out. None of the figures in this section is regenerated: the timings come from an instrumented script that is not committed, and wall clock on a laptop is not a quantity a committed artifact would make honest anyway.
 
 A pass over the reference pipeline is five executions of eight steps, plus five single-threaded executions of each step that fired, plus three to five executions of each step that did not, once per amplifier. That is roughly 65 to 95 step executions against 8 for running the pipeline once. The spec called it 5x to 15x on that arithmetic and the arithmetic is right.
 
@@ -895,7 +895,7 @@ Everything below is a measurement taken once, on a date, and transcribed. None o
 - **The five eval runs A to E**, 2026-08-26. Their JSON was never written, which is the defect this slice fixes. They are kept because five runs of the same code disagreeing about the headline number is the strongest evidence in the file for its own thesis.
 - **The per-comparison progression of the append bug**, 3,953 to 15,812 across four comparisons, 2026-08-26, over 10 uncontained and 20 contained passes. The eval keeps the loudest comparison per step, so the progression is not in the artifact.
 - **The twins over 12 and 40 passes**, 2026-08-26. The committed artifact's twin coverage is 10 trials of 6 steps.
-- **Every `threads=1` figure was 0 of 4 or 4 of 4 and never anything between**, across 636 bisected step-passes counted on 2026-08-26: 166 during slice 3, 237 in a fresh clone, 233 in a 40-pass sweep. It is the one quantity here a larger sample has never moved, and it was not designed and is not explained.
+- **Every `threads=1` figure was 0 of 4 or 4 of 4 and never anything between**, across 636 bisected step-passes counted on 2026-08-26: 166 during slice 3, 237 in a fresh clone, 233 in a 40-pass sweep. The count is transcribed; the property is not, because the third column of the results table above is generated and every cell in it is still a zero or a four. It is the one quantity here a larger sample has never moved, it was not designed, and it is not explained.
 - **The cost measurements**, 2026-08-26. The 25x median multiplier, the 19/15/65 split, and the `--no-amplify` comparison over 12 passes each. Wall clock on a laptop, and the section says what that is worth.
 - **The TLC backfill results and the row-count switch-on table**, 2026-08-26. These need the three TLC partitions, which are not committed and are not fetched in CI, so nothing here can regenerate them.
 - **The DuckDB constructions in `scripts/measure_duckdb.py`**, re-derivable in about two seconds by running it. Its ten invariants fail loudly rather than printing figures that mean something else.

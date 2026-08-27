@@ -105,6 +105,21 @@ def test_the_stamp_names_the_four_things_the_figures_are_specific_to(rendered):
     assert "results/eval-fixture.json" in stamp
 
 
+def test_the_gap_table_carries_the_same_stamp_as_the_eval_one(rendered):
+    """Both scripts measure on one laptop at one thread count, and both have to say so.
+
+    They are separate runs at separate sample sizes, so a reader comparing a
+    rate in one against a rate in the other needs each block to name its own
+    conditions rather than inheriting the other's.
+    """
+    stamp = rendered["gap-provenance"]
+    assert "1.5.5" in stamp
+    assert "threads=10" in stamp
+    assert "macOS-26.5.2-arm64-arm-64bit" in stamp
+    assert "40 passes" in stamp
+    assert "results/gap-fixture.json" in stamp
+
+
 def test_a_step_that_never_fired_says_it_was_not_bisected_rather_than_showing_a_zero(rendered):
     """`0 of 4 at threads=1` on a step that never fired would be four comparisons of nothing."""
     row = next(line for line in rendered["results"].splitlines() if "generate_inputs" in line)
