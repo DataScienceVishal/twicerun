@@ -176,7 +176,7 @@ uv run python scripts/eval.py --json out.json
 
 **Five ten-trial runs went into this section and they disagree with each other about the headline number.** All five are below, in the order they happened. A and B are the same code. C and D followed two changes to how a rate is printed and nothing else, which is why they are here rather than replacing anything: a display change is not a reason to drop a measurement, and the run that breached a pre-registered threshold is the second column.
 
-E is the current code, which measures the same things and reports several of them differently: every denominator is now comparisons that happened rather than runs minus one, and baseline 1 gained the run-matched row two sections down, which is what pushed the wall clock from six minutes to nine.
+E is the current code, which measures the same things and reports several of them differently: every denominator is now comparisons that happened rather than runs minus one, and baseline 1 gained the run-matched row in the table below, which is what pushed the wall clock from six minutes to nine.
 
 Run A's wall clock is the odd one because the laptop was running other things, which the cost section further down is already about.
 
