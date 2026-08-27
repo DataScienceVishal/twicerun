@@ -356,7 +356,7 @@ def score(steps: list[StepMeasurement], into: dict[str, StepScore]) -> None:
         into.setdefault(step.name, StepScore(step.name)).observe(step)
 
 
-def naive_pass(manifest: Manifest) -> dict[str, tuple[int, int]]:
+def naive_pass(manifest: Manifest) -> dict[str, NaiveScore]:
     """Baseline 1: runs 1 and 2 of the same trial, compared as multisets of row hashes.
 
     Two runs, no tolerance, no classification, no repetition. What almost anyone
