@@ -12,8 +12,8 @@ uv run python scripts/eval.py --json out.json
 ```
 
 The eval produces every generated table in the README. `--json` writes what it measured,
-`results/eval-2026-08-27.json` is the copy that file renders, and re-running it and committing the new
-file is the only way any of those numbers changes.
+`results/eval-2026-08-27.json` is the copy that file renders, and re-running it and committing the
+new file is the only way any of those numbers changes.
 
 **The eval always exits 0, including on a triggered condition.** A script that failed on one would be
 a script with a reason to stop publishing it, and there is no CI job running this: the stamp above the
@@ -21,16 +21,16 @@ README's tables says how long the committed run took, and peak disk is 1.3 GB.
 
 ## Five runs that cannot be regenerated
 
-Run F is the committed one. Five ten-trial runs came before it and they disagree with each other about
-the headline number. All five are below, in the order they happened, and none of them can be
-regenerated: their JSON was never written out, which is the defect slice 7 exists to fix and the
-reason the table stops at E. A and B are the same code. C and D followed two changes to how a rate is
-printed and nothing else, which is why they are here rather than replacing anything: a display change
-is not a reason to drop a measurement, and the run that breached a pre-registered threshold is the
-second column. E is the last run before the artifact existed.
+Run F is the committed one. Five ten-trial runs came before it and they disagree with each other
+about the headline number. All five are below, in the order they happened, and none of them can be
+regenerated: their JSON was never written out, which is the defect the report generator exists to
+fix and the reason the table stops at E. A and B are the same code. C and D followed two changes to
+how a rate is printed and nothing else, which is why they are here rather than replacing anything: a
+display change is not a reason to drop a measurement, and the run that breached a pre-registered
+threshold is the second column. E is the last run before the artifact existed.
 
-Measured on 2026-08-26 on this laptop, DuckDB 1.5.5 at `threads=10`. Five observations, transcribed by
-hand, and no way left to check them:
+Measured on 2026-08-26 on this laptop, DuckDB 1.5.5 at `threads=10`. Five observations, transcribed
+by hand, and no way left to check them:
 
 | step | run A | run B | run C | run D | run E |
 |---|---|---|---|---|---|
@@ -45,42 +45,43 @@ hand, and no way left to check them:
 | six twins, every step | nothing fired | nothing fired | nothing fired | nothing fired | nothing fired |
 | wall clock | 536s | 363s | 406s | 356s | 532s |
 
-Two of those columns need their conditions stated, and neither is in the table. Run A's wall clock is
-the odd one because the laptop was running other things. Run E is 532s against B's 363 because it
+Two of those columns need their conditions stated, and neither is in the table. Run A's wall clock
+is the odd one because the laptop was running other things. Run E is 532s against B's 363 because it
 gained baseline 1's run-matched row, which costs about 20 seconds a trial in comparisons and nothing
 else.
 
 **Run B breached the spec's sensitivity threshold**, which fixed 10 of 10 on the four broken steps.
 `apply_price_updates` came out 9 of 10. The eval printed `TRIGGERED` next to it and exited 0, because a
-triggered condition is a result and not a failed run. That is also the condition that cut slice 6.
+triggered condition is a result and not a failed run. That is also the condition that cut crash injection.
 
-There was also a ten-trial run in a fresh clone outside the working tree, on the slice-5 code. It is
-not in the table because it is not the same code path being questioned, and calling it independent
-would be overstating it: same laptop, same DuckDB pin, same pipelines, same author, independent of the
-working tree and of nothing else. It gave `customer_keys` 4x6 3x4, `apply_price_updates` 4x6 3x3 2x1,
-`sparse_customer_keys` 4x4 3x1 2x3 1x2, the other five steps unchanged, zero twin fires, 30 of 30 on
-attribution, and every condition not triggered, in 370s.
+There was also a ten-trial run in a fresh clone outside the working tree, on the code as it stood
+before the report generator. It is not in the table because it is not the same code path being
+questioned, and calling it independent would be overstating it: same laptop, same DuckDB pin, same
+pipelines, same author, independent of the working tree and of nothing else. It gave `customer_keys`
+4x6 3x4, `apply_price_updates` 4x6 3x3 2x1, `sparse_customer_keys` 4x4 3x1 2x3 1x2, the other five
+steps unchanged, zero twin fires, 30 of 30 on attribution, and every condition not triggered, in
+370s.
 
 ## What the specificity denominator contains
 
-Two things are worth naming. One of the six pairs is `generate_inputs`, which is the same function in
-both files, so a sixth of it is the sensitivity table's control row counted a second time. And
+Two things are worth naming. One of the six pairs is `generate_inputs`, which is the same function
+in both files, so a sixth of it is the sensitivity table's control row counted a second time. And
 `mean_basket` and `roll_up_keys` have no twin at all, so the correct-code step that fires in every
-trial is not in the specificity set. The eval prints both of those under the table rather than leaving
-the denominator to be read as that many independent chances to fail.
+trial is not in the specificity set. The eval prints both of those under the table rather than
+leaving the denominator to be read as that many independent chances to fail.
 
 Until run E the main-loop figure was runs minus one times steps times trials rather than a count of
-comparisons that happened, in the same function that filtered the amplified figure on whether anything
-was compared. Both are counted now.
+comparisons that happened, in the same function that filtered the amplified figure on whether
+anything was compared. Both are counted now.
 
 ## The four baselines
 
-Baseline 1's figures moved between the five runs before the artifact existed, and the direction of the
-movement is the useful part: it fired on `mean_basket` in 10 of 10 trials in every one of them, at
-medians of 1,265, 1,270, 1,269, 1,208 and 1,347 rows failing to pair, on a step where nothing is
-wrong. The count is across both sides, out of the 2,000 the two runs put in front of it rather than the
-1,000 groups. It caught the intermittent step in 7, 5, 4, 6 and 5 of 10, against the five-run loop's
-10, 10, 9, 9 and 9.
+Baseline 1's figures moved between the five runs before the artifact existed, and the direction of
+the movement is the useful part: it fired on `mean_basket` in 10 of 10 trials in every one of them,
+at medians of 1,265, 1,270, 1,269, 1,208 and 1,347 rows failing to pair, on a step where nothing is
+wrong. The count is across both sides, out of the 2,000 the two runs put in front of it rather than
+the 1,000 groups. It caught the intermittent step in 7, 5, 4, 6 and 5 of 10, against the five-run
+loop's 10, 10, 9, 9 and 9.
 
 **Baseline 1 was handed one comparison and the oracle four, and that is most of the gap between them.**
 Until run E this section said the comparison method was the only difference, which was false in the
@@ -108,15 +109,15 @@ anyone could put on a static checker's scale. What it still cannot do is the res
   depends on whether the answer was supposed to be exact.
 - Its hits are a fact about the query text. Three of the five bugs are facts about the data.
 
-The patterns run against parsed function bodies rather than the file. That is not tidiness: `grep` the
-twins file for the append pattern and it hits, because `apply_price_updates_deduped` reads and writes
-`prices`. A file-level check reports an append bug in the file whose entire purpose is that it has
-none.
+The patterns run against parsed function bodies rather than the file. That is not tidiness: `grep`
+the twins file for the append pattern and it hits, because `apply_price_updates_deduped` reads and
+writes `prices`. A file-level check reports an append bug in the file whose entire purpose is that
+it has none.
 
 ## The pre-registered conditions
 
-Three of the eight declare a piece of this project unnecessary if they fire. All eight print on every
-run whatever they say, and the README carries the table.
+Three of the eight declare a piece of this project unnecessary if they fire. All eight print on
+every run whatever they say, and the README carries the table.
 
 **Run F triggers the sensitivity condition, and it is the second run to do so.** The step is
 `apply_price_updates`, the same one run B missed, and the shortfall is one trial. Nothing was changed
@@ -127,17 +128,17 @@ roughly 100,000 and 125,000 rows and a source that happens to carry a repeated k
 table shows it at four fires out of four in only 2 of the 10 trials. That is the reading, and it is a
 reading rather than a measurement.
 
-The other seven held in run F and in the five runs before it, with run B's sensitivity the only other
-trigger.
+The other seven held in run F and in the five runs before it, with run B's sensitivity the only
+other trigger.
 
-Three of those eight can be read off an absence rather than off a measurement, and until this pass they
-were. A step that writes no artifact compares nothing, fires on none of the nothing it compared, and
-arrives at the conditions as a clean zero, so the naive baseline reports no false positives, the
-amplification gap comes out as two zero rates and the uncontained pass removes no falsely divergent
-step. All three then print TRIGGERED, which is the verdict that declares a piece of this project
-unnecessary. Seven of the eight carry a third verdict now, `NOT MEASURED`, and the eighth is the wall
-clock, which is measured whatever the pipeline did. The trigger in the committed run is a real 9 of 10
-rather than a gap, and so was run B's.
+Three of those eight can be read off an absence rather than off a measurement, and until this pass
+they were. A step that writes no artifact compares nothing, fires on none of the nothing it
+compared, and arrives at the conditions as a clean zero, so the naive baseline reports no false
+positives, the amplification gap comes out as two zero rates and the uncontained pass removes no
+falsely divergent step. All three then print TRIGGERED, which is the verdict that declares a piece
+of this project unnecessary. Seven of the eight carry a third verdict now, `NOT MEASURED`, and the
+eighth is the wall clock, which is measured whatever the pipeline did. The trigger in the committed
+run is a real 9 of 10 rather than a gap, and so was run B's.
 
 **Two of the eight can trigger on something that is not the detector, and both were written that way in
 the spec.** The amplification gap asks whether any amplifier beats the five-run loop, and a maximum
@@ -149,16 +150,16 @@ because the two causes are indistinguishable from the condition's own output, an
 where the spec put it is the only way it stays worth anything.
 
 The bound check is the one condition whose two readings disagree, and both are in the README's
-drift-bound table. It clears at `n = rows read by the step` and fails at the tight `n`, the terms behind
-one output value. That split has held on every sample taken: 0, 0, 1, 1 and 0 of 20 tight clearances
-across the five runs before the artifact. The check as pre-registered passes and the honest reading of
-it fails, so both print.
+drift-bound table. It clears at `n = rows read by the step` and fails at the tight `n`, the terms
+behind one output value. That split has held on every sample taken: 0, 0, 1, 1 and 0 of 20 tight
+clearances across the five runs before the artifact. The check as pre-registered passes and the
+honest reading of it fails, so both print.
 
 ## Attribution, scored against itself
 
-Three steps produce an attribution and ten trials give thirty chances, so a denominator below thirty is
-a step that went quiet for a whole trial. The five runs before the artifact gave 30 of 30, then 29 of 29
-four times.
+Three steps produce an attribution and ten trials give thirty chances, so a denominator below thirty
+is a step that went quiet for a whole trial. The five runs before the artifact gave 30 of 30, then
+29 of 29 four times.
 
 **Two thirds of that is a sort key scored against itself.** On both `row_number` steps, dropping
 `surrogate_id` and dropping `event_id` each take the unmatched count to zero, because the two columns
@@ -193,22 +194,24 @@ the spec put it rather than widened after the fact.
 
 ## The condition that would have made the oracle pointless
 
-Pre-registered with the rest: **if the naive baseline's false-positive count on correct code had come
-out at zero, the oracle would be more machinery than the problem needs**, and this section would say so.
+Pre-registered with the rest: **if the naive baseline's false-positive count on correct code had
+come out at zero, the oracle would be more machinery than the problem needs**, and this section
+would say so.
 
-It did not, and the README's baselines table has the current figure. Baseline 1 fired on `mean_basket`
-in 10 of 10 trials in every one of the five runs before the artifact too, at medians of 1,265, 1,270,
-1,269, 1,208 and 1,347 rows that failed to pair, on a step where nothing is wrong. The count is across
-both sides, so it is out of 2,000 rather than 1,000: a group that differs loses a row each way.
+It did not, and the README's baselines table has the current figure. Baseline 1 fired on
+`mean_basket` in 10 of 10 trials in every one of the five runs before the artifact too, at medians
+of 1,265, 1,270, 1,269, 1,208 and 1,347 rows that failed to pair, on a step where nothing is wrong.
+The count is across both sides, so it is out of 2,000 rather than 1,000: a group that differs loses
+a row each way.
 
-The first four figures were published as `median 1,265 rows unmatched out of 1,000 on each side`, which
-is a magnitude larger than the ceiling it names, on a line whose own rule is that a ceiling cannot be
-beaten. The numerator summed the two sides and the denominator took one of them. The eval prints the two
-sides separately now, against the total of both, and the four figures are unchanged because the quantity
-was right and only its denominator was wrong.
+The first four figures were published as `median 1,265 rows unmatched out of 1,000 on each side`,
+which is a magnitude larger than the ceiling it names, on a line whose own rule is that a ceiling
+cannot be beaten. The numerator summed the two sides and the denominator took one of them. The eval
+prints the two sides separately now, against the total of both, and the four figures are unchanged
+because the quantity was right and only its denominator was wrong.
 
-`src/twicerun/compare.py` is that comparison, kept rather than deleted, and `scripts/eval.py` runs it
-against each trial's own runs 1 and 2.
+`src/twicerun/compare.py` is that comparison, kept rather than deleted, and `scripts/eval.py` runs
+it against each trial's own runs 1 and 2.
 
 **A second and narrower version of this condition was missing until run E, and it is the one that
 bites.** Baseline 1 gets one comparison where the oracle gets four, so the published gap between them
@@ -219,10 +222,11 @@ says so in the baseline 1 section on every run. The oracle earns its cost on wha
 yes or no: the class, the magnitudes, the attributed column, the bound and the cause. If those turn out
 not to be worth their runtime to anyone, the honest reading of that is the same as this section's.
 
-The two-second version needs none of this repo: `scripts/measure_duckdb.py` re-derives the premise in
-raw DuckDB, and it is the better check, because it is a fact about DuckDB rather than about my code.
+The two-second version needs none of this repo: `scripts/measure_duckdb.py` re-derives the premise
+in raw DuckDB, and it is the better check, because it is a fact about DuckDB rather than about my
+code.
 
-Stating the condition matters more than the outcome. A tool whose author cannot say what would have made
-it pointless has not tested the premise, and there are eight of these now, printed on every eval run
-whatever they say, with a ninth in the baseline 1 section that is not a pre-registered threshold because
-nobody thought to pre-register it.
+Stating the condition matters more than the outcome. A tool whose author cannot say what would have
+made it pointless has not tested the premise, and there are eight of these now, printed on every
+eval run whatever they say, with a ninth in the baseline 1 section that is not a pre-registered
+threshold because nobody thought to pre-register it.

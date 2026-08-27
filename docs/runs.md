@@ -1,16 +1,16 @@
 # The run loop
 
-Five runs on the same input, run 1 as the reference, runs 2 to N each compared against it, and
-every step scored `k of m`. Three choices in that sentence are arguable, so this file argues them:
-the run count, resolving every later read against run 1, and re-executing at `threads=1` to say
-where to look. The last section is what a pass costs, which turned out not to be the runs.
+Five runs on the same input, run 1 as the reference, runs 2 to N each compared against it, and every
+step scored `k of m`. Three choices in that sentence are arguable, so this file argues them: the run
+count, resolving every later read against run 1, and re-executing at `threads=1` to say where to
+look. The last section is what a pass costs, which turned out not to be the runs.
 
 ## Why five and not two
 
 A two-run tool cannot tell "deterministic" from "non-deterministic and lucky this time". Step 6 of
 the reference pipeline is the proof. It is the same `row_number()` bug as step 2 at a lower tie
-density, and its cell in the README's results table spans four of the five values a rate out of
-four can take. At 1 of 4 a two-run checker reports nothing three times in four on a step that is
+density, and its cell in the README's results table spans four of the five values a rate out of four
+can take. At 1 of 4 a two-run checker reports nothing three times in four on a step that is
 definitely broken, and at a flat 0 of 4 even five runs miss it outright.
 
 How often that flat zero comes up is the quantity nobody can pin down, which is the point rather
@@ -46,13 +46,14 @@ output therefore reads the same bytes every time, so it reports what it did rath
 step above it did.
 
 The idea is [Spot's](https://academic.oup.com/gigascience/article/9/12/giaa106/5998300) (Salari,
-Kiar, Lewis, Evans and Glatard, GigaScience 9(12), [arXiv:2006.04684](https://arxiv.org/abs/2006.04684)),
-which compares two conditions of a neuroimaging pipeline "in a step-by-step execution that prevents
-the propagation of differences in the pipeline", and does it by copying the first condition's output
-files into the second. The borrowing is the idea and not the implementation: Spot's tool used
-ReproZip syscall interception, has not been touched since 2020, and works on a domain unrelated to
-this one. Here artifacts are already addressed by `(run, step index, name)`, so containment is a
-dictionary lookup rather than a file copy, and it costs nothing measurable.
+Kiar, Lewis, Evans and Glatard, GigaScience 9(12),
+[arXiv:2006.04684](https://arxiv.org/abs/2006.04684)), which compares two conditions of a
+neuroimaging pipeline "in a step-by-step execution that prevents the propagation of differences in
+the pipeline", and does it by copying the first condition's output files into the second. The
+borrowing is the idea and not the implementation: Spot's tool used ReproZip syscall interception,
+has not been touched since 2020, and works on a domain unrelated to this one. Here artifacts are
+already addressed by `(run, step index, name)`, so containment is a dictionary lookup rather than a
+file copy, and it costs nothing measurable.
 
 `--no-containment` runs the ablation, so the numbers below are something you can reproduce rather
 than a claim to take on trust.
@@ -110,12 +111,12 @@ exercise containment and is not a failure anyone here has been bitten by, unlike
 bugs beside it. The README's containment table is every step of the committed run with the ablation
 beside it, and only that bottom row is what containment is for. Read the others as noise rather than
 as evidence either way: two steps in this pipeline are intermittent, so a contained pass and an
-uncontained pass differ mostly by which of them happened to fire. Counting
-steps-divergent-per-pass and subtracting was the first way this was measured and it was exactly that
-noise, which is why the quantity has to be per step. In the committed run that step is `0 of 4` on
-all ten contained trials and fires on all ten uncontained ones, seven of them at four out of four.
-Every earlier ten-trial run agreed with that, and none of their JSON was written, so the generated
-table is the only version of it anyone can check.
+uncontained pass differ mostly by which of them happened to fire. Counting steps-divergent-per-pass
+and subtracting was the first way this was measured and it was exactly that noise, which is why the
+quantity has to be per step. In the committed run that step is `0 of 4` on all ten contained trials
+and fires on all ten uncontained ones, seven of them at four out of four. Every earlier ten-trial
+run agreed with that, and none of their JSON was written, so the generated table is the only version
+of it anyone can check.
 
 That one step is the whole difference. It is a small number and it is the honest one: on a pipeline
 where nothing reads a diverging artifact, containment removes no false step at all, and this
@@ -188,10 +189,10 @@ in the middle.
 That figure said 65 to 95 here for four revisions, and 65 counts amplification as zero, which it
 cannot be: a step that never fires is exactly the step an amplifier is for.
 
-The wall clock is a different story. Over 20 passes, one pass took a **median 25 times as long as a single
-execution of the same pipeline**, the extremes being 21x and 43x. The denominator is run 1's own
-recorded time out of the manifest, because the tool cannot produce it: `--runs 1` exits 2, since one
-run has nothing to compare against. Where that goes, at the median:
+The wall clock is a different story. Over 20 passes, one pass took a **median 25 times as long as a
+single execution of the same pipeline**, the extremes being 21x and 43x. The denominator is run 1's
+own recorded time out of the manifest, because the tool cannot produce it: `--runs 1` exits 2, since
+one run has nothing to compare against. Where that goes, at the median:
 
 | | share of a pass | in units of one plain execution |
 |---|---|---|
@@ -230,9 +231,9 @@ of the amplified pass and more than the single-threaded bisect's 15 percent.
 That ordering is not what the execution counts predict, and the reason is worth having. The bisect
 re-executed six steps five times each, 30 executions. Amplification had two steps to work with, one
 of which declines two of the three amplifiers because it reads no artifact, so 3 executions there
-and 9 on the other: 12 against the bisect's 30. It still cost more, because which steps land in which
-loop is decided by the fire rate and not by what they cost, and on this pipeline the one expensive
-step is `generate_inputs`, which writes 205 MB, never fires, and therefore always lands in
+and 9 on the other: 12 against the bisect's 30. It still cost more, because which steps land in
+which loop is decided by the fire rate and not by what they cost, and on this pipeline the one
+expensive step is `generate_inputs`, which writes 205 MB, never fires, and therefore always lands in
 amplification.
 
 The shape of the cost is the same surprise as the pass as a whole. Executing the amplified steps is
@@ -276,9 +277,9 @@ If you pipe the suite into anything, check `PIPESTATUS` or redirect instead. `uv
 slice was committed against a suite whose failure had been swallowed exactly that way. `uv run
 pytest >/dev/null 2>&1; echo $?` is what the pre-commit hook and CI effectively do.
 
-The same shape caught someone checking the policy-separation claim by hand. `zsh` does not word-split
-an unquoted parameter expansion, so `FLAGS="--policy reduction-order"; twicerun judge "$RD" $FLAGS`
-passes one argument spelled `--policy reduction-order` in `bash` and something else in `zsh`. Their
-three reports had all run under the default policy and were identical for that reason rather than for
-the interesting one. Both failures look like a passing check, which is the only thing they have in
-common and the reason they are written down together.
+The same shape caught someone checking the policy-separation claim by hand. `zsh` does not
+word-split an unquoted parameter expansion, so `FLAGS="--policy reduction-order"; twicerun judge
+"$RD" $FLAGS` passes one argument spelled `--policy reduction-order` in `bash` and something else in
+`zsh`. Their three reports had all run under the default policy and were identical for that reason
+rather than for the interesting one. Both failures look like a passing check, which is the only
+thing they have in common and the reason they are written down together.
