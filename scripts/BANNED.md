@@ -1,14 +1,9 @@
 # Words this project does not use in prose
 
-`check_fingerprint.py`, beside this file, parses the fenced blocks below. The pre-commit hook runs
-it over the staged diff and CI runs it over the whole tree, so the list has one home and both
-callers read the same one.
+Enforced by `scripts/check_fingerprint.py`, which parses the fenced blocks below.
+The pre-commit hook runs it over the staged diff and CI runs it over the tree.
 
-Adding a term is cheap. Removing one needs a reason written next to it in the commit message.
-
-None of this makes writing good. It catches a specific kind of bad: words that sound like a claim
-and are not one. A file can score zero here and still hedge, repeat itself and pad a list to six
-items where three would do.
+Punctuation and emoji are matched by pattern in the checker rather than listed here.
 
 ## Single words
 
@@ -123,63 +118,3 @@ trailing underscore
 double underscore
 financial leverage
 ```
-
-`eval harness` and `agent harness` are here because they are the ordinary names for those two
-things and no synonym reads as well. `underscore` is here because it names a character that comes
-up constantly in Python discussion.
-
-What stays caught is bare `harness` as a verb, as in "harness the power of embeddings".
-`test_check_fingerprint.py` asserts that, because an exception that quietly widens into a blanket
-pass is worse than no exception.
-
-## Punctuation and symbols
-
-Enforced in code rather than listed as words.
-
-Em dash `U+2014`, en dash `U+2013` and horizontal bar `U+2015`, in any form anywhere. Use a hyphen,
-a comma, a colon, or restructure the sentence. En dash is included because the usual defence for
-it, numeric ranges, reads fine with a hyphen and the exception would get abused.
-
-Emoji anywhere: the standard blocks plus variation selector `U+FE0F` and the zero-width joiner
-sequences. Includes the ones that look like punctuation, such as the check mark `U+2705` and the
-cross mark `U+274C`, which turn up in generated tables.
-
-## House style the checker cannot enforce
-
-Prose:
-
-- every section the same length
-- exactly three bullets under every heading
-- a bold lead-in on every bullet in a list, with no bullet that just says its thing
-- a rhetorical question followed immediately by its own answer
-- a closing paragraph that restates the opening
-- headings that all share one grammatical shape
-- a feature list padded to six items where three of them are trivial
-- badge walls
-- "Contributions are welcome" on a personal project nobody is contributing to
-
-Code:
-
-- comments that restate the line below them
-- docstrings on trivial one-line functions
-- `# Initialize variables` and its relatives
-- `except Exception as e: print(f"Error: {e}")`
-- variables named `data`, `result`, `temp`, `output`, `processed_data`
-- an abstract base class with exactly one implementation
-- a config dataclass with one field
-- `Optional[Any]` type hints
-
-## Change log
-
-Additions go here with the date and what caught them, so the list has a provenance rather than
-growing by vibes.
-
-- 2026-08-25: seeded with the single words, the phrases and the regexes above. Added `dive deep`,
-  `deep dive`, `game changer`, `best-in-class`, `state-of-the-art` and `paradigm shift` on top of
-  the first list, plus the exceptions block for `eval harness` and `underscore`.
-- 2026-08-25: added the missing inflections after `delves` walked through a check that caught
-  `delve`. Also `robustly`, `harnessed`, `unlocked`, `elevated`, `streamlined`, `empowered`,
-  `showcased`, `boast`, `boasting`, `underscored`, `realms`, `landscapes`, `tapestries`.
-- 2026-08-26: added `agent harness` to the allowed contexts. It was a false positive on the phrase
-  "agent harness and trace schema", which is the ordinary noun rather than the marketing verb.
-  Bare `harness` stays banned.
