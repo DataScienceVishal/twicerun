@@ -181,7 +181,7 @@ That line is gone, because the condition it stood in for is now measured and enf
 A trial is three passes: the broken pipeline at the defaults, its matched twin at the defaults, and the broken pipeline again with containment off. Ten trials, four baselines with the first of them scored at two run counts, and eight failure conditions that were written into the spec before any of this existed.
 
 ```bash
-uv run python scripts/eval.py               # ten trials, about nine minutes, 1.3 GB of peak disk
+uv run python scripts/eval.py               # ten trials, the best part of ten minutes, 1.3 GB of peak disk
 uv run python scripts/eval.py --trials 2    # the same shape, quicker
 uv run python scripts/eval.py --json out.json
 ```
@@ -277,7 +277,7 @@ Three of these declare a piece of this project unnecessary if they fire. All eig
 
 The other seven held in run F and in the five runs before it, with run B's sensitivity the only other trigger.
 
-Three of those eight can be read off an absence rather than off a measurement, and until this pass they were. A step that writes no artifact compares nothing, fires on none of the nothing it compared, and arrives at the conditions as a clean zero, so the naive baseline reports no false positives, the amplification gap comes out as two zero rates and the uncontained pass removes no falsely divergent step. All three then print TRIGGERED, which is the verdict that declares a piece of this project unnecessary. Seven of the eight carry a third verdict now, `NOT MEASURED`, and the eighth is the wall clock, which is measured whatever the pipeline did. The one in the table that fires on a real absence, run B's sensitivity, is a real 9 of 10 rather than a gap.
+Three of those eight can be read off an absence rather than off a measurement, and until this pass they were. A step that writes no artifact compares nothing, fires on none of the nothing it compared, and arrives at the conditions as a clean zero, so the naive baseline reports no false positives, the amplification gap comes out as two zero rates and the uncontained pass removes no falsely divergent step. All three then print TRIGGERED, which is the verdict that declares a piece of this project unnecessary. Seven of the eight carry a third verdict now, `NOT MEASURED`, and the eighth is the wall clock, which is measured whatever the pipeline did. The trigger in the table above is a real 9 of 10 rather than a gap, and so was run B's.
 
 **Two of the eight can trigger on something that is not the detector, and both were written that way in the spec.** The amplification gap asks whether any amplifier beats the five-run loop, and a maximum cannot beat a rate that is already at 1.00, so on a run where the loop saturates the condition fires whatever amplification did. The eval says so in the evidence line when it happens rather than moving the threshold. And the sensitivity condition fires when a broken step comes back 0 of 4 in one trial, which on `apply_price_updates` has now happened in 2 of the 6 ten-trial runs taken. The distinction matters because the two causes are indistinguishable from the condition's own output, and leaving the threshold where the spec put it is the only way it stays worth anything.
 
@@ -291,9 +291,9 @@ Attribution named the column the step invented, rather than one it copied in, on
 
 **The amplification gap has to be forced to be visible at all.** Amplification only touches steps the main loop found nothing in, which is the whole cost argument for it, so on a trial where the loop catches the intermittent step there is no amplified rate to compare against. Waiting for a quiet trial throws away nine in ten. So the eval points the shipped amplifiers at that one step every trial, through the same `amplify_runs` the runner calls, and prints the four rates side by side. Forty trials of that is an expensive way to get forty comparisons, so the table the README publishes comes from `scripts/amplification_gap.py`, which does the same thing without the twin pass and the uncontained pass underneath it. It is under "the step this was built for" below.
 
-**The eval always exits 0, including on a triggered condition.** A script that failed on one would be a script with a reason to stop publishing it, and there is no CI job running this: it takes nine minutes and 1.3 GB.
+**The eval always exits 0, including on a triggered condition.** A script that failed on one would be a script with a reason to stop publishing it, and there is no CI job running this: the stamp above says how long the committed run took, and peak disk is 1.3 GB.
 
-**A trial is about 50 percent slower than it was, and the per-trial budget has roughly 12 percent of headroom left.** Run E's 53 seconds a trial against B's 35 is the run-matched baseline, which costs about 20 seconds a trial in comparisons and was worth it: it is the control that showed the sensitivity table holds no evidence for the oracle over multiset equality. The pre-registered wall-clock condition is a minute a trial, so what is left over is about seven seconds. A laptop doing something else while this runs can trip that condition honestly, and run A did, at 536s for work that took B 363. The condition is measuring the machine as much as the code, and it is left where the spec put it rather than widened after the fact.
+**A trial is about 50 percent slower than it was, and the per-trial budget has roughly 12 percent of headroom left.** Run E's 53 seconds a trial against B's 35 is the run-matched baseline, which costs about 20 seconds a trial in comparisons and was worth it: it is the control that showed the sensitivity table holds no evidence for the oracle over multiset equality. The pre-registered wall-clock condition is a minute a trial, so what is left over is about seven seconds. A laptop doing something else while this runs can trip that condition honestly, and run A came within 64 seconds of it, at 536s for work that took run B 363. The condition is measuring the machine as much as the code, and it is left where the spec put it rather than widened after the fact.
 
 ## Containment, and what it is worth
 
@@ -445,7 +445,7 @@ The loop reported nothing on 5 of the 40 passes where it compared anything, and 
 
 A larger sample will move all of those. The last two columns are three different things kept apart: an amplifier that declined to build an input and one that built an input the step wrote nothing from both count as could-not-ask, and only a comparison that happened and found the step clean is evidence about the step. A row with fewer comparisons than the others found nothing in its first two, because an amplifier is escalated to the full run count only on a hit, which is the cost argument working.
 
-**`twicerun run` cannot produce that table and it is not meant to.** Amplification only touches steps the main loop found nothing in, so on most passes step 6 fires, never reaches an amplifier, and contributes nothing to the second half of the comparison. Waiting for the passes where it stays quiet means throwing away five passes in six. So the table comes from a script rather than from the tool, and the script ships:
+**`twicerun run` cannot produce that table and it is not meant to.** Amplification only touches steps the main loop found nothing in, so on most passes step 6 fires, never reaches an amplifier, and contributes nothing to the second half of the comparison. Waiting for the passes where it stays quiet means throwing most of them away, and the first row of the table above says how many that is. So the table comes from a script rather than from the tool, and the script ships:
 
 ```bash
 uv run python scripts/amplification_gap.py 40 --json results/gap-2026-08-27.json
@@ -455,7 +455,7 @@ It points the amplifiers at that one step every pass. There is no flag for it in
 
 The bottom line of that block is the gap the feature exists to close, measured rather than argued: a step that is definitely broken, a loop that says nothing about it on a fraction of passes, and an amplifier that fires on the passes the loop missed.
 
-The thread-count amplifier was the one I expected to find nothing. This machine already runs DuckDB at 10 threads, and the float aggregate is flat from 4 threads upward, so doubling to 20 looked like a second look at the same thing. It is not: it fires on the surrogate-key step most of the time, and on the passes where `apply_price_updates` comes back quiet it is the amplifier that catches the `MERGE` bug, at `4 of 4` where the other two report nothing. That step's own input has no repeated key to collapse and duplicating its rows does not create one the merge can trip over, so thread count is the only one of the three with anything to say about it.
+The thread-count amplifier was the one I expected to find nothing. This machine already runs DuckDB at 10 threads, and the float aggregate is flat from 4 threads upward, so doubling to 20 looked like a second look at the same thing. It is not: it fires on the surrogate-key step more often than not, and on the passes where `apply_price_updates` comes back quiet it is the amplifier that catches the `MERGE` bug, at `4 of 4` where the other two report nothing. That step's own input has no repeated key to collapse and duplicating its rows does not create one the merge can trip over, so thread count is the only one of the three with anything to say about it.
 
 ### The four statuses
 
@@ -653,7 +653,7 @@ uv run twicerun judge .twicerun/run-* --policy reduction-order   # newest, if th
 uv run twicerun run pipelines/reference.py --no-containment
 uv run twicerun run pipelines/twins.py                           # the fixed pipeline: exit 0 or the amplifiers are broken
 
-uv run python scripts/eval.py                                    # the eval, nine minutes and 1.3 GB
+uv run python scripts/eval.py                                    # the eval, most of ten minutes and 1.3 GB
 uv run python scripts/fetch_tlc.py && uv run twicerun run pipelines/tlc_backfill.py
 
 uv run twicerun report results/*.json --format md                # the README's tables, to stdout
@@ -850,9 +850,9 @@ What that buys back is why it is a design choice rather than a workaround. One a
 
 ## Why five runs and not two
 
-A two-run tool cannot tell "deterministic" from "non-deterministic and lucky this time". Step 6 of the reference pipeline is the proof. It is the same `row_number()` bug as step 2 at a lower tie density, and over 30 passes in total it fired between 0 and 4 times out of 4. At 1 of 4, which came up repeatedly, a two-run checker reports nothing three times in four on a step that is definitely broken. It was a flat 0 of 4 on 3 of those 30, so even five runs miss it outright about one time in ten.
+A two-run tool cannot tell "deterministic" from "non-deterministic and lucky this time". Step 6 of the reference pipeline is the proof. It is the same `row_number()` bug as step 2 at a lower tie density, and its cell in the results table above spans four of the five values a rate out of four can take. At 1 of 4 a two-run checker reports nothing three times in four on a step that is definitely broken, and at a flat 0 of 4 even five runs miss it outright.
 
-That split, 3 flat zeros in the first 10 passes and none in the next 20, is itself the point. Nothing changed between them but the sample.
+How often that flat zero comes up is the quantity nobody can pin down, which is the point rather than a gap in the measurement. Three of the first 10 passes ever taken of this step were flat zeros and none of the next 20 were, measured on 2026-08-26, with nothing changed between them but the sample. The gap table above is 40 more passes on 2026-08-27 and puts it at 5.
 
 With `m` comparisons and a per-comparison divergence probability `p`, a step is missed with probability `(1-p)^m`. At `p = 0.5`, going from two runs to five takes the miss rate from 50 percent to 6.3 percent for 2.5 times the runtime. Going from five to ten takes it to 0.2 percent for twice as much again. The first trade is obviously worth making, the second is a judgement call, so five is the default and `--runs` moves it.
 
@@ -914,7 +914,9 @@ Every configuration in the file was re-derived on this machine before it was wri
 
 No `dbt`, Airflow, Dagster or Prefect adapter. No Spark. No syscall interception. No nested type comparison. No web UI. No fix generation.
 
-No model calls either: no LLM adapter, no `openai` dependency, no `AZURE_OPENAI_*` configuration. A non-deterministic output layer on a tool whose premise is determinism is a contradiction, and the hint table in a later slice is fifteen lines of static lookup.
+No model calls either: no LLM adapter, no `openai` dependency, no `AZURE_OPENAI_*` configuration. A non-deterministic output layer on a tool whose premise is determinism is a contradiction that someone would notice, and nothing here needs one.
+
+**No `(class, cause)` hint table, which the spec wanted and slice 6 was going to carry.** Two hints exist and both are one line of static text: `WALL_CLOCK` when a timestamp column moved, which is the commonest reason a step never reproduces, and a line naming an artifact one run wrote and the other did not. Mapping the five classes against the two causes to a suggested fix was fifteen lines of lookup, and it went with the slice.
 
 ## Data
 
