@@ -72,6 +72,25 @@ def test_a_step_that_compared_nothing_still_reaches_the_table_with_its_index():
     assert [step["index"] for step in silent["steps"]] == list(range(8))
 
 
+def test_baseline_one_writes_the_same_keys_whether_or_not_the_benign_step_compared_anything(ten):
+    """Ten of these keys, always, and the four `matched_` ones are the reason it matters.
+
+    The benign step comparing nothing in every trial used to take an early
+    return that wrote three of the ten and skipped the run-matched row
+    altogether, so the one control separating a difference in comparison method
+    from a difference in run count vanished out of the file. The generator then
+    raised KeyError partway through the baselines table and `twicerun report`
+    exited 1, which its own epilog defines as a step diverging.
+    """
+    silent = artifact([a_trial(artifacts=0) for _ in range(10)])
+    assert set(silent["baseline_1"]) == set(ten["baseline_1"])
+    assert silent["baseline_1"]["benign_trials"] == 0
+    # A median of nothing is not zero, and this is the step whose zero three of
+    # the pre-registered conditions read as evidence.
+    assert silent["baseline_1"]["benign_median"] is None
+    assert ten["baseline_1"]["benign_median"] == 1265
+
+
 def test_the_reduction_order_column_covers_every_step_and_not_only_the_broken_four(ten):
     """The terminal prints the four the spec calls broken. The table has eight rows."""
     gated = {step["name"]: step["reduction_order"] for step in ten["steps"]}

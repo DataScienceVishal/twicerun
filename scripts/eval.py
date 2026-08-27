@@ -795,22 +795,22 @@ def report_baseline_one(trials: list[Trial], scored: dict[str, StepScore]) -> di
     benign = [n for n in (trial.naive.get(BENIGN) for trial in trials) if n and n.artifacts]
     fired = sum(1 for n in benign if n.unmatched)
     counts = [n.unmatched for n in benign]
-    if not benign:
+    if benign:
+        hang(
+            f"{BENIGN:<22}",
+            f"fired on {fired} of {len(benign)} trials, median "
+            f"{statistics.median(counts):,.0f} of the "
+            f"{statistics.median(n.rows_compared for n in benign):,.0f} rows compared found no "
+            f"partner: {statistics.median(n.unmatched_reference for n in benign):,.0f} on the "
+            f"reference side and "
+            f"{statistics.median(n.unmatched_candidate for n in benign):,.0f} on the later run's",
+        )
+        if len(benign) < len(trials):
+            hang(" " * 22, f"{len(trials) - len(benign)} trial(s) compared nothing here")
+        say("  Nothing is wrong with that step. It is a correct float average and every one of")
+        say("  those findings is the arithmetic behaving normally.")
+    else:
         hang(f"{BENIGN:<22}", f"wrote no artifact to compare in any of the {len(trials)} trials")
-        return {"benign_median": 0.0, "benign_fired": 0, "benign_trials": 0}
-    hang(
-        f"{BENIGN:<22}",
-        f"fired on {fired} of {len(benign)} trials, median "
-        f"{statistics.median(counts):,.0f} of the "
-        f"{statistics.median(n.rows_compared for n in benign):,.0f} rows compared found no "
-        f"partner: {statistics.median(n.unmatched_reference for n in benign):,.0f} on the "
-        f"reference side and "
-        f"{statistics.median(n.unmatched_candidate for n in benign):,.0f} on the later run's",
-    )
-    if len(benign) < len(trials):
-        hang(" " * 22, f"{len(trials) - len(benign)} trial(s) compared nothing here")
-    say("  Nothing is wrong with that step. It is a correct float average and every one of")
-    say("  those findings is the arithmetic behaving normally.")
 
     intermittent = [
         n for n in (trial.naive.get(INTERMITTENT) for trial in trials) if n and n.artifacts
@@ -824,13 +824,22 @@ def report_baseline_one(trials: list[Trial], scored: dict[str, StepScore]) -> di
     figures = {
         # The median of both sides added up, which is the figure the README has
         # published since slice 5, now with the denominator it is out of.
-        "benign_median": statistics.median(counts),
-        "benign_rows_compared": statistics.median(n.rows_compared for n in benign),
-        "benign_reference_side": statistics.median(n.unmatched_reference for n in benign),
-        "benign_later_side": statistics.median(n.unmatched_candidate for n in benign),
+        # None rather than 0.0 where nothing compared, on `median_or_none`'s
+        # argument: the benign step's whole role in this eval is that its zero
+        # is a real measurement, so an absence dressed as one is the mistake
+        # three pre-registered conditions are guarded against making.
+        "benign_median": median_or_none(counts),
+        "benign_rows_compared": median_or_none([n.rows_compared for n in benign]),
+        "benign_reference_side": median_or_none([n.unmatched_reference for n in benign]),
+        "benign_later_side": median_or_none([n.unmatched_candidate for n in benign]),
         "benign_fired": fired,
         "benign_trials": len(benign),
     }
+    # Both halves, always, and the run-matched half is why. It used to sit
+    # behind an early return taken when the benign step compared nothing, which
+    # deleted the one row in this eval that separates a difference in comparison
+    # method from a difference in run count, and left `baseline_1` carrying
+    # three of its ten keys for `twicerun report` to fail on.
     return {**figures, **report_run_matched(trials)}
 
 

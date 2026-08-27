@@ -404,6 +404,29 @@ def conditions(artifact: dict) -> list[str]:
     )
 
 
+def _benign_cell(naive: dict) -> str:
+    """Baseline 1's headline figure, or the sentence that says it has none.
+
+    `benign_trials` is the count of trials where the step wrote something for
+    the cheap comparison to look at, and every median beside it is None when
+    that count is zero. A cell reading `a median 0 of the 0 rows compared
+    failing to pair` is the shape three of the eight pre-registered conditions
+    are written to refuse, and this table is the surface a reader meets first.
+    """
+    if not naive["benign_trials"]:
+        return (
+            "nothing. `mean_basket` wrote no artifact for it to compare in any trial, so this "
+            "row is an absence of measurement rather than a baseline with no false positives"
+        )
+    return (
+        f"fired on `mean_basket` in {naive['benign_fired']} of {naive['benign_trials']} "
+        f"trials, at a median {naive['benign_median']:,.0f} of the "
+        f"{naive['benign_rows_compared']:,.0f} rows compared failing to pair, on a step "
+        f"where nothing is wrong. {naive['benign_reference_side']:,.0f} of those are on "
+        f"the reference side and {naive['benign_later_side']:,.0f} on the later run's"
+    )
+
+
 def baselines(artifact: dict) -> list[str]:
     naive = artifact["baseline_1"]
     static = artifact["baseline_2"]
@@ -422,11 +445,7 @@ def baselines(artifact: dict) -> list[str]:
                 "two runs, bit-exact multiset equality, no tolerance and no classes. Rescored "
                 "from each trial's own runs 1 and 2, so it sees the same bytes under the same "
                 "containment",
-                f"fired on `mean_basket` in {naive['benign_fired']} of {naive['benign_trials']} "
-                f"trials, at a median {naive['benign_median']:,.0f} of the "
-                f"{naive['benign_rows_compared']:,.0f} rows compared failing to pair, on a step "
-                f"where nothing is wrong. {naive['benign_reference_side']:,.0f} of those are on "
-                f"the reference side and {naive['benign_later_side']:,.0f} on the later run's",
+                _benign_cell(naive),
             ],
             [
                 "1, run-matched",

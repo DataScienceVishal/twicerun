@@ -15,6 +15,7 @@ import pytest
 
 from eval import as_artifact, report_all
 from trial_fixtures import a_trial
+from twicerun import cli
 from twicerun.cli import main
 from twicerun.tables import (
     CLOSE,
@@ -23,6 +24,7 @@ from twicerun.tables import (
     OPEN,
     MarkerError,
     UnreadableArtifact,
+    baselines,
     distribution,
     drifted,
     every_table,
@@ -68,6 +70,20 @@ def gap_artifact() -> dict:
         "loop_silent": 7,
         "amplifier_caught": 7,
     }
+
+
+@pytest.fixture(scope="module")
+def silent_artifact() -> dict:
+    """Ten trials in which no step wrote anything, which is a shape a real run has produced.
+
+    Every rate in it is an absence rather than a zero, so it is the artifact
+    that finds the cells reading a figure without first asking whether there was
+    one to read.
+    """
+    figures = report_all([a_trial(artifacts=0) for _ in range(10)])
+    written = as_artifact(figures, WHERE, 5, 300.0, figures.conditions(300.0))
+    written["source"] = "results/eval-silent.json"
+    return written
 
 
 @pytest.fixture(scope="module")
@@ -119,6 +135,43 @@ def test_a_step_that_never_fired_says_it_was_not_bisected_rather_than_showing_a_
     """`0 of 4 at threads=1` on a step that never fired would be four comparisons of nothing."""
     row = next(line for line in rendered["results"].splitlines() if "generate_inputs" in line)
     assert "not bisected" in row
+
+
+def test_the_baselines_table_renders_from_a_run_where_nothing_compared(silent_artifact):
+    """The cell that used to raise KeyError, and the row that used to disappear with it.
+
+    Baseline 1's figures came out of an early return holding three of ten keys
+    when the benign step wrote nothing, and this table reads five of the seven
+    it did not write. It is the only table in the file that reads `baseline_1`,
+    so the whole block went with it.
+    """
+    block = "\n".join(baselines(silent_artifact))
+    assert "an absence of measurement rather than a baseline" in block
+    assert "run-matched" in block, "the run-matched control is one of six earned corrections"
+    assert "0 of 0 step-trials" in block
+
+
+def test_a_report_that_cannot_render_exits_three_rather_than_one(tmp_path, silent_artifact, capsys):
+    """1 is divergence in this program's epilog, so nothing else may hand the shell a 1.
+
+    `judge` got this guard when it was found dispatched outside the try block.
+    `report` was the third subcommand and did not, and its `_report` catches
+    only OSError and the two artifact errors, so a KeyError out of the
+    generator reached the shell as a pipeline that gave two answers.
+    """
+    where = tmp_path / "eval.json"
+    where.write_text(json.dumps(silent_artifact), encoding="utf-8")
+    assert main(["report", str(where)]) == 0, "the artifact that used to crash it"
+    capsys.readouterr()
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(cli, "render", _explode)
+        assert main(["report", str(where)]) == 3
+    assert "Exit 3 is a crash, not a divergence" in capsys.readouterr().err
+
+
+def _explode(*args, **kwargs):
+    raise KeyError("benign_rows_compared")
 
 
 def test_rewriting_replaces_the_bodies_and_leaves_everything_else_alone(rendered):

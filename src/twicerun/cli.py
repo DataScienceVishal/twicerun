@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 
 from twicerun.amplify import AMPLIFICATION_FAILED, STABLE_ON_THIS_INPUT
@@ -342,22 +343,35 @@ def parse_keys(declared: list[str]) -> dict[str, tuple[str, ...]]:
     return keys
 
 
+def _crash_is_three(command: Callable[[argparse.Namespace], int], args: argparse.Namespace) -> int:
+    """Run one of the two read-only subcommands, giving a crash in it exit 3 rather than 1.
+
+    Same reason as the catch in the run branch below. Anything getting past
+    `rejudge`'s or `render`'s own checks came out as an unhandled traceback and
+    a shell exit of 1, which this program's epilog defines as divergence, so a
+    gate keyed on 1 would record a missing Parquet file as a pipeline that gave
+    two answers.
+
+    Written once because it reached judge and not report, which is the third
+    time a guard here covered two of the three subcommands. The reachable case
+    was an eval artifact whose benign step compared nothing: `baseline_1` came
+    out carrying three of its ten keys and the baselines table raised KeyError
+    partway through rendering.
+    """
+    try:
+        return command(args)
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
+        print(_CRASHED, file=sys.stderr)
+        return 3
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "report":
-        return _report(args)
+        return _crash_is_three(_report, args)
     if args.command == "judge":
-        try:
-            return _judge(args)
-        except Exception:  # noqa: BLE001
-            # Same reason as the catch in the run branch below, and judge was
-            # outside it. Anything getting past rejudge's own checks came out as
-            # an unhandled traceback and a shell exit of 1, which this program's
-            # epilog defines as divergence, so a gate keyed on 1 would record a
-            # missing Parquet file as a pipeline that gave two answers.
-            traceback.print_exc()
-            print(_CRASHED, file=sys.stderr)
-            return 3
+        return _crash_is_three(_judge, args)
     if not args.pipeline.is_file():
         print(f"twicerun: no pipeline file at {args.pipeline}", file=sys.stderr)
         return 2
