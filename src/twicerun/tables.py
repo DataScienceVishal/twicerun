@@ -260,6 +260,37 @@ def provenance(artifact: dict) -> list[str]:
     ]
 
 
+def _silent_note(artifact: dict) -> list[str]:
+    """Trials the rates above are not out of, which the header's trial count does not say.
+
+    Three of the four places this eval publishes a fire rate disclose this. The
+    terminal's sensitivity table prints it under each step, the terminal's
+    specificity table prints a total, and the specificity table below does too.
+    This one, which is the first table in the README and the one a reader meets
+    first, printed `4 of 4 on all 7` under a header saying 10 trials and said
+    nothing about the other three.
+
+    Grouped by count rather than listed per step, because the usual shape is a
+    trial that died before writing anything and took every step down with it,
+    and eight identical clauses would bury the one step that differed.
+    """
+    quiet: dict[int, list[str]] = {}
+    for step in _ordered(artifact["steps"]):
+        if step["silent_trials"]:
+            quiet.setdefault(step["silent_trials"], []).append(step["name"])
+    if not quiet:
+        return []
+    spelled = "; ".join(
+        f"{_plural(n, 'trial')} on {', '.join(_code(name) for name in names)}"
+        for n, names in sorted(quiet.items(), reverse=True)
+    )
+    return [
+        "",
+        f"{spelled} compared no artifact at all. Those are not counted in the rates above, so "
+        f"a cell there can be out of fewer trials than the header names.",
+    ]
+
+
 def results(artifact: dict) -> list[str]:
     return _table(
         [
@@ -281,7 +312,7 @@ def results(artifact: dict) -> list[str]:
             ]
             for step in _ordered(artifact["steps"])
         ],
-    )
+    ) + _silent_note(artifact)
 
 
 def specificity(artifact: dict) -> list[str]:

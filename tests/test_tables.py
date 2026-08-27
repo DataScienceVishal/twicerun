@@ -30,7 +30,9 @@ from twicerun.tables import (
     every_table,
     load,
     render,
+    results,
     rewrite,
+    specificity,
     tally,
 )
 
@@ -70,6 +72,21 @@ def gap_artifact() -> dict:
         "loop_silent": 7,
         "amplifier_caught": 7,
     }
+
+
+@pytest.fixture(scope="module")
+def mixed_artifact() -> dict:
+    """Seven trials that compared something and three that did not, which is the partial case.
+
+    Ten silent trials leave every cell reading `nothing compared`, which is
+    visible. Three out of ten leave the cells reading a rate out of seven under
+    a header that says ten, which is not.
+    """
+    trials = [a_trial() for _ in range(7)] + [a_trial(artifacts=0) for _ in range(3)]
+    figures = report_all(trials)
+    written = as_artifact(figures, WHERE, 5, 300.0, figures.conditions(300.0))
+    written["source"] = "results/eval-mixed.json"
+    return written
 
 
 @pytest.fixture(scope="module")
@@ -135,6 +152,34 @@ def test_a_step_that_never_fired_says_it_was_not_bisected_rather_than_showing_a_
     """`0 of 4 at threads=1` on a step that never fired would be four comparisons of nothing."""
     row = next(line for line in rendered["results"].splitlines() if "generate_inputs" in line)
     assert "not bisected" in row
+
+
+@pytest.mark.parametrize(
+    ("table", "counted"),
+    # Per step for the results table, so 3 of the 10 trials. Per twin step-pass
+    # for specificity, so 6 twins across those same 3 trials.
+    [(results, "3 trials on `generate_inputs`"), (specificity, "18 twin step-passes")],
+)
+def test_every_fire_rate_table_says_which_trials_it_is_not_out_of(table, counted, mixed_artifact):
+    """Four surfaces publish a fire rate and the README's first table was the one without this.
+
+    Its header names ten trials and every cell in it read `4 of 4 on all 7`. The
+    terminal has printed the missing three under each step since slice 5 and the
+    specificity table below has printed a total, so the omission was in one of
+    four places rather than a decision.
+
+    Both tables are checked in one test because the specificity note was
+    unenforced too: deleting it left the whole suite green.
+    """
+    block = "\n".join(table(mixed_artifact))
+    assert "compared no artifact at all" in block
+    assert counted in block, "the count, not just the fact of it"
+
+
+def test_a_table_with_nothing_to_disclose_does_not_disclose_it(artifact):
+    """The control. A note that is always there is a note nobody reads."""
+    assert "compared no artifact at all" not in "\n".join(results(artifact))
+    assert "compared no artifact at all" not in "\n".join(specificity(artifact))
 
 
 def test_the_baselines_table_renders_from_a_run_where_nothing_compared(silent_artifact):
