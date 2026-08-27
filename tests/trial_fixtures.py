@@ -32,6 +32,13 @@ FIRES = {
 }
 
 
+# Uncontained, roll_up_keys reads a diverging artifact and fires, which is the
+# one figure baseline 3 exists to move and so the one that has to differ between
+# the contained and uncontained lists below. It was a keyword argument on
+# a_trial that none of its twenty-one call sites ever passed.
+DOWNSTREAM_UNCONTAINED = 3
+
+
 def a_step(index: int, name: str, *, fired: int = 0, artifacts: int = 1) -> StepMeasurement:
     """Four comparisons of `artifacts` artifacts each, of which `fired` disagreed.
 
@@ -55,7 +62,7 @@ def a_step(index: int, name: str, *, fired: int = 0, artifacts: int = 1) -> Step
     return step
 
 
-def a_trial(*, artifacts: int = 1, downstream_uncontained: int = 3, fires: dict | None = None):
+def a_trial(*, artifacts: int = 1, fires: dict | None = None):
     fires = FIRES if fires is None else {**FIRES, **fires}
     reference = [
         a_step(i, name, fired=fires[name], artifacts=artifacts)
@@ -65,7 +72,7 @@ def a_trial(*, artifacts: int = 1, downstream_uncontained: int = 3, fires: dict 
         a_step(
             i,
             name,
-            fired=downstream_uncontained if name == "roll_up_keys" else fires[name],
+            fired=DOWNSTREAM_UNCONTAINED if name == "roll_up_keys" else fires[name],
             artifacts=artifacts,
         )
         for i, name in enumerate(fires)

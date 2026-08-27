@@ -58,6 +58,7 @@ from twicerun.compare import compare as bit_exact
 from twicerun.manifest import Manifest
 from twicerun.measurement import StepMeasurement, name_classes
 from twicerun.policy import HEADROOM_REQUIRED, REDUCTION_ORDER, DriftBound, Policy, judge
+from twicerun.report import WIDTH
 from twicerun.runner import amplify_runs, load_steps, run_pipeline, scored_runs
 from twicerun.tables import ARTIFACT_VERSION, EVAL, distribution, tally
 
@@ -102,11 +103,6 @@ BUDGET_SECONDS_PER_TRIAL = 60.0
 WORKSPACE = Path(".twicerun-eval")
 
 NOT_MEASURED = "NOT MEASURED"
-
-
-# Two columns short of the 100 the linter allows, matching report.py, so a
-# terminal at 100 does not add a wrap of its own on top of this one.
-WIDTH = 98
 
 
 def say(line: str = "") -> None:

@@ -137,11 +137,10 @@ def unify_partitions(ctx: StepContext) -> None:
     the failure this schema change actually causes and it is one this tool
     cannot see: it is wrong the same way on every run.
     """
-    for month, _ in partitions():
+    months = [month for month, _ in partitions()]
+    for month in months:
         ctx.read(artifact_for(month))
-    unioned = " UNION ALL BY NAME ".join(
-        f"SELECT * FROM {artifact_for(month)}" for month, _ in partitions()
-    )
+    unioned = " UNION ALL BY NAME ".join(f"SELECT * FROM {artifact_for(month)}" for month in months)
     ctx.write("trips", unioned)
 
 
