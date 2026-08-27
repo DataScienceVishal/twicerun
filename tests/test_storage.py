@@ -131,7 +131,13 @@ def test_rows_read_accumulates_across_several_reads(con, tmp_path):
 
 
 def test_quote_survives_an_apostrophe_in_the_path():
-    assert quote(Path("/tmp/vishal's runs/a.parquet")) == "'/tmp/vishal''s runs/a.parquet'"
+    """A single quote in a path is what breaks a hand-built SQL string, so it is the fixture.
+
+    Doubling is DuckDB's escape and there is no second one to check. The path
+    that used to be here had a name in it, which read as decoration next to the
+    apostrophe that is the whole test.
+    """
+    assert quote(Path("/tmp/it's here/a.parquet")) == "'/tmp/it''s here/a.parquet'"
 
 
 def test_sql_runs_ddl_and_returns_nothing_for_it(con, tmp_path):

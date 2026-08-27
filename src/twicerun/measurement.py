@@ -130,7 +130,14 @@ class StepMeasurement:
 
     @property
     def amplified_by(self) -> list[Amplification]:
-        """The amplifiers that made this step disagree with itself."""
+        """The amplifiers that made this step disagree with itself, having compared something.
+
+        `measured` is the half that matters and the half the old docstring left
+        out. An amplifier that built an input the step then wrote nothing from
+        reports 0 of 2 out of two comparisons of nothing, so it never appears
+        here whichever way it went, and a step whose only amplifier did that gets
+        no status at all rather than NO_DIVERGENCE_OBSERVED.
+        """
         return [a for a in self.amplifications if a.measured and a.fired]
 
     @property
