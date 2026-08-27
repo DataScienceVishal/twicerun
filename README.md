@@ -165,65 +165,6 @@ Its counts will not match these, for the same reason the transcript above will n
 
 </details>
 
-## What it cannot catch
-
-<details>
-<summary>A backfill that walks its months oldest first silently loses `cbd_congestion_fee`, and twicerun reports a clean zero</summary>
-
-`pipelines/tlc_backfill.py` runs over three months of real NYC TLC green trip records. TLC added `cbd_congestion_fee` to the trip records for 2025 onward, so a backfill over 2024-12, 2025-01 and 2025-02 spans a column that two of its three partitions have and one does not. `scripts/tlc_schema.py` prints what DuckDB does with that:
-
-```
-read_parquet over the three as one list, which is what a backfill hands it:
-  oldest partition first  20 columns  cbd_congestion_fee: DROPPED, silently
-  newest partition first  21 columns  cbd_congestion_fee: present
-```
-
-DuckDB takes the column set from the first file in the list. Put the 2024 partition first, which is the order a backfill walks its months in, and a revenue column is gone from the answer with no error and no warning. Reverse the list and it is back.
-
-**twicerun cannot catch it, and that is the sharpest limitation this project has.** The wrong answer is wrong the same way on every run, so five runs agree with each other perfectly and the report is a clean zero. A rerun checker is blind to a deterministic wrong answer by construction. `scripts/tlc_schema.py` asserts its three facts and exits non-zero if any stops being true, which is the most this repository can do about a bug its main tool is structurally unable to see. The two spellings that raise instead, and what `UNION ALL BY NAME` costs, are in [docs/data.md](docs/data.md).
-
-</details>
-
-<details>
-<summary>Only pipelines written against `ctx.read` and `ctx.write` get tested at all</summary>
-
-**twicerun only tests pipelines written against its storage interface.** It does not test arbitrary pipelines.
-
-Watching a pipeline's writes without its cooperation needs either a kernel block-layer wrapper or system-call interception. Both are out of budget and both are worse on macOS. What is left is an interface the pipeline reads and writes through, which is portable, needs no root, and only sees pipelines that opted in.
-
-What that buys back is why it is a design choice rather than a workaround. One abstraction carries five jobs: it is where artifacts get captured, where reads get redirected for containment, where input rows get counted for the tolerance bound, where the column names feeding attribution come from, and where amplified inputs get substituted. A step calling `ctx.write()` gets all five. A step calling `duckdb.execute("COPY ... TO ...")` behind its back gets none.
-
-</details>
-
-<details>
-<summary>Everything else it gets wrong, including two published figures that cannot go down when the detector gets worse</summary>
-
-**Sorting to pair rows inside a key group is a heuristic once there is more than one float column.** The ordinal sorts both sides the same way, and for a single float column sorted-to-sorted pairing is the assignment that minimises total absolute difference, so it is optimal. With several, a lexicographic sort can pair the wrong two rows inside one key group. That can only understate a difference, so the failure mode is a bounded false negative confined to within-key-group permutations of float-only differences.
-
-A key group with no exact columns is one big group. If every column is a float, there is no key, the whole artifact sorts as one group and rows pair by order alone. It is the weakest case here and it is where the heuristic above does the most work, so the report says `matched on no key` when it happens rather than leaving it to be inferred.
-
-NaN payloads are not distinguished. The sign survives and the payload does not.
-
-**Two of the published figures cannot go down when the detector gets worse.** Attribution is a rate over findings the oracle produced, and the bound check is a rate over float step-passes that drifted, so both are conditional on something having been found. A detector rewired to report no divergence at all still scores perfectly on both, because neither consults a fire count: they read `step.worst` and `step.rounds` directly. They are quality-of-explanation figures rather than detection figures, and the eval now says so on the attribution line and prints `NOT MEASURED` rather than a zero when there is nothing to score.
-
-`rows_read` is not the term count the bound wants. Both directions it is wrong in are measured in [docs/comparison.md](docs/comparison.md), and the size of the error prints in every report.
-
-A `threads=1` rate of 0 of 4 is four comparisons, not a property. It is reported with its one-sided bound for that reason, and `PARALLEL_ORDER` should be read as the name of a pattern in two measured rates.
-
-The bisect resolves its reads against run 1 even under `--no-containment`. A single step cannot be re-executed on its own without something to read, so the ablation ablates the main loop and not the bisect. A step that only inherited a divergence can therefore come out `PARALLEL_ORDER` in an uncontained report, and the report says so where it happens.
-
-Tie collapse declines more often than it applies. It targets 500 rows per distinct value and refuses to touch a column that is already at or past that, since raising tie density is the whole job and there is nothing to raise. The twin coverage table below is the count of chances it took against the chances it had. The refusal is printed with its reason on the same line as the amplifier, and the declined amplifier goes in the not-varied list, but a reader skimming for zeros should know that most of the boxes tie collapse leaves are unticked rather than green.
-
-An amplifier only sees a step's `ctx.read` inputs. State pulled in through `ctx.state` resolves against the previous run's copy rather than an upstream step's output, so there is nothing for an amplifier to substitute that the step's own last execution did not already decide. On the append bug that is the right answer and on some other shape of bug it may not be.
-
-Three amplifiers is three, and there is no argument that they are the right three. Each is aimed at a bug that was measured here. A pipeline whose non-determinism comes from a clock read, a hash seed, a file listing order or a network response gets nothing from any of them, and the not-varied list is where the report admits it.
-
-**A committed artifact is a measurement of one laptop.** DuckDB 1.5.5, ten threads, macOS on Apple silicon. The stamp above every table says so, and nothing here calibrates against a second machine or a second DuckDB, which every report's not-varied list says as well.
-
-**Six figures published in this file were beaten by a longer run, and every one of the six was a number retyped out of a terminal into a table.** A read-through on 2026-08-27 found eight more of the same class in comments and docstrings, where no generator can reach. That is why the tables below are rendered from a committed measurement instead of typed, which removes transcription as a way for a cell to go false and does nothing whatever about ten trials being ten trials.
-
-</details>
-
 ## Results
 
 Every table below is rendered from a committed measurement by `twicerun report`, so no figure in one was typed by hand, and `tests/test_readme_tables.py` fails the build when this file stops matching the artifact.
@@ -413,6 +354,65 @@ Leave-one-out named the column the step invented, rather than one it copied in, 
 <!-- /twicerun: attribution -->
 
 **Two thirds of that is a sort key scored against itself.** On both `row_number` steps, dropping `surrogate_id` and dropping `event_id` each take the unmatched count to zero, because the two columns are a bijection whose pairing moved, so the counts choose nothing and the `(remaining, from_input, column)` tie-break chooses. Preferring the column the step invented is right, and `tests/test_oracle.py::test_a_tie_goes_to_the_column_the_step_invented` asserts it as a unit test; re-scoring it ten times a run and calling the result an accuracy figure is not. `apply_price_updates` is the one step where the counts do the work.
+
+</details>
+
+## What it cannot catch
+
+<details>
+<summary>A backfill that walks its months oldest first silently loses `cbd_congestion_fee`, and twicerun reports a clean zero</summary>
+
+`pipelines/tlc_backfill.py` runs over three months of real NYC TLC green trip records. TLC added `cbd_congestion_fee` to the trip records for 2025 onward, so a backfill over 2024-12, 2025-01 and 2025-02 spans a column that two of its three partitions have and one does not. `scripts/tlc_schema.py` prints what DuckDB does with that:
+
+```
+read_parquet over the three as one list, which is what a backfill hands it:
+  oldest partition first  20 columns  cbd_congestion_fee: DROPPED, silently
+  newest partition first  21 columns  cbd_congestion_fee: present
+```
+
+DuckDB takes the column set from the first file in the list. Put the 2024 partition first, which is the order a backfill walks its months in, and a revenue column is gone from the answer with no error and no warning. Reverse the list and it is back.
+
+**twicerun cannot catch it, and that is the sharpest limitation this project has.** The wrong answer is wrong the same way on every run, so five runs agree with each other perfectly and the report is a clean zero. A rerun checker is blind to a deterministic wrong answer by construction. `scripts/tlc_schema.py` asserts its three facts and exits non-zero if any stops being true, which is the most this repository can do about a bug its main tool is structurally unable to see. The two spellings that raise instead, and what `UNION ALL BY NAME` costs, are in [docs/data.md](docs/data.md).
+
+</details>
+
+<details>
+<summary>Only pipelines written against `ctx.read` and `ctx.write` get tested at all</summary>
+
+**twicerun only tests pipelines written against its storage interface.** It does not test arbitrary pipelines.
+
+Watching a pipeline's writes without its cooperation needs either a kernel block-layer wrapper or system-call interception. Both are out of budget and both are worse on macOS. What is left is an interface the pipeline reads and writes through, which is portable, needs no root, and only sees pipelines that opted in.
+
+What that buys back is why it is a design choice rather than a workaround. One abstraction carries five jobs: it is where artifacts get captured, where reads get redirected for containment, where input rows get counted for the tolerance bound, where the column names feeding attribution come from, and where amplified inputs get substituted. A step calling `ctx.write()` gets all five. A step calling `duckdb.execute("COPY ... TO ...")` behind its back gets none.
+
+</details>
+
+<details>
+<summary>Everything else it gets wrong, including two published figures that cannot go down when the detector gets worse</summary>
+
+**Sorting to pair rows inside a key group is a heuristic once there is more than one float column.** The ordinal sorts both sides the same way, and for a single float column sorted-to-sorted pairing is the assignment that minimises total absolute difference, so it is optimal. With several, a lexicographic sort can pair the wrong two rows inside one key group. That can only understate a difference, so the failure mode is a bounded false negative confined to within-key-group permutations of float-only differences.
+
+A key group with no exact columns is one big group. If every column is a float, there is no key, the whole artifact sorts as one group and rows pair by order alone. It is the weakest case here and it is where the heuristic above does the most work, so the report says `matched on no key` when it happens rather than leaving it to be inferred.
+
+NaN payloads are not distinguished. The sign survives and the payload does not.
+
+**Two of the published figures cannot go down when the detector gets worse.** Attribution is a rate over findings the oracle produced, and the bound check is a rate over float step-passes that drifted, so both are conditional on something having been found. A detector rewired to report no divergence at all still scores perfectly on both, because neither consults a fire count: they read `step.worst` and `step.rounds` directly. They are quality-of-explanation figures rather than detection figures, and the eval now says so on the attribution line and prints `NOT MEASURED` rather than a zero when there is nothing to score.
+
+`rows_read` is not the term count the bound wants. Both directions it is wrong in are measured in [docs/comparison.md](docs/comparison.md), and the size of the error prints in every report.
+
+A `threads=1` rate of 0 of 4 is four comparisons, not a property. It is reported with its one-sided bound for that reason, and `PARALLEL_ORDER` should be read as the name of a pattern in two measured rates.
+
+The bisect resolves its reads against run 1 even under `--no-containment`. A single step cannot be re-executed on its own without something to read, so the ablation ablates the main loop and not the bisect. A step that only inherited a divergence can therefore come out `PARALLEL_ORDER` in an uncontained report, and the report says so where it happens.
+
+Tie collapse declines more often than it applies. It targets 500 rows per distinct value and refuses to touch a column that is already at or past that, since raising tie density is the whole job and there is nothing to raise. The twin coverage table above is the count of chances it took against the chances it had. The refusal is printed with its reason on the same line as the amplifier, and the declined amplifier goes in the not-varied list, but a reader skimming for zeros should know that most of the boxes tie collapse leaves are unticked rather than green.
+
+An amplifier only sees a step's `ctx.read` inputs. State pulled in through `ctx.state` resolves against the previous run's copy rather than an upstream step's output, so there is nothing for an amplifier to substitute that the step's own last execution did not already decide. On the append bug that is the right answer and on some other shape of bug it may not be.
+
+Three amplifiers is three, and there is no argument that they are the right three. Each is aimed at a bug that was measured here. A pipeline whose non-determinism comes from a clock read, a hash seed, a file listing order or a network response gets nothing from any of them, and the not-varied list is where the report admits it.
+
+**A committed artifact is a measurement of one laptop.** DuckDB 1.5.5, ten threads, macOS on Apple silicon. The stamp above every table says so, and nothing here calibrates against a second machine or a second DuckDB, which every report's not-varied list says as well.
+
+**Six figures published in this file were beaten by a longer run, and every one of the six was a number retyped out of a terminal into a table.** A read-through on 2026-08-27 found eight more of the same class in comments and docstrings, where no generator can reach. That is why the tables above are rendered from a committed measurement instead of typed, which removes transcription as a way for a cell to go false and does nothing whatever about ten trials being ten trials.
 
 </details>
 
