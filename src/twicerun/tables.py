@@ -372,6 +372,28 @@ def _drift_rows(drifted: list[dict]) -> list[tuple[str, list[str]]]:
     ]
 
 
+def attribution(artifact: dict) -> list[str]:
+    """Leave-one-out's hit rate, and how much of it the counts actually decided.
+
+    The second number is why this is not published as an accuracy figure on its
+    own. On both `row_number` steps dropping either of two columns takes the
+    unmatched count to zero, so nothing in the arithmetic chooses and the
+    tie-break does. Preferring the column the step invented is right and is
+    asserted as a unit test; scoring that preference against itself ten times a
+    run and calling the result accuracy is not.
+    """
+    scored = artifact["attribution"]
+    seen = scored["attribution_seen"]
+    if not seen:
+        return ["Nothing was attributed in any trial, so there is no rate here rather than a zero."]
+    return [
+        f"Leave-one-out named the column the step invented, rather than one it copied in, on "
+        f"{scored['attribution_right']} of {seen} attributions. "
+        f"{scored['attribution_tied']} of those {seen} had two columns leaving the same count "
+        f"behind, so the counts chose nothing and the tie-break chose."
+    ]
+
+
 def conditions(artifact: dict) -> list[str]:
     return _table(
         ["condition, as written in the spec", "verdict", "what it came out as"],
@@ -502,6 +524,7 @@ TABLES = {
         "specificity": specificity,
         "baselines": baselines,
         "conditions": conditions,
+        "attribution": attribution,
         "containment": containment,
         "twin-coverage": twin_coverage,
         "drift-bound": drift_bound,
