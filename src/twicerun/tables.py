@@ -291,6 +291,30 @@ def _silent_note(artifact: dict) -> list[str]:
     ]
 
 
+def _threads_one(step: dict) -> str:
+    """The single-threaded rate, or which of two reasons there is not one.
+
+    An empty `single_threaded` had one message, and the eval leaves it empty in
+    three cases: the step never fired so nothing was bisected, the bisect raised,
+    or the bisect ran and the re-executed step wrote nothing to compare. Only the
+    first is what the cell used to claim, and the difference is not cosmetic:
+    `PARALLEL_ORDER` on the fourth column of this table rests on a measured zero
+    at threads=1, so a step whose bisect never produced one is a step with no
+    second axis rather than one that had nothing to explain.
+
+    Which of the two failures it was needs the run's `bisect_error`, which the
+    eval does not carry per step, so the cell names both rather than picking.
+    """
+    if step["single_threaded"]:
+        return distribution(step["single_threaded"], step["comparisons"])
+    if not step["fired_in"]:
+        return "not bisected, since it never fired"
+    return (
+        f"no rate, on {_plural(step['fired_in'], 'trial')} that fired: the re-execution "
+        f"raised or wrote nothing to compare"
+    )
+
+
 def results(artifact: dict) -> list[str]:
     return _table(
         [
@@ -304,9 +328,7 @@ def results(artifact: dict) -> list[str]:
             [
                 _step_cell(step),
                 _rate_cell(step),
-                distribution(step["single_threaded"], step["comparisons"])
-                if step["single_threaded"]
-                else "not bisected, since it never fired",
+                _threads_one(step),
                 distribution(step["reduction_order"]["rates"], step["comparisons"]),
                 _moved(step),
             ]

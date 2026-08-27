@@ -10,6 +10,7 @@ dropping out of the file and keeping whatever it said last.
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 
 import pytest
 
@@ -148,10 +149,39 @@ def test_the_gap_table_carries_the_same_stamp_as_the_eval_one(rendered):
     assert "results/gap-fixture.json" in stamp
 
 
+def a_row(block: str, step: str) -> str:
+    """One step's row out of a rendered table, found by its own cell rather than by position."""
+    return next(line for line in block.splitlines() if f"`{step}`" in line)
+
+
 def test_a_step_that_never_fired_says_it_was_not_bisected_rather_than_showing_a_zero(rendered):
     """`0 of 4 at threads=1` on a step that never fired would be four comparisons of nothing."""
-    row = next(line for line in rendered["results"].splitlines() if "generate_inputs" in line)
-    assert "not bisected" in row
+    assert "not bisected" in a_row(rendered["results"], "generate_inputs")
+
+
+def test_a_step_that_fired_and_got_no_threads_one_rate_is_not_called_unbisected(artifact):
+    """One message covered three states and only one of them was what it said.
+
+    `single_threaded` comes back empty when the step never fired, when the
+    bisect raised, and when the bisect ran and the re-executed step wrote
+    nothing to compare. The cell read "not bisected, since it never fired" for
+    all three. That is not cosmetic: `PARALLEL_ORDER` in the next column over
+    rests on a measured zero at threads=1, so a step whose bisect produced no
+    rate has no second axis rather than nothing to explain.
+
+    This test only covered `generate_inputs`, which genuinely never fires, and
+    the fixture it read gives no step a bisect at all, so every other row of it
+    was making the false claim already.
+    """
+    block = "\n".join(results(artifact))
+    assert "not bisected, since it never fired" in a_row(block, "generate_inputs")
+    assert "no rate, on 10 trials that fired" in a_row(block, "daily_revenue")
+
+    bisected = deepcopy(artifact)
+    next(s for s in bisected["steps"] if s["name"] == "daily_revenue")["single_threaded"] = {
+        "0 of 4": 10
+    }
+    assert "0 of 4 on all 10" in a_row("\n".join(results(bisected)), "daily_revenue")
 
 
 @pytest.mark.parametrize(
