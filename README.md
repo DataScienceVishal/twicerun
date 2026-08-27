@@ -4,15 +4,37 @@
 
 Run a batch pipeline several times on the same input and report, per step, how often it failed to give the same answer.
 
-The premise is one measurement, and it takes two seconds to check. `SELECT g, sum(v) FROM t GROUP BY g` over 2,000,000 rows in 1,000 groups, run twice at `threads=8` on DuckDB 1.5.5, disagrees on several hundred of the 1,000 groups. Ten runs on this machine gave 492, 497, 510, 575, 599, 611, 618, 690, 700 and 738. Nothing is wrong with the query. Parallel reduction adds the terms in whatever order the threads finish in, and float addition is not associative. At `threads=1` it disagrees on none of them, and `count()` over the same table never moves, which is the control: integer arithmetic cannot reassociate into a different answer.
+The naive version of that is a two-run diff, and on correct code it reports hundreds of findings. DuckDB adds the terms of a parallel `sum()` in whatever order the threads finish in, and float addition is not associative. Running a pipeline five times is the easy half. Deciding whether two of its outputs are the same answer is the project.
 
-So the naive version of this tool, run it twice and diff, reports hundreds of findings on correct code. The comparison is the project. The runner is forty lines.
+```
+$ uv run twicerun run pipelines/reference.py
 
-```bash
-uv run python scripts/measure_duckdb.py   # re-derives that measurement in raw DuckDB, about two seconds
+  0 generate_inputs         0 of 4  NO_DIVERGENCE_OBSERVED
+  1 daily_revenue           4 of 4  DIVERGENT  VALUE_DRIFT  cause PARALLEL_ORDER
+  2 customer_keys           4 of 4  DIVERGENT  ROW_MISSING ROW_EXTRA  cause PARALLEL_ORDER
+  3 apply_price_updates     2 of 4  DIVERGENT  ROW_MISSING ROW_EXTRA  cause PARALLEL_ORDER
+  4 append_audit_log        4 of 4  DIVERGENT  MULTIPLICITY  cause PERSISTS_SINGLE_THREADED
+  5 mean_basket             4 of 4  DIVERGENT  VALUE_DRIFT  cause PARALLEL_ORDER
+  6 sparse_customer_keys    0 of 4  STABLE_ON_THIS_INPUT
+  7 roll_up_keys            0 of 4  NO_DIVERGENCE_OBSERVED
+
+5 of 8 steps diverged in 13.4s.
 ```
 
-What the tool does with it, on a pipeline built to be broken in four known ways:
+Four of those five are planted bugs. `mean_basket` is correct code, a float average whose answer moves in the last few bits. Step 6 is the fifth bug. It agreed with itself on all four comparisons, which is the case a plain five-run loop reports as a clean zero.
+
+```bash
+git clone https://github.com/DataScienceVishal/twicerun && cd twicerun
+uv sync --all-extras
+uv run twicerun run pipelines/reference.py
+```
+
+Needs [uv](https://docs.astral.sh/uv/) and nothing else. One pass writes a median 376 MB of Parquet under `.twicerun/`, which is gitignored.
+
+<details>
+<summary>The same run in full, with the per-step evidence the excerpt above drops</summary>
+
+`reference.py` carries four bugs, one step that fires intermittently, one benign float step, one control that must never fire, and one step whose only job is to sit downstream of a bug.
 
 ```
 $ uv run twicerun run pipelines/reference.py
@@ -128,9 +150,42 @@ Step 6 is the one to read three times. It is broken, it gave the same answer fou
 
 **Your numbers will not match that transcript, and neither will mine on the next run.** This is a tool about non-determinism and its own output is non-deterministic, so quoting any single figure as fixed would be the wrong thing to do twice over.
 
-So every results table below is generated. `scripts/eval.py --json` and `scripts/amplification_gap.py --json` each write a file of figures, both are committed under `results/`, and `twicerun report --format md --update README.md` renders the tables out of them. Nothing in those tables was typed by hand, and `tests/test_readme_tables.py` fails the build when this file stops matching the artifacts.
+</details>
 
-## What it does not test
+<details>
+<summary>The measurement the whole tool is built on: one `sum()`, run twice, disagreeing on 492 to 738 of 1,000 groups</summary>
+
+The premise is one measurement, and it takes two seconds to check. `SELECT g, sum(v) FROM t GROUP BY g` over 2,000,000 rows in 1,000 groups, run twice at `threads=8` on DuckDB 1.5.5, disagrees on several hundred of the 1,000 groups. Ten runs on this machine gave 492, 497, 510, 575, 599, 611, 618, 690, 700 and 738. Nothing is wrong with the query. Parallel reduction adds the terms in whatever order the threads finish in, and float addition is not associative. At `threads=1` it disagrees on none of them, and `count()` over the same table never moves, which is the control: integer arithmetic cannot reassociate into a different answer.
+
+```bash
+uv run python scripts/measure_duckdb.py   # re-derives that measurement in raw DuckDB, about two seconds
+```
+
+Its counts will not match these, for the same reason the transcript above will not. What holds is the shape: parallel figures large, `threads=1` figures zero, the three `count()` runs agreeing with each other, the single-word tiebreak fix clean, and the `MERGE` bug present at threads=8 and absent at threads=1. The script checks ten such invariants and exits non-zero if any of them breaks, so it fails loudly rather than printing numbers that mean something different from what they say.
+
+</details>
+
+## What it cannot catch
+
+<details>
+<summary>A backfill that walks its months oldest first silently loses `cbd_congestion_fee`, and twicerun reports a clean zero</summary>
+
+`pipelines/tlc_backfill.py` runs over three months of real NYC TLC green trip records. TLC added `cbd_congestion_fee` to the trip records for 2025 onward, so a backfill over 2024-12, 2025-01 and 2025-02 spans a column that two of its three partitions have and one does not. `scripts/tlc_schema.py` prints what DuckDB does with that:
+
+```
+read_parquet over the three as one list, which is what a backfill hands it:
+  oldest partition first  20 columns  cbd_congestion_fee: DROPPED, silently
+  newest partition first  21 columns  cbd_congestion_fee: present
+```
+
+DuckDB takes the column set from the first file in the list. Put the 2024 partition first, which is the order a backfill walks its months in, and a revenue column is gone from the answer with no error and no warning. Reverse the list and it is back.
+
+**twicerun cannot catch it, and that is the sharpest limitation this project has.** The wrong answer is wrong the same way on every run, so five runs agree with each other perfectly and the report is a clean zero. A rerun checker is blind to a deterministic wrong answer by construction. `scripts/tlc_schema.py` asserts its three facts and exits non-zero if any stops being true, which is the most this repository can do about a bug its main tool is structurally unable to see. The two spellings that raise instead, and what `UNION ALL BY NAME` costs, are in [docs/data.md](docs/data.md).
+
+</details>
+
+<details>
+<summary>Only pipelines written against `ctx.read` and `ctx.write` get tested at all</summary>
 
 **twicerun only tests pipelines written against its storage interface.** It does not test arbitrary pipelines.
 
@@ -138,7 +193,10 @@ Watching a pipeline's writes without its cooperation needs either a kernel block
 
 What that buys back is why it is a design choice rather than a workaround. One abstraction carries five jobs: it is where artifacts get captured, where reads get redirected for containment, where input rows get counted for the tolerance bound, where the column names feeding attribution come from, and where amplified inputs get substituted. A step calling `ctx.write()` gets all five. A step calling `duckdb.execute("COPY ... TO ...")` behind its back gets none.
 
-## What else it gets wrong
+</details>
+
+<details>
+<summary>Everything else it gets wrong, including two published figures that cannot go down when the detector gets worse</summary>
 
 **Sorting to pair rows inside a key group is a heuristic once there is more than one float column.** The ordinal sorts both sides the same way, and for a single float column sorted-to-sorted pairing is the assignment that minimises total absolute difference, so it is optimal. With several, a lexicographic sort can pair the wrong two rows inside one key group. That can only understate a difference, so the failure mode is a bounded false negative confined to within-key-group permutations of float-only differences.
 
@@ -164,13 +222,20 @@ Three amplifiers is three, and there is no argument that they are the right thre
 
 **Six figures published in this file were beaten by a longer run, and every one of the six was a number retyped out of a terminal into a table.** A read-through on 2026-08-27 found eight more of the same class in comments and docstrings, where no generator can reach. That is why the tables below are rendered from a committed measurement instead of typed, which removes transcription as a way for a cell to go false and does nothing whatever about ten trials being ten trials.
 
+</details>
+
 ## Results
+
+Every table below is rendered from a committed measurement by `twicerun report`, so no figure in one was typed by hand, and `tests/test_readme_tables.py` fails the build when this file stops matching the artifact.
 
 <!-- twicerun: provenance -->
 Generated by `twicerun report` from `results/eval-2026-08-27.json`, written 2026-08-27 by `uv run python scripts/eval.py --trials 10 --json`.
 
 DuckDB 1.5.5 at `threads=10` on macOS-26.5.2-arm64-arm-64bit. 10 trials of 5 runs, so 4 comparisons per step per trial and 40 in all. 502s, a median 49s a trial.
 <!-- /twicerun: provenance -->
+
+<details>
+<summary>Per step: what fired, what stopped firing at `threads=1`, and how far the numbers moved</summary>
 
 Ten trials is fewer than the forty passes an earlier version of this table published, and that is the price. What it buys is the table being a function of a measurement rather than of a transcription, so running the eval again and committing what came out is the only way to move a cell.
 
@@ -195,7 +260,12 @@ The two float steps go to zero under `reduction-order` and nothing else moves. T
 
 The `threads=1` column is where one row is unlike the others. Five steps stop diverging with one thread and one does not, which is the difference between a step whose answer depends on how the work was divided and a step whose answer depends on it having run before. No number of runs separates those two; a second thread count does it in one column. A step that never fired is not bisected at all, and the cell says so rather than showing a zero that would be four comparisons of nothing.
 
-### Four baselines, implemented rather than named
+</details>
+
+<details>
+<summary>Bit-exact multiset equality matched the oracle on every step trial it was scored on, so these tables hold no evidence for the oracle over it</summary>
+
+Four baselines, implemented rather than named:
 
 <!-- twicerun: baselines -->
 | baseline | what it is | what it gave |
@@ -211,7 +281,7 @@ The intermittent step is where the run count and the comparison method pull apar
 
 **Baseline 1 was handed one comparison and the oracle four, and that is most of the gap between them.** The run-matched row is the control that was missing: same runs, same bytes, same containment, and nothing but multiset equality over row hashes. It agrees with the oracle on every cell of the sensitivity table and fires on no twin, so **the sensitivity and specificity tables hold no evidence for the oracle over the cheap comparison**. What the oracle produces that multiset equality cannot is the divergence class, the ulp and relative magnitudes, the attributed column, the derived bound and the single-threaded cause, and none of those five is scored in either table. Baseline 2 catches four of the five matched pairs, which is more than the spec predicted, and [docs/eval.md](docs/eval.md) has the three things it still cannot do.
 
-### What the pre-registered conditions returned
+Eight conditions were pre-registered in the spec, each one a way for a piece of this project to turn out unnecessary:
 
 <!-- twicerun: conditions -->
 | condition, as written in the spec | verdict | what it came out as |
@@ -230,7 +300,12 @@ The intermittent step is where the run count and the comparison method pull apar
 
 Three of the eight used to be readable off an absence rather than off a measurement. A step that writes no artifact compares nothing, fires on none of the nothing it compared, and arrives at the conditions as a clean zero, which then prints TRIGGERED and declares a piece of this project unnecessary. Seven of the eight carry a third verdict now, `NOT MEASURED`, and the eighth is the wall clock, which is measured whatever the pipeline did.
 
-### Correct code under the same tool
+</details>
+
+<details>
+<summary>Correct code under the same tool: no twin fired at all, and tie collapse declined most of the chances it had</summary>
+
+`pipelines/twins.py` is the same pipeline with the single line that fixes each bug, and it is what the specificity half of the eval scores against.
 
 <!-- twicerun: specificity -->
 | twin, one line of difference from its partner | trials it fired in | fire rate |
@@ -257,7 +332,12 @@ Two things that denominator contains are worth naming. One of the six pairs is `
 
 **The first column is the honest part of that table.** Tie collapse declines most of its chances and the report says why each time rather than printing a zero: `orders.day` and `customers.cust` already hold 2,000 and 500 rows per value, at or past what the amplifier targets, and `generate_inputs` reads no artifact at all. A twin an amplifier never touched is not evidence that the amplifier is safe on it.
 
-### Containment
+</details>
+
+<details>
+<summary>Containment: the step downstream of a bug fires on every uncontained trial and none of the contained ones</summary>
+
+Contained means runs 2 to 5 read run 1's artifacts, so a divergence at one step cannot reach the next. Dropping it is baseline 3.
 
 <!-- twicerun: containment -->
 | step | contained | uncontained |
@@ -276,7 +356,10 @@ The append with no unique key reports 15,812 extra rows uncontained against 3,95
 
 The bottom row is the one containment is for. `roll_up_keys` computes an integer minimum that cannot reassociate, so every uncontained fire there is inherited from the step it reads rather than its own. Read the other rows as noise either way: two steps in this pipeline are intermittent, so a contained pass and an uncontained pass differ mostly by which of them happened to fire. [docs/runs.md](docs/runs.md) has the ablation, the per-comparison progression, and where the idea was borrowed from.
 
-### The bound that fails
+</details>
+
+<details>
+<summary>The 1,000x of headroom in the tolerance check is really 1x, because my own test pipeline groups into 1,000 days</summary>
 
 The tolerance is derived rather than picked. Reassociating a sum of `n` float64 terms moves the result by at most `gamma_n * sum(|x_i|)`, two orderings differ by at most twice that, and the tool substitutes `max(|a|, |b|)` for the sum it does not have. One condition was fixed before any of this was written: observed drift on the benign step must sit at least 1,000x inside that bound, or the derivation is not conservative enough and the design gets revisited rather than the threshold moved.
 
@@ -294,7 +377,10 @@ The tolerance is derived rather than picked. Reassociating a sum of `n` float64 
 
 The last row is a count rather than a verdict because the tight check fails most of the time rather than every time. Both readings print in every report, so nobody has to take that from this file, and [docs/comparison.md](docs/comparison.md) has the derivation and the two directions `rows_read` is wrong in.
 
-### Amplification against more runs
+</details>
+
+<details>
+<summary>Why a nastier input beats more runs, measured head to head on the intermittent step</summary>
 
 More runs lower the chance of missing a step that diverges with probability `p` and do nothing to `p`. Amplification changes `p`, by handing a step an input built to make the mechanism fire, and only steps the main loop found nothing in get one. Pointed at the intermittent step over 40 passes, whether or not the loop had already caught it:
 
@@ -315,7 +401,10 @@ The loop reported nothing on 5 of the 40 passes where it compared anything, and 
 
 `twicerun run` cannot produce that table and is not meant to. Amplification only touches steps the loop came back quiet on, so on most passes step 6 fires, never reaches an amplifier, and contributes nothing to the second half of the comparison, which is why the table comes from `scripts/amplification_gap.py` instead. The last two columns keep three things apart: an amplifier that declined to build an input and one that built an input the step wrote nothing from both count as could-not-ask, and only a comparison that happened and found the step clean is evidence about the step. [docs/amplification.md](docs/amplification.md) has the three amplifiers, the four statuses, and why an amplifier that broke correct code would make the tool worthless.
 
-### Attribution
+</details>
+
+<details>
+<summary>Naming the column that moved, where two thirds of the score is a sort key graded against itself</summary>
 
 For each key column, drop it and recount what failed to pair. On `customer_keys` that turns 491,520 unmatched rows into a sentence naming a column.
 
@@ -325,9 +414,14 @@ Leave-one-out named the column the step invented, rather than one it copied in, 
 
 **Two thirds of that is a sort key scored against itself.** On both `row_number` steps, dropping `surrogate_id` and dropping `event_id` each take the unmatched count to zero, because the two columns are a bijection whose pairing moved, so the counts choose nothing and the `(remaining, from_input, column)` tie-break chooses. Preferring the column the step invented is right, and `tests/test_oracle.py::test_a_tie_goes_to_the_column_the_step_invented` asserts it as a unit test; re-scoring it ten times a run and calling the result an accuracy figure is not. `apply_price_updates` is the one step where the counts do the work.
 
+</details>
+
 ## Running it
 
-Needs [uv](https://docs.astral.sh/uv/) and nothing else. Python, DuckDB and the dev tools all come from `uv sync`.
+<details>
+<summary>The full command list, from a clone to regenerating these tables</summary>
+
+Python, DuckDB and the dev tools all come from `uv sync`.
 
 ```bash
 git clone https://github.com/DataScienceVishal/twicerun && cd twicerun
@@ -367,6 +461,11 @@ uv run twicerun report results/eval-2026-08-27.json results/gap-2026-08-27.json 
 
 `--update` refuses in both directions. A marker pair this file carries with no artifact behind it, and an artifact table this file does not carry, are both errors that name what is missing, because a block that silently stops being regenerated keeps whatever it last said. `tests/test_readme_tables.py` runs the same comparison in CI, so a hand edit inside a marked block fails the build rather than surviving to a reader.
 
+</details>
+
+<details>
+<summary>Exit codes: 1 is your data, 4 is an input twicerun made up, 5 is a check that did not run</summary>
+
 | exit | meaning |
 |---|---|
 | 0 | nothing diverged |
@@ -378,23 +477,25 @@ uv run twicerun report results/eval-2026-08-27.json results/gap-2026-08-27.json 
 
 1 means divergence on your data and only that, so a release gate keyed on it does not also trip on a broken pipeline, and a comparison downgraded to `TOLERATED` does not set it. **4 exists because 0 and 1 are both wrong for `STABLE_ON_THIS_INPUT`.** Zero is disqualifying, since this tool's argument is that a green five-run loop lies about exactly that step, and folding it into 1 would collapse "your pipeline gave two answers on your data" and "on an input twicerun fabricated" into one integer. 5 is the same argument one step further: exit 0 was carrying both "I checked and found nothing" and "the check that would have made that meaningful did not run", and those are further apart than 1 and 4 because the second one is silent.
 
+</details>
+
+<details>
+<summary>Why `--key` refuses a float column, and why a run that fails is never cleaned up</summary>
+
 `--key artifact=col,col` matches rows of one artifact on a subset of its exact columns, which is how you say that a surrogate key is not part of the answer. It refuses a float column, and the reason is worth stating because the flag looks harmless: matching on a float joins with bit equality, so one ulp of reassociation comes back as a missing row plus an extra row that no policy can downgrade, the step then reports no drift, and a step with no drift has no reassociation bound to print. `--key daily_revenue=day,revenue` used to delete this file's own falsifiable check, headroom figure and all.
 
 `--no-containment` and `--no-amplify` are the two flags that change what gets measured rather than how it is judged, which is why `judge` has neither: a saved run was executed one way or the other and cannot be re-scored into the other.
 
 One pass writes a median 376 MB of Parquet under `.twicerun/`, which is gitignored, and `--run-dir` puts it somewhere else. Retention keeps one directory **per concurrent invocation**, so run it serially and the footprint stays there however many times you run it. **A run that fails is never pruned**, because pruning is on the success path so that a failed run cannot delete the run you would have judged instead. Three `--key` typos in a row therefore leave three directories and 619 MB: each exits 2 after executing the pipeline and before comparing anything, and nothing will clear them but you. `--keep 0` turns pruning off and `rm -rf .twicerun` reclaims the lot.
 
-To re-derive every DuckDB number quoted here on your own machine, in about two seconds:
+</details>
 
-```bash
-uv run python scripts/measure_duckdb.py
-```
-
-Its counts will not match these, for the same reason the transcript above will not. What holds is the shape: parallel figures large, `threads=1` figures zero, the three `count()` runs agreeing with each other, the single-word tiebreak fix clean, and the `MERGE` bug present at threads=8 and absent at threads=1. The script checks ten such invariants and exits non-zero if any of them breaks, so it fails loudly rather than printing numbers that mean something different from what they say.
-
-## What this does not do
+## What it does not do
 
 No `dbt`, Airflow, Dagster or Prefect adapter. No Spark. No syscall interception. No nested type comparison. No web UI. No fix generation.
+
+<details>
+<summary>No model calls, and the crash injection slice that a pre-registered condition cut</summary>
 
 No model calls either: no LLM adapter, no `openai` dependency, no `AZURE_OPENAI_*` configuration. A non-deterministic output layer on a tool whose premise is determinism is a contradiction that someone would notice, and nothing here needs one.
 
@@ -402,7 +503,14 @@ No model calls either: no LLM adapter, no `openai` dependency, no `AZURE_OPENAI_
 
 **No `(class, cause)` hint table, which the spec wanted and crash injection was going to carry.** Two hints exist and both are one line of static text: `WALL_CLOCK` when a timestamp column moved, which is the commonest reason a step never reproduces, and a line naming an artifact one run wrote and the other did not. Mapping the five classes against the two causes to a suggested fix was fifteen lines of lookup, and it went with the cut.
 
-## How it works, file by file
+</details>
+
+## How it works
+
+The arguments behind the code, with the measurements that back them, are in [docs/comparison.md](docs/comparison.md) for the oracle and the derived tolerance, [docs/runs.md](docs/runs.md) for why five runs and what a pass costs, [docs/amplification.md](docs/amplification.md) for the three amplifiers, [docs/eval.md](docs/eval.md) for the trials and the baselines, and [docs/data.md](docs/data.md) for the fixture's bugs and the TLC licence position.
+
+<details>
+<summary>What each module owns, in the order the code runs them</summary>
 
 `src/twicerun/storage.py` is the interface, and every other file assumes it. `ctx.read` and `ctx.write` address artifacts by `(run, step index, name)`. The method worth understanding is `ctx.state(name, initial)`, which resolves the *previous run's* copy of an artifact rather than this run's. Without it a checker starts every run from an empty directory and can never see the two bugs that only exist because a pipeline runs against state its own last execution left behind.
 
@@ -418,21 +526,19 @@ No model calls either: no LLM adapter, no `openai` dependency, no `AZURE_OPENAI_
 
 `src/twicerun/tables.py` renders this file's results tables out of the committed artifacts. It is in the package rather than in `scripts/` because two of its functions are imported back by the eval: a fire-rate distribution and a tally of labels have to read the same in the terminal and in a table, or the two disagree about the same run.
 
-The arguments behind those files, with the measurements that back them:
+</details>
 
-- [docs/comparison.md](docs/comparison.md), the oracle, the attribution tie-break, the derived tolerance and the policy layer
-- [docs/runs.md](docs/runs.md), why five runs, containment, the `threads=1` bisect, and what a pass costs
-- [docs/amplification.md](docs/amplification.md), the three amplifiers, the four statuses, and the property that separates this from a chaos generator
-- [docs/eval.md](docs/eval.md), the trials, the four baselines, the eight pre-registered conditions, and the five ten-trial runs that cannot be regenerated
-- [docs/data.md](docs/data.md), the fixture's four bugs and the NYC TLC licence position
-
-## Data
+<details>
+<summary>Data: a generated fixture whose bugs are its parameters, and NYC TLC records that carry no licence</summary>
 
 The reference pipeline runs on generated data, and synthetic is the point here rather than a convenience. Its bugs are parameterised by tie density, group count and row count, and those parameters are the experiment: real data would fix the tie density at whatever the file happens to contain and make the intermittency measurement impossible to produce. Values come from `hash(i)` rather than `random()`, so all five runs read byte-identical inputs and any divergence is the pipeline's rather than the data's. Three of its four bugs are failures Vishal has been bitten by on Databricks pipelines and SQL migrations: duplicate rows after a retry, IDs changing between runs, and totals not matching between runs. The fourth, a non-idempotent `MERGE`, came out of an experiment for this project and he has never seen it in production.
 
 The second pipeline runs on NYC TLC trip records. **TLC publishes no licence for them**, only a disclaimer that it did not create the data and makes no representations about its accuracy, which grants nothing and says nothing about redistribution either way. So no TLC bytes are committed here: `scripts/fetch_tlc.py` fetches three monthly Parquet files and verifies a SHA-256 recorded on 2026-08-26 against each, and the suite runs against partitions generated from the real column lists in `pipelines/tlc_green_schema.sql`, read off the real Parquet with `DESCRIBE` rather than transcribed from the data dictionary. What the backfill found is in [docs/data.md](docs/data.md), including a revenue column that DuckDB drops silently on file order and that this tool is structurally unable to catch.
 
-## Figures nobody regenerates
+</details>
+
+<details>
+<summary>Every figure here that nobody can regenerate, listed with its date</summary>
 
 Everything here was measured once, on a date, and transcribed. None of it comes out of a committed artifact, and each is kept because deleting it would lose something a reader wants:
 
@@ -447,3 +553,5 @@ Everything here was measured once, on a date, and transcribed. None of it comes 
 - The two measurements the amplifiers were tuned on, 2026-08-26, both in `amplify.py`: the float sum fired on 1 of 8 comparisons at `threads=2` and 8 of 8 at `threads=4` and is flat to 40, which is where the floor of 4 comes from, and the surrogate-key bug fired on 10 of 12 comparisons at 2 rows per tie group against 11 of 12 at 500.
 - The 16 crash-injection kill points across two write styles that produced one divergence, 2026-08-26. That slice was cut, so nothing here can produce them again, which is what this list is for.
 - Two illustrations in the prose that the tool does measure and the artifact does not carry: around 600 findings on the benign step under `strict`, and which column attribution named per step. The eval prints both on every run, and the generated cells beside them are the versions nobody typed.
+
+</details>
