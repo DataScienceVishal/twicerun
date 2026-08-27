@@ -132,9 +132,18 @@ def test_the_run_matched_row_does_not_claim_agreement_from_nothing(capsys):
     the project's own centrepiece. Ten trials that compared nothing produce zero
     disagreements and zero twin fires, which is the same pair of zeros a perfect
     agreement produces.
+
+    This asserted nothing until baseline 1 stopped returning early on a benign
+    step that compared nothing. The fixture never reached the function the test
+    is named for, so the sentence was absent because the whole row was, and
+    deleting the guard left the suite green. Both directions are checked now,
+    because dropping the disclosure and keeping the branch is the other way to
+    lose it.
     """
     verdicts([a_trial(artifacts=0) for _ in range(10)])
-    assert "no evidence for the oracle" not in capsys.readouterr().out
+    printed = capsys.readouterr().out
+    assert "no evidence for the oracle" not in printed
+    assert "One side of that compared nothing" in printed
 
     verdicts([a_trial() for _ in range(10)])
     assert "no evidence for the oracle" in capsys.readouterr().out
