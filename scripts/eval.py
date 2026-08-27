@@ -1266,7 +1266,11 @@ def gate_under(trials: list[Trial], policy: Policy) -> Iterable[tuple[str, int, 
     The rate is a distribution keyed the same way `StepScore.rates` is, so the
     two can sit in adjacent cells of one table without either being reformatted
     into the other's shape. A step is counted only in the trials where it
-    compared something, which is the guard four other loops in this file carry.
+    compared something. Seven other functions in this file carry the same
+    refusal, and this sentence said four for as long as there were four: nothing
+    noticed the fifth, sixth, seventh or eighth arriving. `test_refusals.py`
+    counts them now, which is `test_blanket_catches.py`'s argument one remove
+    out.
     """
     ordered = dict.fromkeys(step.name for trial in trials for step in trial.reference)
     for name in ordered:
