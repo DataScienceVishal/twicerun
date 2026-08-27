@@ -22,6 +22,7 @@ module exists to stop, one layer down.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -32,6 +33,8 @@ ARTIFACT_VERSION = 1
 
 OPEN = "<!-- twicerun: {name} -->"
 CLOSE = "<!-- /twicerun: {name} -->"
+# Any name, not only the ones TABLES offers. See `blocks_in`.
+MARKER = re.compile(r"<!--\s*(/?)twicerun:\s*(\S+?)\s*-->")
 
 # Two scripts write artifacts and they measure different things, so a file says
 # which it is rather than being sniffed for the keys it happens to carry.
@@ -672,45 +675,53 @@ def blocks_in(markdown: str) -> dict[str, tuple[int, int]]:
     silently ignored block is a table that stops being regenerated and starts
     being whatever it was the last time somebody edited it, which is the state
     this whole command exists to leave behind.
+
+    The scan matches any name, not only the names `TABLES` currently offers, and
+    that is the whole difference between a check and a decoration. It used to
+    loop over `every_table()`, so a marker pair whose generator had been deleted
+    was invisible: `twicerun report --update` said the file already matched, the
+    test comparing the markdown's blocks against the generator's tables compared
+    `TABLES` with a subset of `TABLES` and could not fail, and the block sat
+    there as a hand-typed figure with the tooling reporting green over it. That
+    is the sixth test in this repository that could not fail, and this one was
+    guarding the mechanism built to stop hand-typed figures.
     """
     lines = markdown.splitlines()
     found: dict[str, tuple[int, int]] = {}
     opened: tuple[str, int] | None = None
     for n, line in enumerate(lines):
-        stripped = line.strip()
-        for name in every_table():
-            if stripped == OPEN.format(name=name):
-                if opened is not None:
-                    raise MarkerError(
-                        f"line {n + 1} opens {name} while {opened[0]} is still open at "
-                        f"line {opened[1] + 1}"
-                    )
-                if name in found:
-                    raise MarkerError(
-                        f"{name} is opened twice, at lines {found[name][0]} and {n + 1}"
-                    )
-                opened = (name, n)
-            elif stripped == CLOSE.format(name=name):
-                if opened is None or opened[0] != name:
-                    raise MarkerError(f"line {n + 1} closes {name}, which is not open")
-                found[name] = (opened[1] + 1, n)
-                opened = None
+        marker = MARKER.match(line.strip())
+        if not marker:
+            continue
+        closing, name = marker.group(1), marker.group(2)
+        if not closing:
+            if opened is not None:
+                raise MarkerError(
+                    f"line {n + 1} opens {name} while {opened[0]} is still open at "
+                    f"line {opened[1] + 1}"
+                )
+            if name in found:
+                raise MarkerError(f"{name} is opened twice, at lines {found[name][0]} and {n + 1}")
+            opened = (name, n)
+        else:
+            if opened is None or opened[0] != name:
+                raise MarkerError(f"line {n + 1} closes {name}, which is not open")
+            found[name] = (opened[1] + 1, n)
+            opened = None
     if opened is not None:
         raise MarkerError(f"{opened[0]} opens at line {opened[1] + 1} and never closes")
     return found
 
 
-def rewrite(markdown: str, rendered: dict[str, str]) -> str:
-    """Replace the body of every generated block, refusing anything that does not line up.
+def line_up(found: Iterable[str], rendered: Iterable[str]) -> None:
+    """Refuse a markdown file and an artifact that do not carry the same tables.
 
-    Both directions are checked, and the second one is the point. A table the
-    markdown does not carry is a table that quietly stopped being published, and
-    a marker with no generator behind it is a block that will never be updated
-    again. `--key` and `--tolerance` have each already deleted one of this
-    project's own falsifiable checks by being permissive about something
-    adjacent, so this is strict in both directions and says which is missing.
+    Both directions, and the second one is the point. A table the markdown does
+    not carry is a table that quietly stopped being published, and a marker pair
+    with no generator behind it is a block that will never be updated again.
+    `--key` and `--tolerance` have each already deleted one of this project's own
+    falsifiable checks by being permissive about something adjacent.
     """
-    found = blocks_in(markdown)
     missing = sorted(set(rendered) - set(found))
     unknown = sorted(set(found) - set(rendered))
     if missing or unknown:
@@ -720,6 +731,12 @@ def rewrite(markdown: str, rendered: dict[str, str]) -> str:
             + (f"No generator for: {', '.join(unknown)}. " if unknown else "")
             + "Add the marker pair, or delete the generator."
         )
+
+
+def rewrite(markdown: str, rendered: dict[str, str]) -> str:
+    """Replace the body of every generated block, refusing anything that does not line up."""
+    found = blocks_in(markdown)
+    line_up(found, rendered)
     lines = markdown.splitlines()
     for name, (start, end) in sorted(found.items(), key=lambda pair: -pair[1][0]):
         lines[start:end] = rendered[name].splitlines()
@@ -727,10 +744,17 @@ def rewrite(markdown: str, rendered: dict[str, str]) -> str:
 
 
 def drifted(markdown: str, rendered: dict[str, str]) -> list[str]:
-    """Which generated blocks in `markdown` are not what the artifact produces."""
+    """Which generated blocks in `markdown` are not what the artifact produces.
+
+    Refuses the same mismatch `rewrite` refuses, rather than reporting no drift
+    across the blocks that happen to line up. A marker pair with no generator
+    behind it has drifted by definition: nothing is regenerating it.
+    """
+    found = blocks_in(markdown)
+    line_up(found, rendered)
     lines = markdown.splitlines()
     return [
         name
-        for name, (start, end) in sorted(blocks_in(markdown).items())
+        for name, (start, end) in sorted(found.items())
         if "\n".join(lines[start:end]) != rendered[name]
     ]

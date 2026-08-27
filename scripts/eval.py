@@ -66,7 +66,7 @@ from twicerun.cli import exit_code
 from twicerun.compare import compare as bit_exact
 from twicerun.manifest import Manifest
 from twicerun.measurement import StepMeasurement, name_classes
-from twicerun.policy import HEADROOM_REQUIRED, REDUCTION_ORDER, DriftBound, Policy, judge
+from twicerun.policy import HEADROOM_REQUIRED, REDUCTION_ORDER, STRICT, DriftBound, Policy, judge
 from twicerun.report import WIDTH
 from twicerun.runner import amplify_runs, load_steps, run_pipeline, scored_amplification
 from twicerun.tables import ARTIFACT_VERSION, EVAL, distribution, magnitudes, tally
@@ -1240,9 +1240,19 @@ def report_policy_cost(trials: list[Trial]) -> tuple[dict[str, int], dict[str, d
     explains the mechanism without ever printing its price. A step whose every
     comparison is downgraded does not gate a release, and one of the four is a
     float aggregate whose drift is exactly what the policy exists to downgrade.
+
+    The count is a difference between two policies over the same trials, and it
+    used to be `gated < seen` under the lenient one alone. That reads a step
+    which simply did not fire in one trial as a step the policy downgraded:
+    `apply_price_updates` came back 9 of 10 because the `MERGE` bug is
+    intermittent, its rates under both policies were identical, and the eval
+    printed 2 of 4 still gating where the answer is 3. It then explained the
+    missing one with a sentence about float-only drift, on a step whose class is
+    `ROW_MISSING` and which the policy refuses to downgrade at all.
     """
     say("\nsensitivity under --policy reduction-order, which no table above runs")
     lenient = Policy(name=REDUCTION_ORDER)
+    strictly = {name: gated for name, gated, _, _ in gate_under(trials, Policy(name=STRICT))}
     lost = []
     passes = 0
     # Every step, not only the four the spec calls broken. The terminal keeps
@@ -1255,17 +1265,20 @@ def report_policy_cost(trials: list[Trial]) -> tuple[dict[str, int], dict[str, d
         if name not in BROKEN or not seen:
             continue
         passes += 1
-        hang(f"{name:<22}", f"gates on {gated} of {seen} trials")
-        if gated < seen:
+        hang(
+            f"{name:<22}",
+            f"gates on {gated} of {seen} trials, against {strictly[name]} of {seen} under strict",
+        )
+        if gated < strictly[name]:
             lost.append(name)
     if not passes:
         say("  Nothing compared, so there is no cost to report here.")
         return {"gating_steps": 0, "gating_of": 0}, downgraded
     say(f"  {passes - len(lost)} of the {passes} broken steps still gate a release under it.")
     if lost:
-        say(f"  {', '.join(lost)} stops gating: float-only drift, inside the derived bound, and")
-        say("  gone at threads=1, which is the conjunction the policy downgrades on. That is")
-        say("  the trade the flag makes and it is not in any table above.")
+        say(f"  {', '.join(lost)} gates on fewer trials than under strict: float-only drift,")
+        say("  inside the derived bound and gone at threads=1, which is the conjunction the")
+        say("  policy downgrades on. That is the trade the flag makes and it is in no table above.")
     return {"gating_steps": passes - len(lost), "gating_of": passes}, downgraded
 
 

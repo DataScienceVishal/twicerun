@@ -26,6 +26,7 @@ from twicerun.tables import (
     MarkerError,
     UnreadableArtifact,
     baselines,
+    blocks_in,
     distribution,
     drifted,
     every_table,
@@ -291,6 +292,34 @@ def test_a_marker_with_no_generator_behind_it_is_refused_too(rendered):
     page = a_page(rendered)
     with pytest.raises(MarkerError, match="No generator for: results"):
         rewrite(page, {k: v for k, v in rendered.items() if k != "results"})
+
+
+def test_a_marker_pair_whose_generator_was_deleted_is_seen_at_all(rendered):
+    """The version of the check above that could not fail, and the one that matters.
+
+    `blocks_in` used to scan for the names `TABLES` offers, so a pair naming
+    anything else was invisible: both sides of the test comparing the markdown's
+    blocks against the generator's tables came out of the same dict. Deleting a
+    generator and leaving its markers in place therefore left a hand-typed block
+    in the file with `--update` reporting that the file already matched.
+
+    Both directions are asserted here, because the failure is symmetric: an
+    invented name nobody generates, and a real table whose generator went away.
+    """
+    orphan = (
+        a_page(rendered)
+        + f"\n{OPEN.format(name='invented-table')}\n42 of 42\n"
+        + f"{CLOSE.format(name='invented-table')}\n"
+    )
+    assert "invented-table" in blocks_in(orphan)
+    with pytest.raises(MarkerError, match="No generator for: invented-table"):
+        rewrite(orphan, rendered)
+    with pytest.raises(MarkerError, match="No generator for: invented-table"):
+        drifted(orphan, rendered)
+
+    without = {k: v for k, v in rendered.items() if k != "attribution"}
+    with pytest.raises(MarkerError, match="No generator for: attribution"):
+        drifted(a_page(rendered), without)
 
 
 def test_a_marker_that_never_closes_is_an_error_and_not_a_block_to_the_end_of_the_file(rendered):

@@ -34,10 +34,12 @@ from eval import (
     claim_workspace,
     main,
     naive_pass,
+    report_policy_cost,
     static_flags,
     without_amplifiers,
 )
 from test_printed_words import printed_prose
+from trial_fixtures import a_trial
 from twicerun.amplify import DIVERGENT, STABLE_ON_THIS_INPUT, Amplification
 from twicerun.cause import Bisect
 from twicerun.measurement import StepMeasurement
@@ -303,6 +305,31 @@ def test_every_twin_but_the_merge_loses_a_pattern_its_partner_carries():
         if broken != twin and not set(broken_flags[broken]) - set(twin_flags[twin])
     ]
     assert unseparated == ["apply_price_updates"]
+
+
+def test_a_broken_step_that_went_quiet_is_not_counted_as_a_policy_downgrade(capsys):
+    """`reduction-order`'s price is a difference between two policies, not a fire count.
+
+    It was `gated < seen` under the lenient policy alone, so a broken step that
+    compared something in ten trials and fired in nine came out as a step the
+    policy had downgraded. On the committed run that step is
+    `apply_price_updates`, whose `MERGE` bug is intermittent and whose class is
+    `ROW_MISSING`, which `reduction-order` refuses to downgrade at all. The eval
+    printed 2 of the 4 broken steps still gating where three do, and explained
+    the missing one with a sentence about float-only drift.
+
+    The fixture's findings are all `row_missing`, so no downgrade is possible
+    here and the answer has to be all four however the rates move.
+    """
+    trials = [a_trial() for _ in range(9)] + [a_trial(fires={"apply_price_updates": 0})]
+
+    cost, downgraded = report_policy_cost(trials)
+
+    assert cost == {"gating_steps": 4, "gating_of": 4}
+    assert downgraded["apply_price_updates"]["gated_in"] == 9
+    printed = capsys.readouterr().out
+    assert "gates on 9 of 10 trials, against 9 of 10 under strict" in printed
+    assert "4 of the 4 broken steps still gate" in printed
 
 
 def test_baseline_one_counts_two_sides_against_a_total_that_can_hold_them(tmp_path):
