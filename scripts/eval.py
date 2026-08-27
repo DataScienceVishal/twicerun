@@ -59,6 +59,7 @@ from twicerun.manifest import Manifest
 from twicerun.measurement import StepMeasurement, name_classes
 from twicerun.policy import HEADROOM_REQUIRED, REDUCTION_ORDER, DriftBound, Policy, judge
 from twicerun.runner import amplify_runs, load_steps, run_pipeline, scored_runs
+from twicerun.tables import distribution, tally
 
 HERE = Path(__file__).resolve().parent.parent
 REFERENCE = HERE / "pipelines" / "reference.py"
@@ -273,35 +274,13 @@ class StepScore:
         return sum(n for rate, n in self.rates.items() if not rate.startswith("0 "))
 
     def distribution(self) -> str:
-        """Every possible rate with its count, highest first, zeros included.
+        """The terminal's copy of the README's cell, from `twicerun.tables`.
 
-        Ordered by the rate rather than by the count so the shape is readable
-        down a column and two steps compare line to line. `_render` is used
-        everywhere else here and orders by count, which is right for a set of
-        labels and wrong for a small integer support.
-
-        A step that gave the same rate every trial collapses to `0 of 4 on all
-        10`, which omits nothing: naming the trial count accounts for every
-        trial, so there is no bucket left for a reader to wonder about. Spelling
-        five buckets out to say a twin never fired put four x0 cells on every
-        line of the specificity table and buried the one number in it.
-
-        Rates out of a smaller denominator print as they stand, after the
-        buckets. The denominator used to be a single int overwritten by every
-        observation, and the buckets were keyed on it, so ten trials could print
-        as a distribution accounting for one of them beside `fired in 10 of 10`.
+        One implementation, because the two used to be separate and a rate that
+        read `4 of 4 x27, 3 x5, 2 x5, 1 x3` in one place and something else in
+        the other is the drift slice 7 is about, one layer below the tables.
         """
-        if not self.rates:
-            return "nothing compared"
-        if len(self.rates) == 1:
-            only, times = next(iter(self.rates.items()))
-            return f"{only} on all {times}"
-        of = self.comparisons
-        spelled = [f"{k} of {of} x{self.rates[f'{k} of {of}']}" for k in range(of, -1, -1)]
-        odd = [
-            f"{rate} x{n}" for rate, n in self.rates.items() if not rate.endswith(f" of {of}")
-        ]
-        return ", ".join(spelled + odd)
+        return distribution(self.rates, self.comparisons)
 
     def detail(self) -> str:
         """Class, cause, the threads=1 rate, and how far the step moved.
@@ -1563,9 +1542,7 @@ def _bound_words(bounds: dict[str, float]) -> str:
 
 
 def _render(counted: Counter) -> str:
-    if not counted:
-        return "nothing seen"
-    return ", ".join(f"{k} x{n}" if n > 1 else f"{k}" for k, n in counted.most_common())
+    return tally(counted)
 
 
 @dataclass(frozen=True)

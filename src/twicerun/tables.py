@@ -1,0 +1,513 @@
+"""The README's results tables, rendered from one committed copy of what the eval measured.
+
+Six times a figure in that file was published and then beaten by a longer run.
+Every correction was made in good faith and every one was retyped by hand from a
+terminal into a table, which is the step where a figure and the code that
+produced it come apart. So the tables are generated: `twicerun report` reads the
+JSON `scripts/eval.py --json` writes, renders the blocks between the markers in
+the README, and a test fails the build if the file on disk and the artifact
+disagree.
+
+What that buys is narrow and worth being exact about. It does not make a number
+right, and it does not make a ten-trial sample bigger than ten trials. It makes
+the README's tables a function of a file that was written by the measurement,
+so the only way to change one is to run the eval again and commit what came out.
+
+Two of the helpers here are also imported back by the eval. A fire-rate
+distribution and a tally of labels have to read identically in the terminal and
+in the table or the two disagree about the same run, which is the drift this
+module exists to stop, one layer down.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Iterable
+from pathlib import Path
+
+# What `twicerun report` will read. Bumped when a field changes meaning rather
+# than when one is added, since a generator that ignores an unknown key is fine
+# and one that misreads a known key is not.
+ARTIFACT_VERSION = 1
+
+OPEN = "<!-- twicerun: {name} -->"
+CLOSE = "<!-- /twicerun: {name} -->"
+
+
+class UnreadableArtifact(ValueError):
+    """The JSON is not an eval artifact this version knows how to render."""
+
+
+class MarkerError(ValueError):
+    """The markdown's generated blocks do not line up with the tables on offer."""
+
+
+def distribution(rates: dict[str, int], comparisons: int) -> str:
+    """Every rate the step took with its count, highest first, the zeros included.
+
+    Ordered by the rate rather than by the count, so the shape reads down a
+    column and two steps compare line to line.
+
+    A step that gave the same rate every trial collapses to `0 of 4 on all 10`,
+    which omits nothing: naming the trial count accounts for every trial. Where
+    the rate did move, every bucket prints, because an omitted bucket reads as
+    the value being impossible when it only means unobserved. That distinction
+    cost this project a published table: `4 of 4 x27, 3 x5, 2 x5, 1 x3` was
+    called complete, and a later run gave the same step a flat zero.
+
+    Rates out of a smaller denominator print after the buckets rather than being
+    folded into them, since a step that wrote nothing on one round of one trial
+    has a real rate out of a real denominator that is not this one.
+    """
+    if not rates:
+        return "nothing compared"
+    if len(rates) == 1:
+        only, times = next(iter(rates.items()))
+        return f"{only} on all {times}"
+    spelled = [
+        f"{k} of {comparisons} x{rates.get(f'{k} of {comparisons}', 0)}"
+        for k in range(comparisons, -1, -1)
+    ]
+    odd = [f"{rate} x{n}" for rate, n in rates.items() if not rate.endswith(f" of {comparisons}")]
+    return ", ".join(spelled + odd)
+
+
+def tally(counted: dict[str, int]) -> str:
+    """Labels with their counts, commonest first, and the count dropped where it is one.
+
+    Ties break on the label rather than on insertion order. `Counter.most_common`
+    breaks them on which trial happened to come first, which is fine on a screen
+    and not fine in a committed table: two runs with identical counts would
+    render two different files and the drift check would fail on the ordering.
+    """
+    if not counted:
+        return "nothing seen"
+    ordered = sorted(counted.items(), key=lambda pair: (-pair[1], pair[0]))
+    return ", ".join(f"{label} x{n}" if n > 1 else label for label, n in ordered)
+
+
+def load(where: Path) -> dict:
+    try:
+        artifact = json.loads(where.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise UnreadableArtifact(f"{where} is not JSON: {exc}") from exc
+    version = artifact.get("version")
+    if version != ARTIFACT_VERSION:
+        raise UnreadableArtifact(
+            f"{where} says version {version!r} and this build renders version "
+            f"{ARTIFACT_VERSION}. Re-run scripts/eval.py --json to write a current one."
+        )
+    return artifact
+
+
+def _plural(n: int, singular: str) -> str:
+    return f"{n} {singular}" if n == 1 else f"{n} {singular}s"
+
+
+def _code(token: str) -> str:
+    return f"`{token}`"
+
+
+def _codes(counted: dict[str, int]) -> str:
+    return tally({" ".join(_code(t) for t in label.split()): n for label, n in counted.items()})
+
+
+def _step_cell(step: dict) -> str:
+    return f"{step['index']} {_code(step['name'])}"
+
+
+def _rate_cell(step: dict) -> str:
+    return distribution(step["rates"], step["comparisons"])
+
+
+def _thousands(value: float | None) -> str:
+    return "none" if value is None else f"{value:,.0f}"
+
+
+def _moved(step: dict) -> str:
+    """Class, cause and how far the step moved, in the order a reader asks for them.
+
+    The row counts print against the hard maximum they came out of, because a
+    step comparing 500,000 rows cannot lose more than 500,000 of them and a
+    ceiling cannot be beaten. The ulp and relative figures are maxima over a
+    thousand groups, so they print as a median with an n and no bracket at all.
+    """
+    parts = []
+    if step["classes"]:
+        parts.append(_codes(step["classes"]))
+    if step["causes"]:
+        parts.append(f"cause {_codes(step['causes'])}")
+    if step["unmatched_median"]:
+        parts.append(
+            f"median {_thousands(step['unmatched_median'])} of the "
+            f"{_thousands(step['of_rows_median'])} reference rows found no partner"
+        )
+    elif step["extra_median"]:
+        parts.append(
+            f"median {_thousands(step['extra_median'])} extra rows against "
+            f"{_thousands(step['of_rows_median'])} reference rows"
+        )
+    if step["relative_median"] is not None:
+        parts.append(
+            f"median {step['ulps_median']:g} ulp and {step['relative_median']:.1e} relative, "
+            f"n={step['magnitudes_n']}"
+        )
+    return ", ".join(parts) or step["what"]
+
+
+def _table(header: Iterable[str], rows: Iterable[Iterable[str]]) -> list[str]:
+    columns = list(header)
+    return [
+        "| " + " | ".join(columns) + " |",
+        "|" + "---|" * len(columns),
+        *("| " + " | ".join(str(cell) for cell in row) + " |" for row in rows),
+    ]
+
+
+def _ordered(steps: list[dict]) -> list[dict]:
+    return sorted(steps, key=lambda step: (step["index"] is None, step["index"]))
+
+
+def provenance(artifact: dict) -> list[str]:
+    """What every figure below is specific to, which is four things and not one.
+
+    DuckDB pins the parallel behaviour, the thread count picks how the work gets
+    divided, the platform decides both, and the trial count is what any of these
+    rates is out of. A table missing one of them is not reproducible, so the
+    stamp is generated with the tables rather than typed above them.
+    """
+    where = artifact["environment"]
+    return [
+        f"Generated by `twicerun report` from `{artifact['source']}`, "
+        f"written {artifact['generated'][:10]} by "
+        f"`uv run python scripts/eval.py --trials {artifact['trials']} --json`.",
+        "",
+        f"DuckDB {where['duckdb']} at `threads={where['threads']}` on {where['platform']}. "
+        f"{_plural(artifact['trials'], 'trial')} of {artifact['runs']} runs, so "
+        f"{_plural(artifact['runs'] - 1, 'comparison')} per step per trial and "
+        f"{artifact['trials'] * (artifact['runs'] - 1)} in all. "
+        f"{artifact['seconds']:,.0f}s, a median {artifact['seconds_per_trial']:,.0f}s a trial.",
+    ]
+
+
+def results(artifact: dict) -> list[str]:
+    return _table(
+        [
+            "step",
+            f"fires under `strict`, {_plural(artifact['trials'], 'trial')}",
+            "at `threads=1`",
+            "under `reduction-order`",
+            "what the oracle called it, and how far it moved",
+        ],
+        [
+            [
+                _step_cell(step),
+                _rate_cell(step),
+                distribution(step["single_threaded"], step["comparisons"])
+                if step["single_threaded"]
+                else "not bisected, since it never fired",
+                distribution(step["reduction_order"]["rates"], step["comparisons"]),
+                _moved(step),
+            ]
+            for step in _ordered(artifact["steps"])
+        ],
+    )
+
+
+def specificity(artifact: dict) -> list[str]:
+    counted = artifact["twin_comparisons"]
+    quiet = sum(twin["silent_trials"] for twin in artifact["twins"])
+    lines = _table(
+        ["twin, one line of difference from its partner", "trials it fired in", "fire rate"],
+        [
+            [
+                _code(twin["name"]),
+                f"{twin['fired_in']} of {twin['trials']}",
+                distribution(twin["rates"], twin["comparisons"]),
+            ]
+            for twin in artifact["twins"]
+        ],
+    )
+    lines += [
+        "",
+        f"{counted['main_loop']} main-loop comparisons and {counted['amplified']} amplified "
+        f"ones on correct code, with {counted['declined']} amplifier attempts declining rather "
+        f"than passing.",
+    ]
+    if quiet:
+        lines.append(
+            f"{quiet} twin step-passes compared no artifact at all and are not counted as clean."
+        )
+    return lines
+
+
+def twin_coverage(artifact: dict) -> list[str]:
+    return _table(
+        ["amplifier", "twin step-passes it ran on", "comparisons", "fired", "raised"],
+        [
+            [
+                row["amplifier"],
+                f"{row['ran_on']} of {row['step_passes']}",
+                row["comparisons"],
+                row["fired"],
+                row["raised"],
+            ]
+            for row in artifact["twin_coverage"]
+        ],
+    )
+
+
+def amplification_gap(artifact: dict) -> list[str]:
+    return _table(
+        [
+            "",
+            "comparisons that fired",
+            "per-comparison rate",
+            "trials it found nothing on",
+            "trials it could not ask",
+        ],
+        [
+            [
+                row["source"],
+                f"{row['fired']} of {row['comparisons']}" if row["comparisons"] else "nothing",
+                f"{row['fired'] / row['comparisons']:.2f}" if row["comparisons"] else "none",
+                row["clean"],
+                row["compared_nothing"] + row["declined"],
+            ]
+            for row in artifact["forced_amplifiers"]
+        ],
+    )
+
+
+def containment(artifact: dict) -> list[str]:
+    ablation = artifact["baseline_3"]
+    return _table(
+        ["step", "contained", "uncontained"],
+        [
+            [
+                _step_cell(step),
+                _rate_cell(step),
+                distribution(step["uncontained"]["rates"], step["uncontained"]["comparisons"]),
+            ]
+            for step in _ordered(artifact["steps"])
+        ],
+    ) + [
+        "",
+        f"The append with no unique key reports {ablation['overstated']:,} extra rows "
+        f"uncontained against {ablation['contained_magnitude']:,} contained, which is four "
+        f"reruns' worth of duplication charged to one step against what one rerun of it does.",
+    ]
+
+
+def drift_bound(artifact: dict) -> list[str]:
+    """Observed drift against both readings of the derived bound, one column per float step.
+
+    Both readings, always. The check the spec pre-registered is the loose one and
+    the honest reading is the tight one, and on this pipeline they differ by
+    exactly the multiplier the check asks for. Printing only the reading that
+    clears would be the move the whole tolerance section argues against.
+    """
+    drifted = sorted(artifact["drift"], key=lambda row: row["index"])
+    if not drifted:
+        return ["No float step drifted in any trial, so the headroom check had nothing to run on."]
+    return _table(
+        ["", *(_code(row["step"]) for row in drifted)],
+        [[label, *cells] for label, cells in _drift_rows(drifted)],
+    )
+
+
+def _drift_rows(drifted: list[dict]) -> list[tuple[str, list[str]]]:
+    first = drifted[0]
+    return [
+        (
+            f"median furthest relative drift, n={first['step_passes']}",
+            [f"{row['observed_median']:.2g}" for row in drifted],
+        ),
+        (
+            f"bound at `n` = {first['terms']:,.0f} rows read",
+            [f"{row['bound_loose']:.3g}" for row in drifted],
+        ),
+        (
+            f"bound at `n` = {first['tight_terms']:,.0f} terms per output row",
+            [f"{row['bound_tight']:.3g}" for row in drifted],
+        ),
+        (
+            "headroom at the loose `n`, and how often it cleared 1,000x",
+            [
+                f"{row['loose_ratio_median']:,.0f}x, {row['loose_cleared']} of {row['step_passes']}"
+                for row in drifted
+            ],
+        ),
+        (
+            "headroom at the tight `n`, and how often it cleared 1,000x",
+            [
+                f"{row['tight_ratio_median']:,.0f}x, {row['tight_cleared']} of {row['step_passes']}"
+                for row in drifted
+            ],
+        ),
+    ]
+
+
+def conditions(artifact: dict) -> list[str]:
+    return _table(
+        ["condition, as written in the spec", "verdict", "what it came out as"],
+        [
+            [entry["condition"], f"**{entry['verdict']}**", entry["evidence"]]
+            for entry in artifact["conditions"]
+        ],
+    )
+
+
+def baselines(artifact: dict) -> list[str]:
+    naive = artifact["baseline_1"]
+    static = artifact["baseline_2"]
+    ablation = artifact["baseline_3"]
+    amplified = artifact["baseline_4"]
+    benign = next(step for step in artifact["steps"] if step["name"] == "mean_basket")
+    intermittent = next(
+        step for step in artifact["steps"] if step["name"] == "sparse_customer_keys"
+    )
+    downstream = next(step for step in artifact["steps"] if step["name"] == "roll_up_keys")
+    return _table(
+        ["baseline", "what it is", "what it gave"],
+        [
+            [
+                "1",
+                "two runs, bit-exact multiset equality, no tolerance and no classes. Rescored "
+                "from each trial's own runs 1 and 2, so it sees the same bytes under the same "
+                "containment",
+                f"fired on `mean_basket` in {naive['benign_fired']} of {naive['benign_trials']} "
+                f"trials, at a median {naive['benign_median']:,.0f} of the "
+                f"{naive['benign_rows_compared']:,.0f} rows compared failing to pair, on a step "
+                f"where nothing is wrong. {naive['benign_reference_side']:,.0f} of those are on "
+                f"the reference side and {naive['benign_later_side']:,.0f} on the later run's",
+            ],
+            [
+                "1, run-matched",
+                "the same comparison over all of the oracle's comparisons rather than one",
+                f"disagreed with the oracle's fire count on "
+                f"{naive['matched_disagreements']} of {naive['matched_cells']} step-trials, and "
+                f"fired on {naive['matched_twin_fires']} of {naive['matched_twin_passes']} twin "
+                f"step-passes",
+            ],
+            [
+                "2",
+                "four static patterns over the pipeline source, parsed per step",
+                f"separated {static['pairs_separated']} of the 5 matched pairs and flagged "
+                f"{static['false_positives']} step with no bug. It cannot separate the `MERGE` "
+                f"from its own fix",
+            ],
+            [
+                "3",
+                "the same oracle with `--no-containment`",
+                f"`roll_up_keys` fires on {ablation['falsely_divergent_trials']} of "
+                f"{ablation['downstream_trials']} trials uncontained, "
+                f"{downstream['fired_in']} of {downstream['trials']} contained. The append "
+                f"reports {ablation['overstated']:,} extra rows uncontained against "
+                f"{ablation['contained_magnitude']:,}",
+            ],
+            [
+                "4",
+                "the same measurements with the amplifiers dropped, scored through the tool's "
+                "own `exit_code`",
+                f"{amplified['false_negative_trials']} of {artifact['trials']} trials would "
+                f"exit 0 without them. Per comparison on `sparse_customer_keys` the loop ran "
+                f"{amplified['loop_rate']:.2f} against the best amplifier's "
+                f"{amplified['best_amplifier_rate']:.2f}",
+            ],
+        ],
+    ) + [
+        "",
+        f"The intermittent step is where the run count and the comparison method pull apart. "
+        f"The five-run loop caught `sparse_customer_keys` in {intermittent['fired_in']} of "
+        f"{intermittent['trials']} trials; the benign float step fired in "
+        f"{benign['fired_in']} of {benign['trials']} and is correct code.",
+    ]
+
+
+TABLES = {
+    "provenance": provenance,
+    "results": results,
+    "specificity": specificity,
+    "baselines": baselines,
+    "conditions": conditions,
+    "containment": containment,
+    "twin-coverage": twin_coverage,
+    "amplification-gap": amplification_gap,
+    "drift-bound": drift_bound,
+}
+
+
+def render(artifact: dict) -> dict[str, str]:
+    return {name: "\n".join(build(artifact)) for name, build in TABLES.items()}
+
+
+def blocks_in(markdown: str) -> dict[str, tuple[int, int]]:
+    """Where each generated block starts and ends, by line number, half-open.
+
+    Raises rather than skipping on a marker that opens and never closes. A
+    silently ignored block is a table that stops being regenerated and starts
+    being whatever it was the last time somebody edited it, which is the state
+    this whole command exists to leave behind.
+    """
+    lines = markdown.splitlines()
+    found: dict[str, tuple[int, int]] = {}
+    opened: tuple[str, int] | None = None
+    for n, line in enumerate(lines):
+        stripped = line.strip()
+        for name in TABLES:
+            if stripped == OPEN.format(name=name):
+                if opened is not None:
+                    raise MarkerError(
+                        f"line {n + 1} opens {name} while {opened[0]} is still open at "
+                        f"line {opened[1] + 1}"
+                    )
+                if name in found:
+                    raise MarkerError(
+                        f"{name} is opened twice, at lines {found[name][0]} and {n + 1}"
+                    )
+                opened = (name, n)
+            elif stripped == CLOSE.format(name=name):
+                if opened is None or opened[0] != name:
+                    raise MarkerError(f"line {n + 1} closes {name}, which is not open")
+                found[name] = (opened[1] + 1, n)
+                opened = None
+    if opened is not None:
+        raise MarkerError(f"{opened[0]} opens at line {opened[1] + 1} and never closes")
+    return found
+
+
+def rewrite(markdown: str, rendered: dict[str, str]) -> str:
+    """Replace the body of every generated block, refusing anything that does not line up.
+
+    Both directions are checked, and the second one is the point. A table the
+    markdown does not carry is a table that quietly stopped being published, and
+    a marker with no generator behind it is a block that will never be updated
+    again. `--key` and `--tolerance` have each already deleted one of this
+    project's own falsifiable checks by being permissive about something
+    adjacent, so this is strict in both directions and says which is missing.
+    """
+    found = blocks_in(markdown)
+    missing = sorted(set(rendered) - set(found))
+    unknown = sorted(set(found) - set(rendered))
+    if missing or unknown:
+        raise MarkerError(
+            "the markdown and the artifact do not carry the same tables. "
+            + (f"Missing from the markdown: {', '.join(missing)}. " if missing else "")
+            + (f"No generator for: {', '.join(unknown)}. " if unknown else "")
+            + "Add the marker pair, or delete the generator."
+        )
+    lines = markdown.splitlines()
+    for name, (start, end) in sorted(found.items(), key=lambda pair: -pair[1][0]):
+        lines[start:end] = rendered[name].splitlines()
+    return "\n".join(lines) + ("\n" if markdown.endswith("\n") else "")
+
+
+def drifted(markdown: str, rendered: dict[str, str]) -> list[str]:
+    """Which generated blocks in `markdown` are not what the artifact produces."""
+    lines = markdown.splitlines()
+    return [
+        name
+        for name, (start, end) in sorted(blocks_in(markdown).items())
+        if "\n".join(lines[start:end]) != rendered[name]
+    ]

@@ -11,6 +11,16 @@ from twicerun.policy import REDUCTION_ORDER, STRICT, Policy
 from twicerun.report import Report
 from twicerun.runner import PipelineError, UnknownArtifact, rejudge, run_pipeline
 from twicerun.storage import MissingArtifact
+from twicerun.tables import (
+    CLOSE,
+    OPEN,
+    MarkerError,
+    UnreadableArtifact,
+    drifted,
+    load,
+    render,
+    rewrite,
+)
 
 
 class KeySyntaxError(ValueError):
@@ -118,6 +128,47 @@ def _policy_from(args: argparse.Namespace) -> Policy:
     )
 
 
+def _report(args: argparse.Namespace) -> int:
+    """Render the README's tables from a committed artifact, or say what does not line up.
+
+    The whole argument for this command is that a number nobody retypes is a
+    number that cannot drift. So the failure it has to handle loudly is a
+    markdown file whose blocks and the artifact's tables disagree about which
+    tables exist, rather than a rendering error.
+    """
+    try:
+        artifact = load(args.artifact)
+    except (OSError, UnreadableArtifact) as exc:
+        print(f"twicerun: {exc}", file=sys.stderr)
+        return 2
+    artifact["source"] = str(args.artifact)
+    rendered = render(artifact)
+    if args.update is None:
+        # With the markers, so what comes out of the terminal is what goes into
+        # the file rather than something a reader has to wrap by hand.
+        print(
+            "\n\n".join(
+                f"{OPEN.format(name=name)}\n{block}\n{CLOSE.format(name=name)}"
+                for name, block in rendered.items()
+            )
+        )
+        return 0
+
+    try:
+        markdown = args.update.read_text(encoding="utf-8")
+        updated = rewrite(markdown, rendered)
+    except (OSError, MarkerError) as exc:
+        print(f"twicerun: {exc}", file=sys.stderr)
+        return 2
+    stale = drifted(markdown, rendered)
+    if not stale:
+        print(f"twicerun: {args.update} already matches {args.artifact}")
+        return 0
+    args.update.write_text(updated, encoding="utf-8")
+    print(f"twicerun: rewrote {len(stale)} block(s) in {args.update}: {', '.join(stale)}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="twicerun",
@@ -188,6 +239,32 @@ def build_parser() -> argparse.ArgumentParser:
         "them is judged",
     )
     _policy_flags(judge)
+
+    report = commands.add_parser(
+        "report",
+        help="render the results tables from a saved eval artifact, so nobody retypes one",
+    )
+    report.add_argument(
+        "artifact",
+        type=Path,
+        help="a JSON file written by scripts/eval.py --json",
+    )
+    report.add_argument(
+        "--format",
+        choices=["md"],
+        default="md",
+        help="markdown, which is what README.md consumes. There is no second consumer, and "
+        "the flag is here because the file it writes into is not the only thing a saved "
+        "artifact could reasonably be rendered as",
+    )
+    report.add_argument(
+        "--update",
+        type=Path,
+        metavar="FILE",
+        help="rewrite the marked blocks of a markdown file in place instead of printing "
+        "them. Refuses a file whose markers and the artifact's tables do not line up in "
+        "both directions, so a table cannot silently stop being published",
+    )
     return parser
 
 
@@ -251,6 +328,8 @@ def parse_keys(declared: list[str]) -> dict[str, tuple[str, ...]]:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "report":
+        return _report(args)
     if args.command == "judge":
         try:
             return _judge(args)
