@@ -149,7 +149,9 @@ def main(argv: list[str] | None = None) -> int:
     passes = "1 pass" if args.passes == 1 else f"{args.passes} passes"
     print(f"\n{step}, {passes}, DuckDB {where['duckdb']} "
           f"at threads={where['threads']} on {where['platform']}\n")
-    print(f"{'':<20} {'fired':>12}  {'rate':>5}  {'passes clean':>12}  compared nothing")
+    # "Could not ask" rather than "compared nothing", because the column holds
+    # both, and the README's rendering of the same figure has said so all along.
+    print(f"{'':<20} {'fired':>12}  {'rate':>5}  {'passes clean':>12}  could not ask")
     for row in rows:
         rate = f"{row['fired']} of {row['comparisons']}" if row["comparisons"] else "nothing"
         print(
@@ -157,6 +159,12 @@ def main(argv: list[str] | None = None) -> int:
             f"{row['fired'] / max(row['comparisons'], 1):>5.2f}  "
             f"{f'{row['clean']} of {row['scored']}':>12}  {row['unusable']}"
         )
+    raised = sum(1 for one in collected for a in one.values() if a.error)
+    if raised:
+        # The eval's baseline 4 prints this line for the same reason. An
+        # amplifier that fires once and then raises forty times has a rate off
+        # one comparison, and the rate column cannot show that on its own.
+        print(f"{raised} of the attempts above raised while running and count as unusable.")
 
     looked = [one for one in collected if one[LOOP].measured]
     missed = [one for one in looked if not one[LOOP].fired]

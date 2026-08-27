@@ -184,6 +184,24 @@ def test_a_step_that_fired_and_got_no_threads_one_rate_is_not_called_unbisected(
     assert "0 of 4 on all 10" in a_row("\n".join(results(bisected)), "daily_revenue")
 
 
+def test_the_threads_one_buckets_come_out_of_the_bisects_own_denominator(artifact):
+    """A cell headed threads=1 cannot enumerate the main loop's range.
+
+    The two are runs minus one either way and part company when the main loop
+    had a round that compared nothing, which lowers its measured denominator and
+    not the bisect's. This cell then listed buckets out of 3 and appended the
+    bisect's real `0 of 4` as an oddity beside them.
+    """
+    moved = deepcopy(artifact)
+    step = next(s for s in moved["steps"] if s["name"] == "daily_revenue")
+    step["single_threaded"] = {"0 of 4": 8, "4 of 4": 2}
+    step["comparisons"] = 3
+
+    cell = a_row("\n".join(results(moved)), "daily_revenue")
+    assert "0 of 4 x8" in cell and "4 of 4 x2" in cell
+    assert "of 3" not in cell, "the main loop's denominator has no business in this column"
+
+
 @pytest.mark.parametrize(
     ("table", "counted"),
     # Per step for the results table, so 3 of the 10 trials. Per twin step-pass

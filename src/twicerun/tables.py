@@ -291,6 +291,17 @@ def _silent_note(artifact: dict) -> list[str]:
     ]
 
 
+def _bisect_n(rates: dict[str, int]) -> int:
+    """The largest denominator the bisect's own rates were taken out of.
+
+    Read off the keys, which are `{fired} of {comparisons}` written by the eval
+    and split the same way `distribution` splits them. That is structure rather
+    than prose: the objection to parsing a rendered figure back apart is that the
+    figure is a sentence, and these are keys.
+    """
+    return max(int(rate.rsplit(" of ", 1)[1]) for rate in rates)
+
+
 def _threads_one(step: dict) -> str:
     """The single-threaded rate, or which of two reasons there is not one.
 
@@ -304,9 +315,16 @@ def _threads_one(step: dict) -> str:
 
     Which of the two failures it was needs the run's `bisect_error`, which the
     eval does not carry per step, so the cell names both rather than picking.
+
+    The buckets are enumerated over the bisect's own N, not the main loop's. Both
+    are runs minus one nominally, and they part when the main loop had a round
+    that compared nothing: this column then listed buckets out of 3 with the
+    bisect's real `0 of 4` appended as an oddity, in a cell headed threads=1.
+    `cause.py` opens on why two rates only belong in one sentence when they share
+    a denominator, and this is the same argument at the cell above.
     """
     if step["single_threaded"]:
-        return distribution(step["single_threaded"], step["comparisons"])
+        return distribution(step["single_threaded"], _bisect_n(step["single_threaded"]))
     if not step["fired_in"]:
         return "not bisected, since it never fired"
     return (
