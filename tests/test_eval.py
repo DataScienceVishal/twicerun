@@ -15,22 +15,11 @@ from __future__ import annotations
 
 import ast
 import re
-import sys
 from pathlib import Path
 
 import pytest
 
-from twicerun.amplify import DIVERGENT, STABLE_ON_THIS_INPUT, Amplification
-from twicerun.cause import Bisect
-from twicerun.measurement import StepMeasurement
-from twicerun.oracle import ArtifactFindings
-from twicerun.runner import run_pipeline
-
-EVAL = Path(__file__).resolve().parent.parent / "scripts" / "eval.py"
-
-sys.path.insert(0, str(EVAL.parent))
-
-from eval import (  # noqa: E402
+from eval import (
     BROKEN,
     INTERMITTENT,
     PAIRS,
@@ -44,6 +33,17 @@ from eval import (  # noqa: E402
     static_flags,
     without_amplifiers,
 )
+from twicerun.amplify import DIVERGENT, STABLE_ON_THIS_INPUT, Amplification
+from twicerun.cause import Bisect
+from twicerun.measurement import StepMeasurement
+from twicerun.oracle import ArtifactFindings
+from twicerun.runner import run_pipeline
+
+# The file itself, not the module, because three tests below parse it rather
+# than call it. Every printed word in the eval is checked against four
+# forbidden ones, and prose a helper composes at runtime is not a literal
+# anywhere, so the source is the only place the whole set is visible.
+EVAL = Path(__file__).resolve().parent.parent / "scripts" / "eval.py"
 
 # Fifty rows, every one of them a different id on the second run, so both sides
 # of the comparison lose all fifty.

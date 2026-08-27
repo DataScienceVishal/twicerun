@@ -33,10 +33,23 @@ packages = ["src/twicerun"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --disable-socket --allow-unix-socket"
+# scripts/ is not a package and must not become one: the README runs the eval as
+# `python scripts/eval.py`, which only works while the file is a file. So the
+# tests that check what it measures have to put the directory on sys.path. Eight
+# of them did it themselves, spelled four different ways, each one followed by
+# imports carrying `# noqa: E402` because they came after the statement.
+# test_check_fingerprint.py still does its own, and should: that test also runs
+# in the factory, where the script is its sibling rather than in ../scripts.
+pythonpath = ["scripts"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Every directory a module can be imported from, so the import sorter puts
+# `eval` and `trial_fixtures` next to `twicerun` rather than in among the pip
+# packages. Without scripts/ here they resolve to nothing and sort as
+# third-party, which reads as though the eval were something installed.
+src = ["src", "scripts", "tests"]
 
 [tool.ruff.lint]
 # BLE is here so the four deliberate blanket catches have to keep saying so.

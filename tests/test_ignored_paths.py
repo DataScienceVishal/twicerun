@@ -22,20 +22,16 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
+import amplification_gap
+import eval as eval_script
+import fetch_tlc
 from twicerun.cli import build_parser
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "scripts"))
-
-import amplification_gap  # noqa: E402
-import eval as eval_script  # noqa: E402
-import fetch_tlc  # noqa: E402
-
 GIT = shutil.which("git")
 
 

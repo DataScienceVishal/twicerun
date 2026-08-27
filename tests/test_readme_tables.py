@@ -72,9 +72,6 @@ def test_the_stamp_in_the_readme_names_the_artifact_it_came_from(markdown, artif
 
 def test_the_artifacts_were_written_by_the_current_pipelines(artifacts):
     """A stale artifact renders a table about steps the reference pipeline no longer has."""
-    import sys
-
-    sys.path.insert(0, str(ROOT / "scripts"))
     from eval import PAIRS, WHAT_EACH_STEP_IS  # noqa: PLC0415
 
     measured = {step["name"] for step in artifacts[EVAL]["steps"]}

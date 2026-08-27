@@ -14,17 +14,12 @@ fact about the writer that must not.
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 
 import pytest
 
+from eval import as_artifact, report_all
+from trial_fixtures import a_step, a_trial
 from twicerun.tables import ARTIFACT_VERSION, EVAL
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-
-from eval import as_artifact, report_all  # noqa: E402
-from trial_fixtures import a_step, a_trial  # noqa: E402
 
 WHERE = {"duckdb": "1.5.5", "threads": "10", "platform": "macOS-26.5.2-arm64-arm-64bit"}
 

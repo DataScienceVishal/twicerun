@@ -13,16 +13,10 @@ out of, so the tests for the two halves want the same fixtures.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
+from eval import BENIGN, INTERMITTENT, PAIRS, NaiveScore, Trial
 from twicerun.amplify import Amplification
 from twicerun.measurement import StepMeasurement
 from twicerun.oracle import ArtifactFindings
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-
-from eval import BENIGN, INTERMITTENT, PAIRS, NaiveScore, Trial  # noqa: E402
 
 # The reference pipeline's eight steps and what each one does on a healthy
 # laptop, so a fixture that departs from this is departing from something.

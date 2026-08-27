@@ -5,8 +5,8 @@ import shutil
 from pathlib import Path
 
 import pytest
-from test_statuses import BREAKS_ON_A_DUPLICATE_KEY, ONLY_ON_TIED_INPUT
 
+from test_statuses import BREAKS_ON_A_DUPLICATE_KEY, ONLY_ON_TIED_INPUT
 from twicerun import cli
 from twicerun.amplify import (
     AMPLIFICATION_FAILED,

@@ -21,15 +21,9 @@ anywhere.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
+from eval import PAIRS, WIDTH, Trial, report_all
+from trial_fixtures import a_step, a_trial
 from twicerun.amplify import STABLE_ON_THIS_INPUT
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-
-from eval import PAIRS, WIDTH, Trial, report_all  # noqa: E402
-from trial_fixtures import a_step, a_trial  # noqa: E402
 
 
 def verdicts(trials: list[Trial], seconds: float = 300.0) -> dict[str, str]:
