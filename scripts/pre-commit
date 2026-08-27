@@ -34,8 +34,8 @@ if ! "$python" scripts/check_fingerprint.py --staged; then
 Commit blocked. Fix the hits above.
 
 If one is genuinely wrong, add the ignore marker to that line, or add a new
-entry to the allowed-contexts block in BANNED.md when the false positive will
-keep recurring. Do not disable the hook.
+entry to the allowed-contexts block in scripts/BANNED.md when the false positive
+will keep recurring. Do not disable the hook.
 MSG
   exit 1
 fi

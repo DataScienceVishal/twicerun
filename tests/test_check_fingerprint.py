@@ -146,14 +146,21 @@ def test_finds_a_repo_local_banned_md_from_a_subdirectory(tmp_path):
 
     `find_banned_md` used to check `start / "BANNED.md"` once and then walk up
     for `_factory/BANNED.md` only. Called from `tests/`, it skipped the repo's
-    own root copy and kept climbing until it found the factory's copy outside
-    the repo. Green locally, 18 errors in every clone.
-    """
-    repo = tmp_path / "someproject"
-    (repo / "tests").mkdir(parents=True)
-    (repo / "BANNED.md").write_text("```banned-words\nrobust\n```\n", encoding="utf-8")
+    own copy and kept climbing until it found the shared one outside the repo.
+    Green locally, 18 errors in every clone.
 
-    assert fp.find_banned_md(repo / "tests") == repo / "BANNED.md"
+    Both places a repo can keep it, since this one moved from the root to
+    `scripts/` and the walk has to find either.
+    """
+    for where in ("scripts", ""):
+        repo = tmp_path / f"project-{where or 'root'}"
+        (repo / "tests").mkdir(parents=True)
+        holding = repo / where if where else repo
+        holding.mkdir(exist_ok=True)
+        listed = holding / "BANNED.md"
+        listed.write_text("```banned-words\nrobust\n```\n", encoding="utf-8")
+
+        assert fp.find_banned_md(repo / "tests") == listed
 
 
 def test_repo_local_banned_md_wins_over_a_factory_copy_further_up(tmp_path):
@@ -163,9 +170,12 @@ def test_repo_local_banned_md_wins_over_a_factory_copy_further_up(tmp_path):
     )
     repo = tmp_path / "someproject"
     (repo / "tests").mkdir(parents=True)
-    (repo / "BANNED.md").write_text("```banned-words\nrobust\n```\n", encoding="utf-8")
+    (repo / "scripts").mkdir()
+    (repo / "scripts" / "BANNED.md").write_text(
+        "```banned-words\nrobust\n```\n", encoding="utf-8"
+    )
 
-    assert fp.find_banned_md(repo / "tests") == repo / "BANNED.md"
+    assert fp.find_banned_md(repo / "tests") == repo / "scripts" / "BANNED.md"
 
 
 def test_falls_back_to_the_factory_when_the_repo_has_no_copy(tmp_path):

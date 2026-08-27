@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Fail a commit that contains the tells listed in BANNED.md.
+"""Fail a commit that uses a word, phrase or character the style list rules out.
+
+The list is `BANNED.md` beside this file, which also carries the punctuation
+rules and the exceptions.
 
 Two modes. `--staged` checks what git is about to commit, which is what the
 pre-commit hook uses. Passing paths (or nothing, meaning the whole tree) checks
@@ -31,7 +34,7 @@ SKIP_DIRS = {
     ".git", ".venv", "venv", "node_modules", "__pycache__",
     ".pytest_cache", ".ruff_cache", "dist", "build", ".mypy_cache",
 }
-# These two quote the banned list in order to define it.
+# These two quote the list in order to define it.
 SKIP_NAMES = {"BANNED.md", "CLAUDE.md"}
 
 # Built by concatenation on purpose. Spelling either marker out as one literal
@@ -72,7 +75,7 @@ class Finding:
 
 
 def parse_banned(md: Path) -> Rules:
-    """Pull the fenced blocks out of BANNED.md so the list has exactly one home."""
+    """Pull the fenced blocks out of the markdown so the list has exactly one home."""
     blocks: dict[str, list[str]] = {}
     current: str | None = None
     for raw in md.read_text(encoding="utf-8").splitlines():
@@ -107,18 +110,23 @@ def find_banned_md(start: Path) -> Path:
 
     The repo-local check has to happen at every level, not only at `start`. An
     earlier version checked `start / "BANNED.md"` once and then walked up looking
-    only for `_factory/BANNED.md`. Called from a repo's `tests/` directory that
-    meant the repo's own root-level copy was skipped, and on the author's machine
-    the walk found the factory's copy one directory above the repo instead. Tests
-    passed there and failed in every clone, which is the exact shape of bug the
-    adversary agent exists to catch.
+    only for `_factory/BANNED.md`, the shared copy that sits one directory above
+    this repo on the author's machine. Called from a repo's `tests/` directory
+    that skipped the repo's own copy and found the shared one instead, so the
+    suite passed here and failed with 18 errors in every clone.
     """
     for parent in [start, *start.parents]:
-        for candidate in (parent / "BANNED.md", parent / "_factory" / "BANNED.md"):
+        candidates = (
+            parent / "scripts" / "BANNED.md",
+            parent / "BANNED.md",
+            parent / "_factory" / "BANNED.md",
+        )
+        for candidate in candidates:
             if candidate.is_file():
                 return candidate
     raise SystemExit(
-        "check_fingerprint: no BANNED.md in this repo or in any _factory/ above it"
+        "check_fingerprint: no BANNED.md in this repo's scripts/ or root, "
+        "and none in any _factory/ above it"
     )
 
 
@@ -228,7 +236,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="*", type=Path)
     parser.add_argument("--staged", action="store_true", help="check the git index, not the tree")
-    parser.add_argument("--banned", type=Path, help="path to BANNED.md, otherwise discovered")
+    parser.add_argument(
+        "--banned", type=Path, help="path to the word list, otherwise discovered"
+    )
     args = parser.parse_args()
 
     root = Path.cwd()
