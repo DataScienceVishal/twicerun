@@ -90,8 +90,10 @@ class StepRecord:
     input_columns: list[str] = field(default_factory=list)
     # What the step pulled in through ctx.read. Amplification substitutes these
     # and nothing else: the artifacts written before a step are everything the
-    # pipeline has produced by then, and rewriting all of them to amplify one
-    # step that reads two of them is 205 MB of Parquet nobody asked for.
+    # pipeline has produced by then, 42 MB of Parquet on this pipeline, where
+    # `roll_up_keys` reads one 5 MB artifact out of that. Rewriting the lot per
+    # amplifier attempt is disk nobody asked for, and the figure here said
+    # 205 MB until someone measured a run directory.
     reads: list[str] = field(default_factory=list)
     # Names this step had to read from its own run because run 1 never wrote
     # them. Empty on every run of a pipeline whose steps write the same
