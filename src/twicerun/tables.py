@@ -119,21 +119,42 @@ def load(paths: Iterable[Path]) -> dict[str, dict]:
             raise UnreadableArtifact(
                 f"two {kind} artifacts given, {loaded[kind]['source']} and {where}"
             )
-        artifact["source"] = str(where)
+        # Relative to where the command was run, because this string is
+        # rendered into a committed file. An absolute path would put whoever
+        # ran it into the README and would differ between the person
+        # regenerating the tables and the test checking them.
+        artifact["source"] = str(_relative(where))
         loaded[kind] = artifact
     return loaded
 
 
-def _plural(n: int, singular: str) -> str:
-    return f"{n} {singular}" if n == 1 else f"{n} {singular}s"
+def _relative(where: Path) -> Path:
+    here = Path.cwd().resolve()
+    resolved = where.resolve()
+    return resolved.relative_to(here) if resolved.is_relative_to(here) else resolved
+
+
+def _plural(n: int, singular: str, plural: str | None = None) -> str:
+    return f"{n} {singular}" if n == 1 else f"{n} {plural or singular + 's'}"
 
 
 def _code(token: str) -> str:
     return f"`{token}`"
 
 
-def _codes(counted: dict[str, int]) -> str:
-    return tally({" ".join(_code(t) for t in label.split()): n for label, n in counted.items()})
+def _codes(counted: dict[str, int], of: int) -> str:
+    """Class or cause labels, with the count dropped where it held on every trial.
+
+    `VALUE_DRIFT x10` in a table whose every row is ten trials repeats the
+    header. `VALUE_DRIFT x8, SCHEMA x2` says the step changed its mind between
+    trials, which is the only thing the counts are here for.
+    """
+    ordered = sorted(counted.items(), key=lambda pair: (-pair[1], pair[0]))
+    spelled = []
+    for label, n in ordered:
+        marked = " ".join(_code(token) for token in label.split())
+        spelled.append(marked if n == of else f"{marked} x{n}")
+    return ", ".join(spelled)
 
 
 def _step_cell(step: dict) -> str:
@@ -144,8 +165,8 @@ def _rate_cell(step: dict) -> str:
     return distribution(step["rates"], step["comparisons"])
 
 
-def _thousands(value: float | None) -> str:
-    return "none" if value is None else f"{value:,.0f}"
+def _thousands(value: float) -> str:
+    return f"{value:,.0f}"
 
 
 def _moved(step: dict) -> str:
@@ -158,9 +179,9 @@ def _moved(step: dict) -> str:
     """
     parts = []
     if step["classes"]:
-        parts.append(_codes(step["classes"]))
+        parts.append(_codes(step["classes"], step["trials"]))
     if step["causes"]:
-        parts.append(f"cause {_codes(step['causes'])}")
+        parts.append(f"cause {_codes(step['causes'], step['trials'])}")
     if step["unmatched_median"]:
         parts.append(
             f"median {_thousands(step['unmatched_median'])} of the "
@@ -189,7 +210,8 @@ def _table(header: Iterable[str], rows: Iterable[Iterable[str]]) -> list[str]:
 
 
 def _ordered(steps: list[dict]) -> list[dict]:
-    return sorted(steps, key=lambda step: (step["index"] is None, step["index"]))
+    last = 1 << 30
+    return sorted(steps, key=lambda step: last if step["index"] is None else step["index"])
 
 
 def provenance(artifact: dict) -> list[str]:
@@ -434,7 +456,7 @@ def gap_provenance(artifact: dict) -> list[str]:
         f"{artifact['generated'][:10]} by "
         f"`uv run python scripts/amplification_gap.py {artifact['passes']} --json`. "
         f"DuckDB {where['duckdb']} at `threads={where['threads']}` on {where['platform']}, "
-        f"{_plural(artifact['passes'], 'pass')} over `{artifact['step']}`, "
+        f"{_plural(artifact['passes'], 'pass', 'passes')} over `{artifact['step']}`, "
         f"{artifact['seconds']:,.0f}s.",
     ]
 

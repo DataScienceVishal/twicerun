@@ -160,7 +160,8 @@ def _report(args: argparse.Namespace) -> int:
         return 2
     stale = drifted(markdown, rendered)
     if not stale:
-        print(f"twicerun: {args.update} already matches {args.artifact}")
+        named = ", ".join(str(one) for one in args.artifact)
+        print(f"twicerun: {args.update} already matches {named}")
         return 0
     args.update.write_text(updated, encoding="utf-8")
     print(f"twicerun: rewrote {len(stale)} block(s) in {args.update}: {', '.join(stale)}")

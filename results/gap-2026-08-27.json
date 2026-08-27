@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "kind": "amplification-gap",
+  "generated": "2026-08-27T01:22:17+00:00",
+  "environment": {
+    "duckdb": "1.5.5",
+    "threads": "10",
+    "platform": "macOS-26.5.2-arm64-arm-64bit"
+  },
+  "step": "sparse_customer_keys",
+  "passes": 40,
+  "seconds": 492.1487598749809,
+  "rows": [
+    {
+      "source": "the five-run loop",
+      "fired": 84,
+      "comparisons": 160,
+      "clean": 5,
+      "scored": 40,
+      "unusable": 0
+    },
+    {
+      "source": "tie collapse",
+      "fired": 149,
+      "comparisons": 160,
+      "clean": 0,
+      "scored": 40,
+      "unusable": 0
+    },
+    {
+      "source": "thread count",
+      "fired": 73,
+      "comparisons": 128,
+      "clean": 16,
+      "scored": 40,
+      "unusable": 0
+    },
+    {
+      "source": "row multiplication",
+      "fired": 137,
+      "comparisons": 156,
+      "clean": 2,
+      "scored": 40,
+      "unusable": 0
+    }
+  ],
+  "loop_looked": 40,
+  "loop_silent": 5,
+  "amplifier_caught": 5
+}
