@@ -278,7 +278,7 @@ def attribute(
     effects = []
     for column in considered:
         without = replace(columns, key=tuple(c for c in columns.key if c != column))
-        counted = con.execute(census_sql(without, left, right, ordered=False)).fetchone()
+        counted = con.execute(census_sql(without, left, right)).fetchone()
         missing, extra, mult_reference, mult_candidate, _ = (int(n) for n in counted)
         effects.append(
             KeyEffect(

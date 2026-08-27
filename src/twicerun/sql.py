@@ -145,9 +145,17 @@ def per_key_sql(columns: ColumnPlan) -> str:
      )"""
 
 
-def census_sql(columns: ColumnPlan, left: Path, right: Path, *, ordered: bool = True) -> str:
+def census_sql(columns: ColumnPlan, left: Path, right: Path) -> str:
+    """Row counts per key group and nothing else, which is all leave-one-out needs.
+
+    Unordered, and that is not a choice a caller gets: this exists for the
+    attribution pass, which drops one key column at a time and asks how many
+    rows failed to pair. `side_sql` explains why the sort is pure cost for that
+    question. The parameter was here to let a caller ask for the sort and the
+    one caller has always passed False.
+    """
     return (
-        f"{paired_sql(columns, left, right, ordered=ordered)},"
+        f"{paired_sql(columns, left, right, ordered=False)},"
         f"{per_key_sql(columns)}\n"
         f"SELECT{CENSUS_TOTALS}\nFROM per_key\n"
     )
