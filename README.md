@@ -510,6 +510,49 @@ No model calls either: no LLM adapter, no `openai` dependency, no `AZURE_OPENAI_
 
 </details>
 
+## How this was built
+
+Every number in this file that I typed instead of generating has been wrong at
+least once. Not carelessly: each one was correct when it was written and stopped
+being correct when a longer run replaced it. The count reached seven before I
+stopped counting and started generating.
+
+An agent pipeline wrote most of this code, and the commit trailers say so. The
+checks exist because of the seven, not because of the pipeline. But the pipeline
+is what made a slow mistake into a fast one, and it is why the answer had to be
+mechanical rather than more care.
+
+<details>
+<summary>Two of these checks were switched off and passing before I noticed</summary>
+
+Eleven tables here are rendered from two committed artifacts, so a figure in one
+cannot be a figure somebody retyped. That mechanism had a defect that survived
+almost to the end.
+
+**The regeneration check could be switched off one table at a time with a green
+build.** It scanned only for the marker names the generator already offered, so
+it compared a dictionary against a subset of itself and could never disagree.
+Delete a generator, leave its marker in the file, and the tool reported that
+everything already matched while the table froze at whatever it last said. It
+now refuses in both directions: a marker with no generator and a generator with
+no marker are each an error that names the block.
+
+**The stale-artifact test was anchored to the thing it was meant to catch.** It
+asserted against a dictionary built from the same source it was checking, so it
+would have passed whatever the pipeline did.
+
+The eval had its own version of this. Its policy-cost figure counted a step that
+failed to fire as a step the policy had downgraded, reported two where the answer
+was one, and then explained the extra one with a sentence about float drift in a
+step that counts rows. The number was wrong and the prose around it was
+confabulated to fit.
+
+None of that is an argument against building this way. It is the argument for
+the checks, and for the fold below listing what this file still does not
+regenerate, which is written down rather than left for a reader to find.
+
+</details>
+
 ## How it works
 
 The arguments behind the code, with the measurements that back them, are in [docs/comparison.md](docs/comparison.md) for the oracle and the derived tolerance, [docs/runs.md](docs/runs.md) for why five runs and what a pass costs, [docs/amplification.md](docs/amplification.md) for the three amplifiers, [docs/eval.md](docs/eval.md) for the trials and the baselines, and [docs/data.md](docs/data.md) for the fixture's bugs and the TLC licence position.
