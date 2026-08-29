@@ -201,9 +201,9 @@ def mean_basket(ctx: StepContext) -> None:
     pipeline gave the same answer twice and it did not. Under
     --policy reduction-order the count goes to zero and the magnitudes stay.
 
-    Since slice 3 that downgrade also has to show its mechanism: this step and
-    daily_revenue both gave 0 of 4 at threads=1 on all 20 contained passes,
-    which is the condition that used to be missing.
+    The downgrade is not allowed to stand on the divergence class alone, which
+    it was until the mechanism became a condition of it: this step and
+    daily_revenue both gave 0 of 4 at threads=1 on all 20 contained passes.
     """
     ctx.read("orders")
     ctx.write("mean_basket", "SELECT day, avg(amount) AS mean_amount FROM orders GROUP BY day")
@@ -221,8 +221,8 @@ def sparse_customer_keys(ctx: StepContext) -> None:
     machine and the same code, which is a reminder that a floor counted off 20
     samples is not a floor. Every pass where it fired gave 0 of 4 at threads=1.
 
-    That floor is the real argument for slice 4. Five runs are much better than
-    two, but they are not enough: on 5 invocations in 20 this step is broken,
+    That floor is the real argument for amplification. Five runs are much better
+    than two, but they are not enough: on 5 invocations in 20 this step is broken,
     the tool ran it five times, and the report said nothing. Raising the number
     of runs cannot fix that, because it lowers the miss rate for a given firing
     probability without changing the probability. Amplification changes the

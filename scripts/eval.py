@@ -201,15 +201,14 @@ class StepScore:
     out of four has five possible values, so every one of them gets a cell,
     including the ones that did not come up. The magnitudes are maxima over a
     thousand groups: their observed range grows with looking time by
-    construction, so they get a median and an n and no bracket. That method
-    changed in slice 4 after a published bracket was beaten for the fifth time.
+    construction, so they get a median and an n and no bracket. A bracket was
+    what they got until the fifth time a longer run beat a published one.
 
-    Printing the empty buckets is the refinement slice 5 forced, and it came out
-    of this eval disagreeing with itself. Slice 4 published this step's rates
-    over 40 passes as `4 of 4 x27, 3 x5, 2 x5, 1 x3` and called it complete
-    because a rate out of four cannot leave the range. Two ten-trial runs of the
-    eval then gave `apply_price_updates` a flat 0 of 4 in one and nothing below
-    1 of 4 in the other. Omitting a bucket that did not come up reads as the
+    Printing the empty buckets came out of this eval disagreeing with itself. A
+    40-pass run published `apply_price_updates` as `4 of 4 x27, 3 x5, 2 x5,
+    1 x3` and called it complete because a rate out of four cannot leave the
+    range. Two ten-trial runs of the eval then gave it a flat 0 of 4 in one and
+    nothing below 1 of 4 in the other. Omitting a bucket that did not come up reads as the
     value being impossible rather than unobserved, which is the same overclaim
     as a bracket in a different shape.
     """
@@ -284,7 +283,8 @@ class StepScore:
 
         One implementation, because the two used to be separate and a rate that
         read `4 of 4 x27, 3 x5, 2 x5, 1 x3` in one place and something else in
-        the other is the drift slice 7 is about, one layer below the tables.
+        the other is the drift the generated tables exist to stop, one layer
+        below the tables themselves.
         """
         return distribution(self.rates, self.comparisons)
 
@@ -311,9 +311,9 @@ class StepScore:
     def figures(self) -> dict:
         """The same counts `distribution()` and `detail()` render, before they become prose.
 
-        Slice 7 turned the README's tables into something generated from a
-        committed copy of this, so a figure in that file cannot be a figure
-        somebody retyped. The generator needs the counts and not the sentences:
+        The README's tables are rendered from a committed copy of this, so a
+        figure in that file cannot be a figure somebody retyped. The
+        generator needs the counts and not the sentences:
         parsing `median 491,520 of the 500,000 reference rows found no partner`
         back apart to put two numbers in two cells would be the retyping problem
         again with an extra step in it.
@@ -608,8 +608,8 @@ def environment() -> dict[str, str]:
 
     The spec asks for the DuckDB version, the thread count and the platform
     beside any figure quoted from this. They were printed and not written to
-    `--json`, so the file slice 7 reads to regenerate the README's tables had no
-    way to label them.
+    `--json`, so the artifact `twicerun report` reads to regenerate the README's
+    tables had no way to label them.
     """
     probe = duckdb.connect()
     threads = probe.execute("SELECT current_setting('threads')").fetchone()[0]
@@ -821,7 +821,7 @@ def report_baseline_one(trials: list[Trial], scored: dict[str, StepScore]) -> di
     )
     figures = {
         # The median of both sides added up, which is the figure the README has
-        # published since slice 5, now with the denominator it is out of.
+        # published all along, now with the denominator it is out of.
         # None rather than 0.0 where nothing compared, on `median_or_none`'s
         # argument: the benign step's whole role in this eval is that its zero
         # is a real measurement, so an absence dressed as one is the mistake
@@ -1003,7 +1003,7 @@ def report_baseline_three(
         say("  being a fact about the step rather than about how many times the tool ran.")
     else:
         say("  does, and the rate moved as well this time. This line asserted 4 of 4 either way")
-        say("  for two slices without deriving it from anything, which is why it prints both.")
+        say("  for two revisions without deriving it from anything, which is why it prints both.")
     return {
         "falsely_divergent_trials": falsely,
         # The denominator condition 4 is out of. Uncontained, this step reads a
@@ -1640,9 +1640,9 @@ def as_artifact(
 ) -> dict:
     """The whole run as one JSON document, which is what the README's tables are made of.
 
-    Slice 7's argument is that a number nobody retypes is a number that cannot
-    drift, and six corrections in this repository were all retyped figures. So
-    the file has to carry everything a table needs and label what the figures
+    The argument for generating the tables is that a number nobody retypes is a
+    number that cannot drift, and six corrections in this repository were all
+    retyped figures. So the file has to carry everything a table needs and label what the figures
     are specific to: DuckDB pins the parallel behaviour, the thread count picks
     how the work is divided, and the platform decides both.
 

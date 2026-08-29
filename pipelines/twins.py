@@ -4,12 +4,13 @@
 from a checker that is broken. This file is the other half of that pair, and it
 has two jobs.
 
-The first is the eval's specificity half, which slice 5 uses: a detector that
-fires on everything scores 50 percent against a matched set, so every twin here
-has to come out quiet.
+The first is the eval's specificity half: a detector that fires on everything
+scores 50 percent against a matched set, so every twin here has to come out
+quiet.
 
 The second is what makes amplification a detector rather than a chaos generator,
-and it is why this file arrives in slice 4 rather than slice 5. An amplifier
+and it is why the twins had to be written alongside the amplifiers rather than
+later, with the eval that scores them. An amplifier
 substitutes a step's input in order to raise the probability that a broken step
 fires. If it also makes correct code fire, it is measuring its own violence and
 the tool is worthless. So each amplifier is built so the fix survives it: tie
