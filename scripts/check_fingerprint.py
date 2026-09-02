@@ -105,29 +105,20 @@ def parse_banned(md: Path) -> Rules:
     )
 
 
-def find_banned_md(start: Path) -> Path:
-    """Nearest BANNED.md walking up, preferring a repo-local copy at each level.
+def find_word_list(start: Path) -> Path:
+    """The nearest word list, walking up from `start`.
 
-    The repo-local check has to happen at every level, not only at `start`. An
-    earlier version checked `start / "BANNED.md"` once and then walked up looking
-    only for `_factory/BANNED.md`, the shared copy that sits one directory above
-    this repo on the author's machine. Called from a repo's `tests/` directory
-    that skipped the repo's own copy and found the shared one instead, so the
-    suite passed here and failed with 18 errors in every clone.
+    The walk checks every level rather than only `start`. An earlier version
+    looked at `start` once and then climbed, so running it from `tests/` skipped
+    this repo's own copy and found one belonging to a different project higher up
+    the disk. The suite passed here and failed with 18 errors in every clone,
+    which is the kind of bug that only exists on the machine it was written on.
     """
     for parent in [start, *start.parents]:
-        candidates = (
-            parent / "scripts" / "BANNED.md",
-            parent / "BANNED.md",
-            parent / "_factory" / "BANNED.md",
-        )
-        for candidate in candidates:
+        for candidate in (parent / "scripts" / "BANNED.md", parent / "BANNED.md"):
             if candidate.is_file():
                 return candidate
-    raise SystemExit(
-        "check_fingerprint: no BANNED.md in this repo's scripts/ or root, "
-        "and none in any _factory/ above it"
-    )
+    raise SystemExit("check_fingerprint: no BANNED.md in this repo's scripts/ or root")
 
 
 def excused(text: str, rules: Rules) -> bool:
@@ -242,7 +233,7 @@ def main() -> int:
     args = parser.parse_args()
 
     root = Path.cwd()
-    rules = parse_banned(args.banned or find_banned_md(root))
+    rules = parse_banned(args.banned or find_word_list(root))
 
     if args.staged:
         candidates = staged_files(root)
