@@ -517,10 +517,10 @@ least once. Not carelessly: each one was correct when it was written and stopped
 being correct when a longer run replaced it. The count reached seven before I
 stopped counting and started generating.
 
-An agent pipeline wrote most of this code, and the commit trailers say so. The
-checks exist because of the seven, not because of the pipeline. But the pipeline
-is what made a slow mistake into a fast one, and it is why the answer had to be
-mechanical rather than more care.
+An agent pipeline wrote most of this code. The checks exist because of the
+seven, not because of the pipeline. But the pipeline is what made a slow mistake
+into a fast one, and it is why the answer had to be mechanical rather than more
+care.
 
 <details>
 <summary>Two of these checks were switched off and passing before I noticed</summary>
