@@ -214,9 +214,9 @@ def test_every_fire_rate_table_says_which_trials_it_is_not_out_of(table, counted
     """Four surfaces publish a fire rate and the README's first table was the one without this.
 
     Its header names ten trials and every cell in it read `4 of 4 on all 7`. The
-    terminal has printed the missing three under each step since slice 5 and the
-    specificity table below has printed a total, so the omission was in one of
-    four places rather than a decision.
+    terminal prints the missing three under each step and the specificity table
+    below prints a total, so the omission was in one of four places rather than
+    a decision.
 
     Both tables are checked in one test because the specificity note was
     unenforced too: deleting it left the whole suite green.

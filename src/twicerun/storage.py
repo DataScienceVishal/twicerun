@@ -19,8 +19,8 @@ single SELECT, so the escape hatch has to exist. What it costs is that anything
 `ctx.sql` scans is uncounted and anything it writes outside `ctx.write` is
 uncaptured. The reference pipeline uses it three times, all inside
 `apply_price_updates`, and that step's `rows_read` is short by at least 300,000
-as a result. Slice 2 consumed the number and kept it as it is; the manifest
-docstring says what that costs and in which direction.
+as a result. The reassociation bound consumed the number and kept it as it is;
+the manifest docstring says what that costs and in which direction.
 """
 
 from __future__ import annotations

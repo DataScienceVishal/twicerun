@@ -1,11 +1,11 @@
 """The README's tables against the artifacts they are supposed to be rendered from.
 
-This is the whole point of slice 7 expressed as a build failure. Six figures in
-that file have been published and then beaten by a longer run, and every one of
-the six was transcribed by hand out of a terminal. Transcription is removed as a
-way for a table to go false: edit a cell and this fails, change what the eval
-measures and this fails, and the only way to move a number is to run the
-measurement again and commit what came out.
+This is the whole point of generating those tables, expressed as a build
+failure. Six figures in that file have been published and then beaten by a
+longer run, and every one of the six was transcribed by hand out of a terminal.
+Transcription is removed as a way for a table to go false: edit a cell and this
+fails, change what the eval measures and this fails, and the only way to move a
+number is to run the measurement again and commit what came out.
 
 It runs in CI, offline, against committed JSON. It does not run the eval.
 """

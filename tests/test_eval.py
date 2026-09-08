@@ -124,10 +124,10 @@ def test_a_step_that_compared_something_is_counted():
 def test_every_rate_prints_with_its_denominator_and_the_empty_buckets_too():
     """A rate that never came up has to print as x0 rather than be left out.
 
-    Slice 4 published this step's 40-pass rates as `4 of 4 x27, 3 x5, 2 x5, 1 x3`
-    and called the cell complete on the grounds that a rate out of four cannot
-    leave the range. Two ten-trial runs of the eval then disagreed about whether
-    0 of 4 happens. An omitted bucket reads as impossible rather than
+    A 40-pass run published `apply_price_updates` as `4 of 4 x27, 3 x5, 2 x5,
+    1 x3` and called the cell complete on the grounds that a rate out of four
+    cannot leave the range. Two ten-trial runs of the eval then disagreed about
+    whether 0 of 4 happens. An omitted bucket reads as impossible rather than
     unobserved, so every bucket prints.
     """
     scored = StepScore("mixed")

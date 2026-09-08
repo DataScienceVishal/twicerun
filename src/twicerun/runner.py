@@ -2,12 +2,12 @@
 
 Run 1 is the reference and runs 2 to N are each compared against it, so a step
 gets `N - 1` comparisons and a fire rate of `k of m`. All-pairs clustering was
-the alternative and is rejected for a reason that only bites in slice 2:
-tolerant equality is not transitive, so "how many distinct answers" stops being
-well defined the moment any tolerance exists. A fixed reference gives a
-statistic that stays defined, and it is the one matching the question a user
-actually has, which is whether a fresh run agrees with the answer they already
-have.
+the alternative and is rejected for a reason that only bites once the comparison
+tolerates anything: tolerant equality is not transitive, so "how many distinct
+answers" stops being well defined the moment any tolerance exists. A fixed
+reference gives a statistic that stays defined, and it is the one matching the
+question a user actually has, which is whether a fresh run agrees with the
+answer they already have.
 
 Every run gets its own DuckDB connection rather than its own process. That was
 measured rather than assumed: the float divergence fires at full strength across
@@ -174,13 +174,14 @@ def prune_run_dirs(parent: Path, keep: int, current: Path | None = None) -> Rete
     pass needs two, and the report generator does not need any, since it renders
     from the JSON under results/ rather than from a run directory.
 
-    Two things here were wrong until a flaky test in slice 2 caught them, and
-    both come from `new_run_dir` reusing a name this function has freed. Names
-    carry a second-resolution timestamp, so once `run-100715` is deleted the
-    next invocation inside that second takes the name back. After that, name
-    order and creation order disagree: the newest directory on disk sorts first
-    and gets deleted next. That deleted the run that was starting, which then
-    recreated its own directory as it wrote, leaving `keep + 1` behind.
+    Two things here were wrong until a test that failed about one run in fifty
+    caught them, and both come from `new_run_dir` reusing a name this function
+    has freed. Names carry a second-resolution timestamp, so once `run-100715`
+    is deleted the next invocation inside that second takes the name back. After
+    that, name order and creation order disagree: the newest directory on disk
+    sorts first and gets deleted next. That deleted the run that was starting,
+    which then recreated its own directory as it wrote, leaving `keep + 1`
+    behind.
 
     So recency comes from mtime rather than from the name, and `current` is
     excluded from the candidates outright. It still counts toward `keep`, so

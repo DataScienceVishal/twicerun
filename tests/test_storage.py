@@ -167,8 +167,9 @@ def test_sql_lets_a_step_build_something_write_can_then_capture(con, tmp_path):
 def test_rows_read_does_not_see_anything_pulled_in_through_sql(con, tmp_path):
     """The documented hole in rows_read, asserted rather than left as a comment.
 
-    Slice 2's reassociation bound consumes this number, so the gap needs to be
-    visible in the suite rather than discovered by whoever writes that bound.
+    The reassociation bound in `policy.py` consumes this number, so the gap
+    needs to be visible in the suite rather than discovered by whoever writes
+    that bound.
     """
     ctx = context(con, tmp_path)
     ctx.sql("CREATE TABLE staged AS SELECT i FROM range(5000) AS s(i)")

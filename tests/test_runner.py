@@ -412,7 +412,7 @@ def test_pruning_leaves_anything_it_did_not_name_alone(tmp_path):
 
 
 def test_pruning_never_deletes_the_run_that_is_starting(tmp_path):
-    """The flake slice 2's suite turned up, made deterministic.
+    """The flake this file turned up, made deterministic.
 
     Names carry a second-resolution timestamp, so a name this function frees
     can be taken back by the next invocation inside the same second. The newest

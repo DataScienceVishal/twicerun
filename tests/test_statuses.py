@@ -115,7 +115,7 @@ def step_named(report, name: str):
 
 
 def test_a_step_quiet_on_its_own_input_and_loud_under_one_amplifier(tmp_path):
-    """The status slice 4 exists for, and the case a plain five-run loop calls clean.
+    """The case a plain five-run loop calls clean, which is the argument for amplifying at all.
 
     The step gives the same answer four times out of four on the input the
     pipeline handed it. Collapsing that input's key makes it disagree with

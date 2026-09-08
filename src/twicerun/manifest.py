@@ -5,9 +5,10 @@ count, so both are recorded next to the artifacts rather than left to whoever
 reads the report to remember.
 
 `StepRecord.rows_read` feeds the reassociation bound in `policy.py`, which is a
-function of the term count. Slice 1 recorded it and flagged two limits; slice 2
-is the consumer and had to decide what to do about them. It kept the number as
-it is, and here is what that costs in each direction.
+function of the term count. This file recorded it and flagged two limits before
+anything read it. The bound is the consumer that had to decide what to do about
+them, and it kept the number as it is. Here is what that costs in each
+direction.
 
 It is a lower bound on rows scanned, not a count of them. Only `ctx.read` and
 `ctx.state` add to it, so anything a step pulls in through `ctx.sql` is

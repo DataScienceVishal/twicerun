@@ -30,9 +30,10 @@ def verdicts(trials: list[Trial], seconds: float = 300.0) -> dict[str, str]:
     """Every report main() runs, through the same call main() makes.
 
     This used to list the reporters itself, in main()'s order, and that copy
-    went stale the moment a reporter had a second thing to hand back for slice
-    7's tables. Five of the guards in this file broke on a signature change that
-    could not affect any of them, which is a test measuring the wrong thing.
+    went stale the moment a reporter had a second thing to hand back for the
+    generated tables. Five of the guards in this file broke on a signature
+    change that could not affect any of them, which is a test measuring the
+    wrong thing.
     """
     checked = report_all(trials).conditions(seconds)
     return {condition: verdict for condition, verdict, _ in checked}
