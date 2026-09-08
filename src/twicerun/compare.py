@@ -5,12 +5,13 @@ of this project's spec proposed. Row order is not part of a pipeline's answer,
 so it hashes each row into a canonical digest, counts the digests on both sides,
 and reports how many rows one side has that the other does not.
 
-`oracle.py` replaced it as the tool's comparison in slice 2. It stays because
-the number it produces is the argument for the replacement: bit-exact is
-knowingly the wrong answer for a float, so `sum()` over a DOUBLE column that
-reassociates under parallelism arrives here as several hundred differing rows on
-arithmetic that is not wrong. Slice 5's eval runs it as baseline 1 and publishes
-that count next to the oracle's.
+`oracle.py` replaced it as the tool's comparison once rows were paired on a key
+and floats were measured rather than hashed. It stays because the number it
+produces is the argument for the replacement: bit-exact is knowingly the wrong
+answer for a float, so `sum()` over a DOUBLE column that reassociates under
+parallelism arrives here as several hundred differing rows on arithmetic that is
+not wrong. The eval runs it as baseline 1 and publishes that count next to the
+oracle's.
 
 The equivalent raw-DuckDB measurement is in `scripts/measure_duckdb.py`, so the
 claim can be checked in about two seconds without going through this code at all.

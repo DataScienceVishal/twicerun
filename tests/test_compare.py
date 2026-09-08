@@ -69,7 +69,7 @@ def test_negative_zero_is_not_zero(con, make_artifact):
 
 
 def test_one_ulp_of_drift_counts_as_divergence(con, make_artifact):
-    """The false positive this slice exists to produce, in its smallest form."""
+    """The false positive this baseline exists to produce, in its smallest form."""
     left = make_artifact("t", "SELECT (1.0)::DOUBLE AS v", run=1)
     right = make_artifact("t", "SELECT (1.0 + 2.220446049250313e-16)::DOUBLE AS v", run=2)
     assert compare(con, left, right).diverged is True

@@ -373,7 +373,7 @@ STEPS = [seed, average]
 
 
 def test_the_same_drift_exits_one_under_strict_and_zero_under_reduction_order(tmp_path, capsys):
-    """The slice's deliverable, in one pair of invocations.
+    """What a policy is allowed to change, in one pair of invocations.
 
     A float that moved by one ulp on a step that read 100 rows. Under the
     default that is a divergence, because the question asked was whether the
@@ -415,7 +415,7 @@ def test_the_step_line_names_which_route_downgraded_it(tmp_path, capsys):
 
 
 def test_a_downgrade_rests_on_a_measured_rate_rather_than_on_a_disclosure(tmp_path, capsys):
-    """What slice 3 changed about a TOLERATED, in the one report that shows it.
+    """What the threads=1 bisect changed about a TOLERATED, in the one report that shows it.
 
     Every header that downgraded anything used to carry a note saying condition
     2 of 3 was not implemented. It is now, so the note is gone and the evidence
@@ -597,7 +597,7 @@ def status_column(printed: str) -> list[str | None]:
 
 
 def test_the_status_column_does_not_move_when_the_policy_does(tmp_path, capsys):
-    """The rule the fire rate already follows, extended to the thing slice 4 added.
+    """The rule the fire rate already follows, extended to the status column.
 
     A policy decides whether a difference matters. Letting it decide whether one
     happened would put the status in the same negotiable pile as everything a

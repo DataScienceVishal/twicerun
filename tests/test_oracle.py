@@ -146,7 +146,7 @@ def test_an_all_float_artifact_pairs_by_sorted_order(con, make_artifact):
 
 
 def test_one_ulp_of_drift_is_measured_not_hidden(con, make_artifact):
-    """The false positive slice 1 produced, now carrying its size.
+    """The false positive the bit-exact baseline produces, now carrying its size.
 
     Nothing is tolerated here. The oracle measures; the policy layer decides.
     """

@@ -1,9 +1,8 @@
 """What `scripts/eval.py --json` has to carry for the README's tables to come out of it.
 
-Slice 7 made every results table in the README a rendering of one committed
-copy of this file, so anything missing from it becomes a number somebody has to
-retype, and retyping is the failure mode this project has been caught by six
-times.
+Every results table in the README is a rendering of one committed copy of this
+file, so anything missing from it becomes a number somebody has to retype, and
+retyping is the failure mode this project has been caught by six times.
 
 These assertions are about the artifact and not about the figures in it. Whether
 `daily_revenue` fired four times out of four is a fact about DuckDB that moves

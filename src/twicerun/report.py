@@ -399,7 +399,7 @@ class Report:
         ]
 
     def _stable_on_this_input(self, steps: list[StepMeasurement]) -> list[str]:
-        """The status the whole slice exists for, and the one most able to overclaim.
+        """The status amplification exists to produce, and the one most able to overclaim.
 
         It has to mean that the step did not fire under these specific stresses,
         which are named on the lines above it. It must never be read as the step

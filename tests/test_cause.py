@@ -279,8 +279,8 @@ def test_a_bisect_that_compared_no_artifacts_gets_no_label(tmp_path):
 
     Four comparisons of nothing sum to `0 of 4` because `any([])` is False, and
     the step printed PARALLEL_ORDER over nothing compared against nothing. The
-    main loop says "wrote no artifacts, so nothing was compared" in that
-    situation and has since slice 1.
+    main loop has said "wrote no artifacts, so nothing was compared" in that
+    situation since long before the bisect existed.
     """
     report, _ = run_pipeline(
         write_pipeline(tmp_path, GUARDS_AGAINST_A_MISSING_TABLE),

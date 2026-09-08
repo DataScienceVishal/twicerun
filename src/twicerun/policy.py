@@ -345,7 +345,7 @@ def _bound_refusal(
 
 
 def _no_mechanism(step: StepMeasurement) -> str:
-    """Condition 2 refusing, which is the condition that only started existing in slice 3.
+    """Condition 2 refusing, and it is the only one of the three needing a second execution.
 
     Two ways to fail it and they are different findings. A step that still
     moves at threads=1 has drift the reassociation story does not explain, so
