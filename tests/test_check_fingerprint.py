@@ -114,6 +114,19 @@ def test_unparseable_python_still_gets_checked(tmp_path, rules):
     assert "robust" in kinds(found)
 
 
+def test_a_file_that_cannot_be_decoded_is_reported_rather_than_counted_as_clean(tmp_path, rules):
+    """Regression: the read used to return [], which reads as "checked, clean".
+
+    A checker that exits 0 over a file it never opened is the failure mode this
+    whole repo is about, one level up from the pipelines it grades.
+    """
+    undecodable = tmp_path / "wrong-encoding.md"
+    undecodable.write_bytes(b"\xff\xfe\x00\x01 robust and seamless\n")
+
+    found = fp.check_file(undecodable, rules)
+    assert "unreadable" in kinds(found)
+
+
 def test_allowed_context_suppresses_the_hit(tmp_path, rules):
     assert scan(tmp_path, "a.md", "The eval harness reports F1.\n", rules) == []
 

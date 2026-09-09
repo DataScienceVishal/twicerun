@@ -168,8 +168,13 @@ def word_targets(path: Path, source: str) -> list[tuple[int, str]]:
 def check_file(path: Path, rules: Rules) -> list[Finding]:
     try:
         source = path.read_text(encoding="utf-8")
-    except (UnicodeDecodeError, OSError):
-        return []
+    except (UnicodeDecodeError, OSError) as exc:
+        # An empty list is how this function says "opened it, nothing in it",
+        # so returning one here puts the file in the "clean across N file(s)"
+        # count and exits 0 over text nobody read. `python_segments` refuses to
+        # pass a file it cannot tokenize for the same reason, and the two
+        # answers have to agree.
+        return [Finding(path, 1, f"unreadable: {type(exc).__name__}", str(exc)[:120])]
     if DISABLE_FILE_MARKER in source:
         return []
 
