@@ -221,6 +221,25 @@ def walk(root: Path) -> list[Path]:
     ]
 
 
+def working_tree(start: Path) -> Path:
+    """The top of the repository, which is what the word list applies to.
+
+    With `Path.cwd()` as the root, `uv run python ../scripts/check_fingerprint.py`
+    from `tests/` checked 25 files, printed the clean line and exited 0. The
+    whole-tree run checks 59, so 34 files went unopened and the verdict still
+    read as a pass. `scripts/pre-commit` resolves the root with this same
+    command before it does anything else, which is why the hook never had the
+    problem and a run by hand did. Outside a repository there is nothing above
+    `start` to find, and `start` is the answer.
+    """
+    top = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], cwd=start, capture_output=True, text=True
+    )
+    if top.returncode != 0:
+        return start
+    return Path(top.stdout.strip())
+
+
 def interesting(path: Path) -> bool:
     if path.name in SKIP_NAMES:
         return False
@@ -237,7 +256,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    root = Path.cwd()
+    root = working_tree(Path.cwd())
     rules = parse_banned(args.banned or find_word_list(root))
 
     if args.staged:
