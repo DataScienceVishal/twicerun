@@ -8,6 +8,7 @@ testing for, so scanning it would report every fixture as a violation.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -192,6 +193,44 @@ def test_no_list_anywhere_is_an_error_rather_than_an_empty_rule_set(tmp_path):
     """An empty rule set would pass every file, which is worse than failing."""
     with pytest.raises(SystemExit):
         fp.find_word_list(tmp_path)
+
+def test_the_scan_starts_at_the_repo_top_and_not_at_the_directory_you_ran_from(tmp_path):
+    """Regression: run from tests/, the scan covered 25 of this repo's 59 files.
+
+    It reported clean on the subset and exited 0, so the directory you happened
+    to be standing in decided how much of the tree got a verdict.
+    """
+    repo = tmp_path / "somewhere"
+    (repo / "tests").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+
+    assert fp.working_tree(repo / "tests") == repo.resolve()
+
+
+def test_a_run_from_a_subdirectory_fails_on_a_file_above_it(tmp_path, monkeypatch):
+    """The two tests either side of this one pass with `working_tree` unwired.
+
+    They only hold that the function returns the right path. This one calls
+    `main` from a subdirectory of a repo whose one offence sits at the root,
+    which is the arrangement that exited 0 before.
+    """
+    repo = tmp_path / "somewhere"
+    (repo / "scripts").mkdir(parents=True)
+    (repo / "tests").mkdir()
+    (repo / "scripts" / "BANNED.md").write_text("```banned-words\nrobust\n```\n", encoding="utf-8")
+    (repo / "README.md").write_text("A robust design.\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+
+    monkeypatch.chdir(repo / "tests")
+    monkeypatch.setattr(sys, "argv", ["check_fingerprint.py"])
+
+    assert fp.main() == 1
+
+
+def test_outside_a_repo_the_scan_starts_where_it_was_asked_to(tmp_path):
+    """`git rev-parse` fails here, and a loose directory is still worth checking."""
+    assert fp.working_tree(tmp_path) == tmp_path
+
 
 def test_banned_and_claude_md_are_skipped_by_name():
     assert not fp.interesting(Path("BANNED.md"))
