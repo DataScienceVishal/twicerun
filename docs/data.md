@@ -28,10 +28,10 @@ because an amplifier that made those twins fire would be a chaos generator rathe
 
 Two of the eight steps are constructed rather than observed, and both say so where they are defined:
 the `MERGE` bug, and `roll_up_keys`, which exists to be fed a diverging artifact. Three of the four
-bugs are failures Vishal has actually been bitten by running Databricks pipelines and SQL
-migrations: duplicate rows after a retry, IDs changing between runs, and totals not matching between
-runs. The fourth, the non-idempotent `MERGE`, is not a war story. It came out of an experiment for
-this project and he has never seen it. Its distinction is how narrow its window turned out to be: it
+bugs are failures I have actually been bitten by running Databricks pipelines and SQL migrations:
+duplicate rows after a retry, IDs changing between runs, and totals not matching between runs. The
+fourth, the non-idempotent `MERGE`, is not a war story. It came out of an experiment for this
+project and I have never seen it. Its distinction is how narrow its window turned out to be: it
 needs a target somewhere around 100,000 to 125,000 rows, a source staged into a real table and
 `BIGINT` columns, and at 50,000 rows and again at 200,000 it gives the same answer every time.
 
