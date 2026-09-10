@@ -148,7 +148,7 @@ Step 4 is the one to read twice. `cause PERSISTS_SINGLE_THREADED` next to `4 of 
 
 Step 6 is the one to read three times. It is broken, it gave the same answer four times out of four on the input it was handed, and a five-run loop that stopped there would have printed a clean zero. `STABLE_ON_THIS_INPUT` is what the tool prints instead, and the amplification block above it names the stress that made it disagree with itself. Step 3 does the same thing on other passes; on this one the loop caught it at 2 of 4.
 
-**Your numbers will not match that transcript, and neither will mine on the next run.** This is a tool about non-determinism and its own output is non-deterministic, so quoting any single figure as fixed would be the wrong thing to do twice over.
+Your numbers will not match that transcript, and neither will mine on the next run. This is a tool about non-determinism and its own output is non-deterministic, so quoting any single figure as fixed would be the wrong thing to do twice over.
 
 </details>
 
@@ -180,7 +180,7 @@ DuckDB 1.5.5 at `threads=10` on macOS-26.5.2-arm64-arm-64bit. 10 trials of 5 run
 
 Ten trials is fewer than the forty passes an earlier version of this table published, and that is the price. What it buys is the table being a function of a measurement rather than of a transcription, so running the eval again and committing what came out is the only way to move a cell.
 
-**The ulp counts and the relative drift are maxima**, over 1,000 groups times four comparisons, so their observed range grows with how long anyone looks and a bracket on either can always be beaten by looking longer. That bracket is the one promise this file has already broken four times, so the maxima carry a median and a sample size and nothing else. The quantities with a real ceiling carry the ceiling instead: a step comparing 500,000 rows cannot lose more than 500,000 of them, and a fire rate out of four has five possible values, so the whole distribution fits in the cell.
+The ulp counts and the relative drift are maxima, over 1,000 groups times four comparisons, so their observed range grows with how long anyone looks and a bracket on either can always be beaten by looking longer. That bracket is the one promise this file has already broken four times, so the maxima carry a median and a sample size and nothing else. The quantities with a real ceiling carry the ceiling instead: a step comparing 500,000 rows cannot lose more than 500,000 of them, and a fire rate out of four has five possible values, so the whole distribution fits in the cell.
 
 <!-- twicerun: results -->
 | step | fires under `strict`, 10 trials | at `threads=1` | under `reduction-order` | what the oracle called it, and how far it moved |
@@ -220,7 +220,7 @@ Four baselines, implemented rather than named:
 The intermittent step is where the run count and the comparison method pull apart. The five-run loop caught `sparse_customer_keys` in 8 of 10 trials; the benign float step fired in 10 of 10 and is correct code.
 <!-- /twicerun: baselines -->
 
-**Baseline 1 was handed one comparison and the oracle four, and that is most of the gap between them.** The run-matched row is the control that was missing: same runs, same bytes, same containment, and nothing but multiset equality over row hashes. It agrees with the oracle on every cell of the sensitivity table and fires on no twin, so **the sensitivity and specificity tables hold no evidence for the oracle over the cheap comparison**. What the oracle produces that multiset equality cannot is the divergence class, the ulp and relative magnitudes, the attributed column, the derived bound and the single-threaded cause, and none of those five is scored in either table. Baseline 2 catches four of the five matched pairs, which is more than the spec predicted, and [docs/eval.md](docs/eval.md) has the three things it still cannot do.
+Baseline 1 was handed one comparison and the oracle four, and that is most of the gap between them. The run-matched row is the control that was missing: same runs, same bytes, same containment, and nothing but multiset equality over row hashes. It agrees with the oracle on every cell of the sensitivity table and fires on no twin, so **the sensitivity and specificity tables hold no evidence for the oracle over the cheap comparison**. What the oracle produces that multiset equality cannot is the divergence class, the ulp and relative magnitudes, the attributed column, the derived bound and the single-threaded cause, and none of those five is scored in either table. Baseline 2 catches four of the five matched pairs, which is more than the spec predicted, and [docs/eval.md](docs/eval.md) has the three things it still cannot do.
 
 Eight conditions were pre-registered in the spec, each one a way for a piece of this project to turn out unnecessary:
 
@@ -237,7 +237,7 @@ Eight conditions were pre-registered in the spec, each one a way for a piece of 
 | the whole eval took longer than 10 minutes, which is the spec's ten at the ten trials it fixed | **not triggered** | 502s over 10 trials, 50s each |
 <!-- /twicerun: conditions -->
 
-**The committed run triggers the sensitivity condition, and it is the second of six ten-trial runs to do so.** The step is `apply_price_updates` and the shortfall is one trial. Nothing was changed in response, because the threshold was pre-registered and the eval exits 0 on a triggered condition by design. What the condition cannot distinguish is the detector missing a divergence from the fixture not producing one, and on this step the fixture is intermittent: the `MERGE` bug needs a target between roughly 100,000 and 125,000 rows and a source that happens to carry a repeated key.
+The committed run triggers the sensitivity condition, and it is the second of six ten-trial runs to do so. The step is `apply_price_updates` and the shortfall is one trial. Nothing was changed in response, because the threshold was pre-registered and the eval exits 0 on a triggered condition by design. What the condition cannot distinguish is the detector missing a divergence from the fixture not producing one, and on this step the fixture is intermittent: the `MERGE` bug needs a target between roughly 100,000 and 125,000 rows and a source that happens to carry a repeated key.
 
 Three of the eight used to be readable off an absence rather than off a measurement. A step that writes no artifact compares nothing, fires on none of the nothing it compared, and arrives at the conditions as a clean zero, which then prints TRIGGERED and declares a piece of this project unnecessary. Seven of the eight carry a third verdict now, `NOT MEASURED`, and the eighth is the wall clock, which is measured whatever the pipeline did.
 
@@ -271,7 +271,7 @@ Two things that denominator contains are worth naming. One of the six pairs is `
 | row multiplication | 50 of 60 | 100 | 0 | 0 |
 <!-- /twicerun: twin-coverage -->
 
-**The first column is the honest part of that table.** Tie collapse declines most of its chances and the report says why each time rather than printing a zero: `orders.day` and `customers.cust` already hold 2,000 and 500 rows per value, at or past what the amplifier targets, and `generate_inputs` reads no artifact at all. A twin an amplifier never touched is not evidence that the amplifier is safe on it.
+The first column is the honest part of that table. Tie collapse declines most of its chances and the report says why each time rather than printing a zero: `orders.day` and `customers.cust` already hold 2,000 and 500 rows per value, at or past what the amplifier targets, and `generate_inputs` reads no artifact at all. A twin an amplifier never touched is not evidence that the amplifier is safe on it.
 
 </details>
 
@@ -353,7 +353,7 @@ For each key column, drop it and recount what failed to pair. On `customer_keys`
 Leave-one-out named the column the step invented, rather than one it copied in, on 27 of 27 attributions. 18 of those 27 had two columns leaving the same count behind, so the counts chose nothing and the tie-break chose.
 <!-- /twicerun: attribution -->
 
-**Two thirds of that is a sort key scored against itself.** On both `row_number` steps, dropping `surrogate_id` and dropping `event_id` each take the unmatched count to zero, because the two columns are a bijection whose pairing moved, so the counts choose nothing and the `(remaining, from_input, column)` tie-break chooses. Preferring the column the step invented is right, and `tests/test_oracle.py::test_a_tie_goes_to_the_column_the_step_invented` asserts it as a unit test; re-scoring it ten times a run and calling the result an accuracy figure is not. `apply_price_updates` is the one step where the counts do the work.
+Two thirds of that is a sort key scored against itself. On both `row_number` steps, dropping `surrogate_id` and dropping `event_id` each take the unmatched count to zero, because the two columns are a bijection whose pairing moved, so the counts choose nothing and the `(remaining, from_input, column)` tie-break chooses. Preferring the column the step invented is right, and `tests/test_oracle.py::test_a_tie_goes_to_the_column_the_step_invented` asserts it as a unit test; re-scoring it ten times a run and calling the result an accuracy figure is not. `apply_price_updates` is the one step where the counts do the work.
 
 </details>
 
@@ -386,7 +386,7 @@ The two are the leave-one-out attribution rate and the pre-registered drift boun
 <details>
 <summary>Only pipelines written against `ctx.read` and `ctx.write` get tested at all</summary>
 
-**twicerun only tests pipelines written against its storage interface.** It does not test arbitrary pipelines.
+twicerun only tests pipelines written against its storage interface. It does not test arbitrary pipelines.
 
 Watching a pipeline's writes without its cooperation needs either a kernel block-layer wrapper or system-call interception. Both are out of budget and both are worse on macOS. What is left is an interface the pipeline reads and writes through, which is portable, needs no root, and only sees pipelines that opted in.
 
@@ -397,7 +397,7 @@ What that buys back is why it is a design choice rather than a workaround. One a
 <details>
 <summary>Everything else it gets wrong, from row pairing that can only understate a difference to six figures in this file that a longer run beat</summary>
 
-**Sorting to pair rows inside a key group is a heuristic once there is more than one float column.** The ordinal sorts both sides the same way, and for a single float column sorted-to-sorted pairing is the assignment that minimises total absolute difference, so it is optimal. With several, a lexicographic sort can pair the wrong two rows inside one key group. That can only understate a difference, so the failure mode is a bounded false negative confined to within-key-group permutations of float-only differences.
+Sorting to pair rows inside a key group is a heuristic once there is more than one float column. The ordinal sorts both sides the same way, and for a single float column sorted-to-sorted pairing is the assignment that minimises total absolute difference, so it is optimal. With several, a lexicographic sort can pair the wrong two rows inside one key group. That can only understate a difference, so the failure mode is a bounded false negative confined to within-key-group permutations of float-only differences.
 
 A key group with no exact columns is one big group. If every column is a float, there is no key, the whole artifact sorts as one group and rows pair by order alone. It is the weakest case here and it is where the heuristic above does the most work, so the report says `matched on no key` when it happens rather than leaving it to be inferred.
 
@@ -415,9 +415,9 @@ An amplifier only sees a step's `ctx.read` inputs. State pulled in through `ctx.
 
 Three amplifiers is three, and there is no argument that they are the right three. Each is aimed at a bug that was measured here. A pipeline whose non-determinism comes from a clock read, a hash seed, a file listing order or a network response gets nothing from any of them, and the not-varied list is where the report admits it.
 
-**A committed artifact is a measurement of one laptop.** DuckDB 1.5.5, ten threads, macOS on Apple silicon. The stamp above every table says so, and nothing here calibrates against a second machine or a second DuckDB, which every report's not-varied list says as well.
+A committed artifact is a measurement of one laptop. DuckDB 1.5.5, ten threads, macOS on Apple silicon. The stamp above every table says so, and nothing here calibrates against a second machine or a second DuckDB, which every report's not-varied list says as well.
 
-**Six figures published in this file were beaten by a longer run, and every one of the six was a number retyped out of a terminal into a table.** A read-through on 2026-08-27 found eight more of the same class in comments and docstrings, where no generator can reach. That is why the tables above are rendered from a committed measurement instead of typed, which removes transcription as a way for a cell to go false and does nothing whatever about ten trials being ten trials.
+Six figures published in this file were beaten by a longer run, and every one of the six was a number retyped out of a terminal into a table. A read-through on 2026-08-27 found eight more of the same class in comments and docstrings, where no generator can reach. That is why the tables above are rendered from a committed measurement instead of typed, which removes transcription as a way for a cell to go false and does nothing whatever about ten trials being ten trials.
 
 </details>
 
@@ -504,9 +504,9 @@ No `dbt`, Airflow, Dagster or Prefect adapter. No Spark. No syscall interception
 
 No model calls either: no LLM adapter, no `openai` dependency, no `AZURE_OPENAI_*` configuration. A non-deterministic output layer on a tool whose premise is determinism is a contradiction that someone would notice, and nothing here needs one.
 
-**Crash injection was cut, by a contingency the spec wrote for it.** It was pre-declared droppable on one condition: that the sensitivity numbers miss their pre-registered threshold. Run B of the eval put `apply_price_updates` at 9 of 10 against a fixed 10 of 10, the condition fired, and the two days went to the detector and to the report generator instead. The committed run puts the same step short again, which is the one TRIGGERED in the conditions table above. The spec's own argument for crash injection was already that it was the weakest part of the project: 16 kill points across two write styles produced exactly one divergence, and that one was the `INSERT` bug that `grep` finds. So there is no `twicerun crash`, and the step-boundary schedule stays what it was in the spec, an argument about the shape of the project rather than a code path.
+Crash injection was cut, by a contingency the spec wrote for it. It was pre-declared droppable on one condition: that the sensitivity numbers miss their pre-registered threshold. Run B of the eval put `apply_price_updates` at 9 of 10 against a fixed 10 of 10, the condition fired, and the two days went to the detector and to the report generator instead. The committed run puts the same step short again, which is the one TRIGGERED in the conditions table above. The spec's own argument for crash injection was already that it was the weakest part of the project: 16 kill points across two write styles produced exactly one divergence, and that one was the `INSERT` bug that `grep` finds. So there is no `twicerun crash`, and the step-boundary schedule stays what it was in the spec, an argument about the shape of the project rather than a code path.
 
-**No `(class, cause)` hint table, which the spec wanted and crash injection was going to carry.** Two hints exist and both are one line of static text: `WALL_CLOCK` when a timestamp column moved, which is the commonest reason a step never reproduces, and a line naming an artifact one run wrote and the other did not. Mapping the five classes against the two causes to a suggested fix was fifteen lines of lookup, and it went with the cut.
+No `(class, cause)` hint table, which the spec wanted and crash injection was going to carry. Two hints exist and both are one line of static text: `WALL_CLOCK` when a timestamp column moved, which is the commonest reason a step never reproduces, and a line naming an artifact one run wrote and the other did not. Mapping the five classes against the two causes to a suggested fix was fifteen lines of lookup, and it went with the cut.
 
 </details>
 
@@ -537,7 +537,7 @@ everything already matched while the table froze at whatever it last said. It
 now refuses in both directions: a marker with no generator and a generator with
 no marker are each an error that names the block.
 
-**The stale-artifact test was anchored to the thing it was meant to catch.** It
+The stale-artifact test was anchored to the thing it was meant to catch. It
 asserted against a dictionary built from the same source it was checking, so it
 would have passed whatever the pipeline did.
 
