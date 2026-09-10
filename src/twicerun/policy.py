@@ -7,13 +7,12 @@ of it is negotiable. So nothing here writes back: the ulp counts, the relative
 magnitudes and the row counts are identical under every policy, and only the
 verdict moves.
 
-`strict` is the default and it stays the default. Asked what difference between
-two runs of the same total he would have accepted in a pipeline he shipped,
-Vishal picked zero, and asked how he found out a pipeline had gone wrong, he
-picked a downstream count that did not reconcile. Those two answers fit
-together: if breakage surfaces as an exact reconciliation failing, a tool that
-quietly absorbs a difference is a tool that hides the thing you would have used
-to find the bug.
+`strict` is the default and it stays the default. The difference between two runs
+of the same total I would have accepted in a pipeline I shipped is zero, and the
+way I found out a pipeline had gone wrong was a downstream count that did not
+reconcile. Those two answers fit together: if breakage surfaces as an exact
+reconciliation failing, a tool that quietly absorbs a difference is a tool that
+hides the thing you would have used to find the bug.
 
 `reduction-order` is the opt-in that says a difference is float reassociation
 rather than a wrong answer, and it has to clear three conditions at once: the

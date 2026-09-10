@@ -132,11 +132,11 @@ README's table, and it is a factor of a thousand on this pipeline.
 Any difference at all counts as a divergence unless you ask otherwise. The argument for that is not
 first principles, it is how the failure actually surfaces.
 
-Asked what difference between two runs of the same total he would have accepted in a pipeline he
-shipped, Vishal's answer was zero: any difference is a bug. Asked how he found out a pipeline had
-gone wrong, the answer was a downstream count that did not reconcile. Those fit together. If
-breakage reaches you as an exact reconciliation failing, a tool that quietly absorbs a small
-difference has hidden the thing you would have used to find the bug.
+Asked what difference between two runs of the same total I would have accepted in a pipeline I
+shipped, my answer was zero: any difference is a bug. Asked how I found out a pipeline had gone
+wrong, the answer was a downstream count that did not reconcile. Those fit together. If breakage
+reaches you as an exact reconciliation failing, a tool that quietly absorbs a small difference has
+hidden the thing you would have used to find the bug.
 
 So correct code producing around 600 findings under the default is the intended behaviour rather
 than an embarrassment. Baseline 1's cell in the README's table is the version of that number nobody

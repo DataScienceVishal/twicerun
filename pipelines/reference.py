@@ -96,8 +96,8 @@ def apply_price_updates(ctx: StepContext) -> None:
     with no error and no warning. No linter finds it, because it depends on the
     data rather than the query.
 
-    The one bug in this file nobody here has been bitten by. The other three are
-    failures Vishal hit running Databricks pipelines and SQL migrations; this one
+    The one bug in this file I have never been bitten by. The other three are
+    failures I hit running Databricks pipelines and SQL migrations; this one
     came out of an experiment for this project, and the window it fires in is
     narrow enough that most pipelines would never land in it.
 
