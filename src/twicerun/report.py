@@ -713,10 +713,10 @@ def _runners_up(named: KeyEffect, rest: list[KeyEffect]) -> list[str]:
     read as `zeta does the same, so alpha is named first because it is the one
     no input to this step carries`, over a tie that the letter a decided.
 
-    Near-ties are disclosed too. A runner-up taking 491,520 down to 4 also
-    explains the divergence, and on real data those will be commoner than exact
-    ties. No threshold is involved: the runner-up's own figure is printed and
-    the reader judges it.
+    Near-ties are disclosed too. A runner-up that leaves 4 rows unmatched where
+    the named column leaves none also explains the divergence, and on real data
+    those will be commoner than exact ties. No threshold is involved: the
+    runner-up's own figure is printed and the reader judges it.
     """
     if not rest:
         return []

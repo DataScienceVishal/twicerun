@@ -347,7 +347,7 @@ The loop reported nothing on 5 of the 40 passes where it compared anything, and 
 <details>
 <summary>Naming the column that moved, where two thirds of the score is a sort key graded against itself</summary>
 
-For each key column, drop it and recount what failed to pair. On `customer_keys` that turns 491,520 unmatched rows into a sentence naming a column.
+For each key column, drop it and recount what failed to pair. On `customer_keys` that turns a median 444,840 unmatched rows of 500,000 into a sentence naming a column.
 
 <!-- twicerun: attribution -->
 Leave-one-out named the column the step invented, rather than one it copied in, on 27 of 27 attributions. 18 of those 27 had two columns leaving the same count behind, so the counts chose nothing and the tie-break chose.

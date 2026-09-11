@@ -73,11 +73,11 @@ class KeyEffect:
 
     `from_input` is the tie-break, and it is needed rather than decorative. On
     the reference pipeline's row_number bug, dropping `surrogate_id` and
-    dropping `event_id` both take the unmatched count from 491,520 to 0,
-    because the two columns are a bijection whose pairing moved and either
-    description of that is true. The storage interface knows `event_id` arrived
-    from an artifact this step read and `surrogate_id` did not, so the column
-    the step invented gets named first.
+    dropping `event_id` both take the unmatched count from a median 444,840
+    to 0, because the two columns are a bijection whose pairing moved and
+    either description of that is true. The storage interface knows `event_id`
+    arrived from an artifact this step read and `surrogate_id` did not, so the
+    column the step invented gets named first.
     """
 
     column: str
@@ -260,9 +260,9 @@ def attribute(
 ) -> tuple[tuple[KeyEffect, ...], int]:
     """Drop each key column in turn and recount what failed to pair.
 
-    This is what turns 491,520 unmatched rows into the name of one column. The
-    counts alone do not always single one out, so the ordering falls back to
-    whether the step could have invented the column at all.
+    This is what turns a median 444,840 unmatched rows into the name of one
+    column. The counts alone do not always single one out, so the ordering
+    falls back to whether the step could have invented the column at all.
 
     Skipped below two key columns, because dropping the only one leaves an
     empty key that matches everything by construction and says nothing.

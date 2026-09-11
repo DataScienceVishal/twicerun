@@ -46,8 +46,8 @@ every column is a float has no key at all and pairs by order.
 
 ## Which column moved
 
-For each key column, drop it and recount what failed to pair. On `customer_keys` that turns 491,520
-unmatched rows into a sentence naming a column.
+For each key column, drop it and recount what failed to pair. On `customer_keys` that turns a median
+444,840 unmatched rows of 500,000 into a sentence naming a column.
 
 The counts alone do not always single one out, and finding that out changed the design. Dropping
 `event_id` works exactly as well as dropping `surrogate_id`, because each `cust` block keeps the

@@ -314,7 +314,7 @@ class StepScore:
         The README's tables are rendered from a committed copy of this, so a
         figure in that file cannot be a figure somebody retyped. The
         generator needs the counts and not the sentences:
-        parsing `median 491,520 of the 500,000 reference rows found no partner`
+        parsing `median 444,840 of the 500,000 reference rows found no partner`
         back apart to put two numbers in two cells would be the retyping problem
         again with an extra step in it.
         """
