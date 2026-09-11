@@ -331,7 +331,7 @@ def test_an_alphabetical_tie_does_not_claim_an_input_based_reason(con, make_arti
 
 
 def test_a_runner_up_that_almost_explains_it_is_named_too(con, make_artifact):
-    """A column taking 491,520 down to 4 also explains it, and used to print nothing.
+    """A runner-up leaving 4 rows where the named column leaves none used to print nothing.
 
     Only exact ties were disclosed, and on real data a near-tie is the commoner
     shape. Here b moved on ten rows and c on two different rows, so dropping
