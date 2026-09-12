@@ -932,7 +932,7 @@ def report_baseline_two() -> dict[str, int]:
         )
     say("  The pair it cannot separate is the MERGE, and no pattern can: the fix is a GROUP BY")
     say("  in a different statement, so telling the two apart is data-flow analysis rather")
-    say("  than a pattern. Three of these five bugs are properties of the data, not the text.")
+    say("  than a pattern. Three of these five are properties of the data, not the text.")
     return {"pairs_separated": separated, "false_positives": len(false_positives)}
 
 

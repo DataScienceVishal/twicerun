@@ -97,8 +97,9 @@ tables. What baseline 1 as originally written does show is what one comparison c
 which is a real result about run count and was published as a result about comparison method.
 
 **Baseline 2 is the one worth reading twice, and it is stronger than the spec predicted.** The spec
-expected a static check to catch the `INSERT`-shaped bug and miss the other three. It catches four of
-the five, because the patterns were written here after the bugs were known, which is the largest thumb
+expected a static check to catch the `INSERT`-shaped bug and miss the other three. Those four bugs sit
+on five steps, `sparse_customer_keys` repeating `customer_keys`'s, and the check catches four of the
+five, because the patterns were written here after the bugs were known, which is the largest thumb
 anyone could put on a static checker's scale. What it still cannot do is the result:
 
 - It flags `apply_price_updates` and `apply_price_updates_deduped` identically. Both contain `MERGE
@@ -107,7 +108,7 @@ anyone could put on a static checker's scale. What it still cannot do is the res
 - It flags `mean_basket`, which is a correct average. That is the same false positive baseline 1 makes,
   and neither can be fixed by looking harder at the text, because whether a float aggregate is a bug
   depends on whether the answer was supposed to be exact.
-- Its hits are a fact about the query text. Three of the five bugs are facts about the data.
+- Its hits are a fact about the query text. Three of those five are facts about the data.
 
 The patterns run against parsed function bodies rather than the file. That is not tidiness: `grep`
 the twins file for the append pattern and it hits, because `apply_price_updates_deduped` reads and
