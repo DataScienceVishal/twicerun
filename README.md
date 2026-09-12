@@ -417,7 +417,7 @@ Three amplifiers is three, and there is no argument that they are the right thre
 
 A committed artifact is a measurement of one laptop. DuckDB 1.5.5, ten threads, macOS on Apple silicon. The stamp above every table says so, and nothing here calibrates against a second machine or a second DuckDB, which every report's not-varied list says as well.
 
-Six figures published in this file were beaten by a longer run, and every one of the six was a number retyped out of a terminal into a table. A read-through on 2026-08-27 found eight more of the same class in comments and docstrings, where no generator can reach. That is why the tables above are rendered from a committed measurement instead of typed, which removes transcription as a way for a cell to go false and does nothing whatever about ten trials being ten trials.
+Six figures published in this file were beaten by a longer run, and every one of the six was a number retyped out of a terminal into a table. A read-through on 2026-08-27 found eight more of the same class in comments and docstrings, and I fixed all eight that day. Reading is still the only check on those, because no generator renders a docstring. That is why the tables above are rendered from a committed measurement instead of typed, which removes transcription as a way for a cell to go false and does nothing whatever about ten trials being ten trials.
 
 </details>
 
