@@ -21,7 +21,7 @@ $ uv run twicerun run pipelines/reference.py
 5 of 8 steps diverged in 13.4s.
 ```
 
-Four of those five are planted bugs. `mean_basket` is correct code, a float average whose answer moves in the last few bits. Step 6 is the fifth bug. It agreed with itself on all four comparisons, which is the case a plain five-run loop reports as a clean zero.
+Four of those five are planted bugs. `mean_basket` is correct code, a float average whose answer moves in the last few bits. Step 6 is the same bug as step 2 at two rows per tie group instead of 500, which puts four bugs across five broken steps. It agreed with itself on all four comparisons, which is the case a plain five-run loop reports as a clean zero.
 
 ```bash
 git clone https://github.com/DataScienceVishal/twicerun && cd twicerun
@@ -34,7 +34,7 @@ Needs [uv](https://docs.astral.sh/uv/) and nothing else. One pass writes a media
 <details>
 <summary>The same run in full, with the per-step evidence the excerpt above drops</summary>
 
-`reference.py` carries four bugs, one step that fires intermittently, one benign float step, one control that must never fire, and one step whose only job is to sit downstream of a bug.
+`reference.py` carries four bugs across five steps, because `sparse_customer_keys` runs `customer_keys`'s bug at a tie density where it fires only sometimes. The other three steps are one benign float step, one control that must never fire, and one whose only job is to sit downstream of a bug.
 
 ```
 $ uv run twicerun run pipelines/reference.py

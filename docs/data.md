@@ -17,7 +17,8 @@ any divergence is the pipeline's rather than the data's.
 ## The reference pipeline ships broken
 
 A checker that finds nothing is indistinguishable from a checker that is broken. `reference.py`
-carries four bugs, one step that drifts benignly, one step that fires intermittently, one control
+carries four bugs over five steps, since `sparse_customer_keys` is the surrogate-key bug again at a
+tie density that makes it intermittent. Beside those sit one step that drifts benignly, one control
 step that must never fire, and one step whose only job is to sit downstream of a bug so the
 containment ablation has something to measure.
 
