@@ -464,7 +464,7 @@ uv run python scripts/amplification_gap.py 40 --json results/gap-2026-08-27.json
 uv run twicerun report results/eval-2026-08-27.json results/gap-2026-08-27.json --update README.md
 ```
 
-`--update` refuses in both directions. A marker pair this file carries with no artifact behind it, and an artifact table this file does not carry, are both errors that name what is missing, because a block that silently stops being regenerated keeps whatever it last said. `tests/test_readme_tables.py` runs the same comparison in CI, so a hand edit inside a marked block fails the build rather than surviving to a reader.
+`--update` will not rewrite a file whose marker pairs are not exactly the set of tables the artifacts can render. `line_up` compares the two sets and the command exits 2 naming whichever side is short: `No generator for: invented` where this file carries a marker pair nothing renders, `Missing from the markdown: baselines` where the artifacts render a table this file has stopped carrying. Equal sets rather than a subset either way, because a block nothing regenerates keeps whatever it last said and reads like a maintained table while it does. `tests/test_readme_tables.py` runs the same comparison in CI, so a hand edit inside a marked block fails the build rather than surviving to a reader.
 
 </details>
 
@@ -533,9 +533,9 @@ almost to the end.
 build.** It scanned only for the marker names the generator already offered, so
 it compared a dictionary against a subset of itself and could never disagree.
 Delete a generator, leave its marker in the file, and the tool reported that
-everything already matched while the table froze at whatever it last said. It
-now refuses in both directions: a marker with no generator and a generator with
-no marker are each an error that names the block.
+everything already matched while the table froze at whatever it last said. The
+scan takes any marker name now and the comparison is an equality, so the case
+that used to report a match is the case that exits 2.
 
 The stale-artifact test was anchored to the thing it was meant to catch. It
 asserted against a dictionary built from the same source it was checking, so it
