@@ -16,7 +16,7 @@ import pytest
 
 
 def _script_dir() -> Path:
-    """Sibling in the factory, ../scripts once init_project.sh has split them."""
+    """Sibling before the layout is split, ../scripts afterwards."""
     here = Path(__file__).resolve().parent
     for candidate in (here, here.parent / "scripts"):
         if (candidate / "check_fingerprint.py").is_file():

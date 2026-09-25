@@ -1,4 +1,4 @@
-"""The one test in here that fails if constraint 4 stops being enforced.
+"""The one test in here that fails if the no-model-calls rule stops being enforced.
 
 Every other test runs offline because nothing under `src/` opens a socket, which
 is a property of the code and not a proof of it. The proof was four words in

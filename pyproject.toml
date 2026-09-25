@@ -14,7 +14,7 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "pytest-cov>=5.0.0",
-    # Enforces constraint 4 rather than trusting it: --disable-socket makes any
+    # Enforces the no-model-calls rule rather than trusting it: --disable-socket makes any
     # accidental network call a test failure.
     "pytest-socket>=0.7.0",
     "ruff>=0.6.0",
@@ -39,7 +39,7 @@ addopts = "-q --disable-socket --allow-unix-socket"
 # of them did it themselves, spelled four different ways, each one followed by
 # imports carrying `# noqa: E402` because they came after the statement.
 # test_check_fingerprint.py still does its own, and should: that test also runs
-# in the factory, where the script is its sibling rather than in ../scripts.
+# before the split, where the script is its sibling rather than in ../scripts.
 #
 # One script imports a sibling script, tlc_schema.py taking MONTHS out of
 # fetch_tlc.py, and this line is what makes that resolve under pytest. It used
